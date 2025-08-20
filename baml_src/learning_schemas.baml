@@ -85,7 +85,7 @@ function ExplainConcept(
 ) -> Explanation {
   client GPT4
   prompt #"
-    You are an expert AI/ML tutor with a PhD in both Computer Science and Physics. 
+    You are an expert AI/ML tutor with a PhD in both Computer Science and Physics.
     Explain the concept of {{concept}} to a student.
 
     Student Profile:
@@ -144,7 +144,7 @@ function CreatePhysicsAnalogy(
   client GPT4
   prompt #"
     Create 2-3 physics analogies to explain {{concept}} in machine learning.
-    
+
     Student Background: {{user_background}}
 
     For each analogy:
@@ -159,7 +159,7 @@ function CreatePhysicsAnalogy(
 }
 
 // =============================================================================
-// Curriculum Director Functions  
+// Curriculum Director Functions
 // =============================================================================
 
 function GenerateCurriculum(
@@ -352,6 +352,231 @@ function IdentifyLearningGaps(
 }
 
 // =============================================================================
+// Developer Crew Project Management Types
+// =============================================================================
+
+enum TechnologyStack {
+  NextJS
+  React
+  TypeScript
+  Python
+  FastAPI
+  Django
+  Flask
+  PostgreSQL
+  SQLite
+  MongoDB
+  Redis
+  Docker
+  NodeJS
+  TailwindCSS
+  ShadcnUI
+  Prisma
+  Supabase
+  Vercel
+  AWS
+  Firebase
+}
+
+enum RiskLevel {
+  Low
+  Medium
+  High
+  Critical
+}
+
+enum PhaseStatus {
+  Planned
+  InProgress
+  Completed
+  Blocked
+  Failed
+}
+
+enum EstimatedEffort {
+  OneToTwoHours
+  TwoToFourHours
+  HalfDay
+  OneDay
+  TwoToThreeDays
+  OneWeek
+  TwoWeeks
+  OneMonth
+}
+
+enum GitStrategy {
+  FeatureBranch
+  ContinueBranch
+  NewBranch
+  HotfixBranch
+  ReleaseBranch
+  DirectToMain
+}
+
+class Risk {
+  description string
+  level RiskLevel
+  mitigation_strategy string
+  impact string
+}
+
+class AcceptanceCriterion {
+  description string
+  testable bool
+  priority int // 1-5, where 1 is highest priority
+}
+
+class Dependency {
+  phase_number int
+  description string
+  type string // "hard" or "soft"
+}
+
+class Deliverable {
+  name string
+  description string
+  file_path string?
+  acceptance_criteria AcceptanceCriterion[]
+}
+
+class ProjectPhase {
+  phase_number int
+  phase_name string
+  description string
+  deliverables Deliverable[]
+  estimated_effort EstimatedEffort
+  dependencies Dependency[]
+  git_strategy GitStrategy
+  acceptance_criteria AcceptanceCriterion[]
+  potential_risks Risk[]
+  prerequisites string[]
+  success_metrics string[]
+  status PhaseStatus
+}
+
+class IntegrationPlan {
+  strategy string
+  testing_approach string
+  deployment_steps string[]
+  rollback_plan string
+  monitoring_requirements string[]
+}
+
+class DeploymentConsiderations {
+  environment_setup string[]
+  infrastructure_requirements string[]
+  security_considerations string[]
+  performance_requirements string[]
+  scaling_considerations string[]
+  backup_strategy string
+  monitoring_setup string[]
+}
+
+class ProjectPlan {
+  project_summary string
+  technology_stack TechnologyStack[]
+  phases ProjectPhase[]
+  integration_plan IntegrationPlan
+  deployment_considerations DeploymentConsiderations
+  total_estimated_effort string
+  critical_path_phases int[]
+  success_metrics string[]
+  assumptions string[]
+  constraints string[]
+  stakeholders string[]
+  budget_considerations string?
+  timeline_milestones map<string, string>
+}
+
+// =============================================================================
+// Project Management Functions
+// =============================================================================
+
+function GenerateProjectPlan(
+  task_description: string,
+  working_directory: string,
+  existing_tech_stack: string[]
+) -> ProjectPlan {
+  client Anthropic
+  prompt #"
+    You are an expert Project Manager and Software Architect with deep expertise in breaking down complex software development tasks into manageable, executable phases.
+
+    Task: {{task_description}}
+    Working Directory: {{working_directory}}
+    Existing Technology Stack: {{existing_tech_stack}}
+
+    Create a comprehensive project plan that breaks this task into 3-8 logical phases. Each phase should be:
+    1. Independently executable (1-6 hours of work)
+    2. Have clear deliverables and acceptance criteria
+    3. Minimize dependencies between phases where possible
+    4. Include realistic risk assessment
+    5. Provide clear Git workflow strategy
+
+    Consider:
+    - What are the core requirements?
+    - What's the minimal viable first step?
+    - How can dependencies be minimized?
+    - What could go wrong and how to mitigate it?
+    - How will this be tested and deployed?
+    - What are the success metrics?
+
+    Provide detailed phase breakdowns with specific deliverables, realistic effort estimates, and actionable acceptance criteria.
+  "#
+}
+
+function ValidateProjectPhase(
+  phase_name: string,
+  phase_description: string,
+  estimated_effort: EstimatedEffort,
+  deliverables: Deliverable[],
+  project_context: string
+) -> PhaseValidationResult {
+  client Anthropic
+  prompt #"
+    Validate this project phase for feasibility and completeness:
+
+    Phase: {{phase_name}}
+    Description: {{phase_description}}
+    Estimated Effort: {{estimated_effort}}
+    Deliverables: {{deliverables}}
+
+    Project Context: {{project_context}}
+
+    Assess:
+    1. Is the effort estimate realistic?
+    2. Are deliverables clearly defined and achievable?
+    3. Are there missing dependencies or risks?
+    4. Are acceptance criteria testable?
+
+    Provide validation results with specific recommendations for improvement.
+  "#
+}
+
+class PhaseValidationResult {
+  is_valid bool
+  confidence_score float // 0.0 to 1.0
+  issues ValidationIssue[]
+  recommendations string[]
+  adjusted_effort_estimate EstimatedEffort?
+}
+
+enum ValidationIssueType {
+  UnrealisticEffort
+  UnclearDeliverables
+  MissingDependencies
+  UntestedAcceptanceCriteria
+  HighRiskPhase
+  TechnicalComplexity
+}
+
+class ValidationIssue {
+  type ValidationIssueType
+  severity RiskLevel
+  description string
+  suggested_fix string
+}
+
+// =============================================================================
 // Client Configuration
 // =============================================================================
 
@@ -362,5 +587,15 @@ client<llm> GPT4 {
     temperature 0.7
     max_tokens 2000
     api_key env.OPENAI_API_KEY
+  }
+}
+
+client<llm> Anthropic {
+  provider "anthropic"
+  options {
+    model "claude-3-5-sonnet-20241022"
+    temperature 0.3
+    max_tokens 4000
+    api_key env.ANTHROPIC_API_KEY
   }
 }

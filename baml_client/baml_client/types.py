@@ -37,12 +37,78 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (0)
+# Generated enums (6)
 # #########################################################################
 
+class EstimatedEffort(str, Enum):
+    OneToTwoHours = "OneToTwoHours"
+    TwoToFourHours = "TwoToFourHours"
+    HalfDay = "HalfDay"
+    OneDay = "OneDay"
+    TwoToThreeDays = "TwoToThreeDays"
+    OneWeek = "OneWeek"
+    TwoWeeks = "TwoWeeks"
+    OneMonth = "OneMonth"
+
+class GitStrategy(str, Enum):
+    FeatureBranch = "FeatureBranch"
+    ContinueBranch = "ContinueBranch"
+    NewBranch = "NewBranch"
+    HotfixBranch = "HotfixBranch"
+    ReleaseBranch = "ReleaseBranch"
+    DirectToMain = "DirectToMain"
+
+class PhaseStatus(str, Enum):
+    Planned = "Planned"
+    InProgress = "InProgress"
+    Completed = "Completed"
+    Blocked = "Blocked"
+    Failed = "Failed"
+
+class RiskLevel(str, Enum):
+    Low = "Low"
+    Medium = "Medium"
+    High = "High"
+    Critical = "Critical"
+
+class TechnologyStack(str, Enum):
+    NextJS = "NextJS"
+    React = "React"
+    TypeScript = "TypeScript"
+    Python = "Python"
+    FastAPI = "FastAPI"
+    Django = "Django"
+    Flask = "Flask"
+    PostgreSQL = "PostgreSQL"
+    SQLite = "SQLite"
+    MongoDB = "MongoDB"
+    Redis = "Redis"
+    Docker = "Docker"
+    NodeJS = "NodeJS"
+    TailwindCSS = "TailwindCSS"
+    ShadcnUI = "ShadcnUI"
+    Prisma = "Prisma"
+    Supabase = "Supabase"
+    Vercel = "Vercel"
+    AWS = "AWS"
+    Firebase = "Firebase"
+
+class ValidationIssueType(str, Enum):
+    UnrealisticEffort = "UnrealisticEffort"
+    UnclearDeliverables = "UnclearDeliverables"
+    MissingDependencies = "MissingDependencies"
+    UntestedAcceptanceCriteria = "UntestedAcceptanceCriteria"
+    HighRiskPhase = "HighRiskPhase"
+    TechnicalComplexity = "TechnicalComplexity"
+
 # #########################################################################
-# Generated classes (7)
+# Generated classes (17)
 # #########################################################################
+
+class AcceptanceCriterion(BaseModel):
+    description: str
+    testable: bool
+    priority: int
 
 class AssessmentResult(BaseModel):
     quiz_id: str
@@ -72,6 +138,26 @@ class CurriculumModule(BaseModel):
     difficulty_level: int
     topics: typing.List[str]
 
+class Deliverable(BaseModel):
+    name: str
+    description: str
+    file_path: typing.Optional[str] = None
+    acceptance_criteria: typing.List["AcceptanceCriterion"]
+
+class Dependency(BaseModel):
+    phase_number: int
+    description: str
+    type: str
+
+class DeploymentConsiderations(BaseModel):
+    environment_setup: typing.List[str]
+    infrastructure_requirements: typing.List[str]
+    security_considerations: typing.List[str]
+    performance_requirements: typing.List[str]
+    scaling_considerations: typing.List[str]
+    backup_strategy: str
+    monitoring_setup: typing.List[str]
+
 class Explanation(BaseModel):
     concept: str
     explanation: str
@@ -81,12 +167,55 @@ class Explanation(BaseModel):
     related_concepts: typing.List[str]
     difficulty_level: int
 
+class IntegrationPlan(BaseModel):
+    strategy: str
+    testing_approach: str
+    deployment_steps: typing.List[str]
+    rollback_plan: str
+    monitoring_requirements: typing.List[str]
+
 class LearningProfile(BaseModel):
     background: str
     learning_style: str
     time_commitment: str
     goals: typing.List[str]
     current_level: str
+
+class PhaseValidationResult(BaseModel):
+    is_valid: bool
+    confidence_score: float
+    issues: typing.List["ValidationIssue"]
+    recommendations: typing.List[str]
+    adjusted_effort_estimate: typing.Optional[EstimatedEffort] = None
+
+class ProjectPhase(BaseModel):
+    phase_number: int
+    phase_name: str
+    description: str
+    deliverables: typing.List["Deliverable"]
+    estimated_effort: EstimatedEffort
+    dependencies: typing.List["Dependency"]
+    git_strategy: GitStrategy
+    acceptance_criteria: typing.List["AcceptanceCriterion"]
+    potential_risks: typing.List["Risk"]
+    prerequisites: typing.List[str]
+    success_metrics: typing.List[str]
+    status: PhaseStatus
+
+class ProjectPlan(BaseModel):
+    project_summary: str
+    technology_stack: typing.List[TechnologyStack]
+    phases: typing.List["ProjectPhase"]
+    integration_plan: "IntegrationPlan"
+    deployment_considerations: "DeploymentConsiderations"
+    total_estimated_effort: str
+    critical_path_phases: typing.List[int]
+    success_metrics: typing.List[str]
+    assumptions: typing.List[str]
+    constraints: typing.List[str]
+    stakeholders: typing.List[str]
+    budget_considerations: typing.Optional[str] = None
+    timeline_milestones: typing.Dict[str, str]
 
 class Question(BaseModel):
     id: str
@@ -105,6 +234,18 @@ class Quiz(BaseModel):
     estimated_time_minutes: int
     difficulty_level: int
     learning_objectives: typing.List[str]
+
+class Risk(BaseModel):
+    description: str
+    level: RiskLevel
+    mitigation_strategy: str
+    impact: str
+
+class ValidationIssue(BaseModel):
+    type: ValidationIssueType
+    severity: RiskLevel
+    description: str
+    suggested_fix: str
 
 # #########################################################################
 # Generated type aliases (0)

@@ -64,6 +64,12 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateCurriculum", llm_response=llm_response, mode="request")
         return typing.cast(types.Curriculum, result)
 
+    def GenerateProjectPlan(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.ProjectPlan:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateProjectPlan", llm_response=llm_response, mode="request")
+        return typing.cast(types.ProjectPlan, result)
+
     def IdentifyLearningGaps(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> typing.List[str]:
@@ -81,6 +87,12 @@ class LlmResponseParser:
     ) -> typing.List[str]:
         result = self.__options.merge_options(baml_options).parse_response(function_name="SequenceTopics", llm_response=llm_response, mode="request")
         return typing.cast(typing.List[str], result)
+
+    def ValidateProjectPhase(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.PhaseValidationResult:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateProjectPhase", llm_response=llm_response, mode="request")
+        return typing.cast(types.PhaseValidationResult, result)
 
     
 
@@ -132,6 +144,12 @@ class LlmStreamParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateCurriculum", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.Curriculum, result)
 
+    def GenerateProjectPlan(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.ProjectPlan:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateProjectPlan", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.ProjectPlan, result)
+
     def IdentifyLearningGaps(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> typing.List[str]:
@@ -149,5 +167,11 @@ class LlmStreamParser:
     ) -> typing.List[str]:
         result = self.__options.merge_options(baml_options).parse_response(function_name="SequenceTopics", llm_response=llm_response, mode="stream")
         return typing.cast(typing.List[str], result)
+
+    def ValidateProjectPhase(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.PhaseValidationResult:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateProjectPhase", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.PhaseValidationResult, result)
 
     

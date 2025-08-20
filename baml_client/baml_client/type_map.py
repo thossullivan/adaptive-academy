@@ -16,6 +16,9 @@ from . import stream_types
 
 type_map = {
 
+    "types.AcceptanceCriterion": types.AcceptanceCriterion,
+    "stream_types.AcceptanceCriterion": stream_types.AcceptanceCriterion,
+
     "types.AssessmentResult": types.AssessmentResult,
     "stream_types.AssessmentResult": stream_types.AssessmentResult,
 
@@ -25,11 +28,32 @@ type_map = {
     "types.CurriculumModule": types.CurriculumModule,
     "stream_types.CurriculumModule": stream_types.CurriculumModule,
 
+    "types.Deliverable": types.Deliverable,
+    "stream_types.Deliverable": stream_types.Deliverable,
+
+    "types.Dependency": types.Dependency,
+    "stream_types.Dependency": stream_types.Dependency,
+
+    "types.DeploymentConsiderations": types.DeploymentConsiderations,
+    "stream_types.DeploymentConsiderations": stream_types.DeploymentConsiderations,
+
     "types.Explanation": types.Explanation,
     "stream_types.Explanation": stream_types.Explanation,
 
+    "types.IntegrationPlan": types.IntegrationPlan,
+    "stream_types.IntegrationPlan": stream_types.IntegrationPlan,
+
     "types.LearningProfile": types.LearningProfile,
     "stream_types.LearningProfile": stream_types.LearningProfile,
+
+    "types.PhaseValidationResult": types.PhaseValidationResult,
+    "stream_types.PhaseValidationResult": stream_types.PhaseValidationResult,
+
+    "types.ProjectPhase": types.ProjectPhase,
+    "stream_types.ProjectPhase": stream_types.ProjectPhase,
+
+    "types.ProjectPlan": types.ProjectPlan,
+    "stream_types.ProjectPlan": stream_types.ProjectPlan,
 
     "types.Question": types.Question,
     "stream_types.Question": stream_types.Question,
@@ -37,5 +61,23 @@ type_map = {
     "types.Quiz": types.Quiz,
     "stream_types.Quiz": stream_types.Quiz,
 
+    "types.Risk": types.Risk,
+    "stream_types.Risk": stream_types.Risk,
+
+    "types.ValidationIssue": types.ValidationIssue,
+    "stream_types.ValidationIssue": stream_types.ValidationIssue,
+
+
+    "types.EstimatedEffort": types.EstimatedEffort,
+
+    "types.GitStrategy": types.GitStrategy,
+
+    "types.PhaseStatus": types.PhaseStatus,
+
+    "types.RiskLevel": types.RiskLevel,
+
+    "types.TechnologyStack": types.TechnologyStack,
+
+    "types.ValidationIssueType": types.ValidationIssueType,
 
 }
