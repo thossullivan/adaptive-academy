@@ -7,12 +7,19 @@
     "test": "tests"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc",
+    "dev": "tsx watch src/core/initialize.ts",
+    "init": "tsx src/core/initialize.ts",
+    "start": "node dist/core/initialize.js",
+    "test:curriculum": "tsx src/test/testCurriculumDirector.ts",
+    "test:tutor": "tsx src/test/testTutorAgent.ts",
+    "test:assessment": "tsx src/test/testAssessmentCoach.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@typescript-eslint/eslint-plugin": "^8.40.0",
@@ -22,5 +29,9 @@
     "prettier": "^3.6.2",
     "tsx": "^4.20.4",
     "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
   }
 }

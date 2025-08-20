@@ -251,6 +251,7 @@ CREATE TABLE assessments (
 - **File-based configuration** (no admin interface)
 - **Basic error handling** (no sophisticated retry logic)
 - **Simple authentication** (local system only)
+- **SQLite database** (PostgreSQL migration planned for future scaling)
 
 ## Success Metrics (MVP)
 
@@ -267,3 +268,43 @@ CREATE TABLE assessments (
 - Quiz performance improvement
 - System reliability (uptime, error rates)
 - Personal satisfaction with learning experience
+
+## Database Architecture & Future Migration
+
+### Current: SQLite (MVP)
+- **Perfect for MVP**: Zero configuration, single file, local deployment
+- **Performance**: Handles expected load (single user, thousands of records)
+- **Simplicity**: No server setup, automatic backups via file copy
+
+### Future: PostgreSQL Migration
+The system is designed for easy PostgreSQL migration when needed:
+
+**Migration Triggers:**
+- Multiple users required
+- Data size > 100GB  
+- Advanced analytics needs
+- Cloud deployment requirements
+
+**Migration Path (3-4 weeks):**
+1. **Database Interface**: Already abstracted via `DatabaseConnection` interface
+2. **Schema Translation**: Standard SQL with minor syntax adjustments
+3. **JSON Handling**: SQLite JSON → PostgreSQL JSONB (performance improvement)
+4. **Connection Pooling**: Add pg-pool for production scaling
+
+**Architecture Benefits:**
+- All TypeScript types remain unchanged
+- Agent logic unaffected
+- Business logic preserved
+- Configuration-driven database selection
+
+**Implementation Preview:**
+```typescript
+// Future configuration-based database selection
+const stateManager = createStateManager({
+  type: process.env.DB_TYPE || 'sqlite',
+  sqlite: { path: './database/adaptive-academy.db' },
+  postgres: { connectionString: process.env.DATABASE_URL }
+})
+```
+
+The current SQLite implementation provides all needed features for the MVP while maintaining a clear path to PostgreSQL when scaling requirements emerge.
