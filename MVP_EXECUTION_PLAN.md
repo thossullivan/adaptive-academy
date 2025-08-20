@@ -9,6 +9,57 @@ This document outlines a two-part strategy to build the Adaptive Academy project
 
 This approach is designed to maximize development velocity, ensure high code quality through automated reviews and testing, and create a scalable development process.
 
+## 🤖 Integration with Claude Code
+
+The Developer Crew is designed to complement and amplify the capabilities of interactive AI coding assistants like Claude Code. Here's how they work together:
+
+### **Claude Code as the Strategic Partner**
+- **Planning & Architecture**: Use Claude Code for high-level planning, architectural decisions, and complex problem-solving
+- **Interactive Development**: Real-time collaboration on complex logic, debugging, and iterative refinement  
+- **Code Review & Analysis**: Deep analysis of existing codebases, understanding patterns, and strategic refactoring
+- **Learning & Guidance**: Understanding new frameworks, best practices, and getting explanations
+
+### **Developer Crew as the Execution Engine**
+- **Automated Implementation**: Execute well-defined tasks autonomously (e.g., "Create CRUD endpoints for User model")
+- **Batch Operations**: Handle repetitive tasks like file generation, boilerplate code, or mass refactoring
+- **Quality Assurance**: Automated testing, code review, and validation pipelines
+- **Workflow Automation**: Multi-step processes that can run unattended
+
+### **Typical Workflow Integration**
+
+```mermaid
+graph TD
+    A[Claude Code: Plan & Design] --> B[Developer Crew: Implement]
+    B --> C[Developer Crew: Review & Test]
+    C --> D[Claude Code: Validate & Refine]
+    D --> E[Developer Crew: Final Implementation]
+```
+
+**Example Scenario:**
+1. **Claude Code Session**: "Help me design a FastAPI service with user authentication"
+   - Discuss architecture, choose libraries, design endpoints
+   - Create initial project structure and key files
+   - Plan the implementation strategy
+
+2. **Developer Crew Execution**: Hand off to autonomous agents
+   ```bash
+   uv run python -m developer_crew.main code "Implement JWT authentication middleware for FastAPI"
+   uv run python -m developer_crew.main code "Create User model with SQLAlchemy and Pydantic schemas"
+   uv run python -m developer_crew.main workflow "Build complete user registration endpoint"
+   ```
+
+3. **Claude Code Review**: Return for strategic oversight
+   - Review the generated code for architectural alignment
+   - Handle complex edge cases or business logic
+   - Plan next phase of development
+
+### **Benefits of This Approach**
+- **Efficiency**: Handle routine tasks automatically while focusing human attention on complex problems
+- **Consistency**: Standardized code patterns and quality checks across all generated code
+- **Speed**: Parallel execution of multiple related tasks
+- **Quality**: Multi-layer validation (code review + testing + human oversight)
+- **Learning**: The Developer Crew learns patterns from Claude Code sessions and codifies them
+
 ---
 
 ## Part 1: Build the AI Developer Crew
@@ -17,28 +68,35 @@ This approach is designed to maximize development velocity, ensure high code qua
 
 This phase focuses on creating our "AI factory"—a command-line tool that orchestrates a team of specialized AI agents to perform software engineering tasks.
 
-### Phase 1: Foundation & The `Coder` Agent
+### ✅ Phase 1: Foundation & The `Coder` Agent - **COMPLETED**
 
 **Goal:** Create a single, functional agent that can write and modify code based on a precise instruction.
 
-- [ ] Create a new Python project directory: `developer_crew`.
-- [ ] Set up a `pyproject.toml` and a virtual environment.
-- [ ] Install core dependencies: `pyautogen`, `python-dotenv`, `typer`.
-- [ ] Implement the `Coder` agent with a focused system prompt.
-- [ ] Implement file system tools (`read_file`, `edit_file`) for the agent.
-- [ ] Create a simple CLI (`main.py`) to pass a prompt to the `Coder`.
+- [x] Create a new Python project directory: `developer_crew`.
+- [x] Set up a `pyproject.toml` and modern uv-based virtual environment.
+- [x] Install core dependencies: `autogen-agentchat>=0.7.4`, `autogen-ext[openai]`, `python-dotenv`, `typer`, `rich`.
+- [x] Implement the `Coder` agent with a focused system prompt using modern async AutoGen API.
+- [x] Implement comprehensive file system tools (`read_file`, `write_file`, `edit_file`, `list_files`, `get_project_structure`).
+- [x] Create a rich CLI (`main.py`) with multiple commands: `code`, `review`, `init`, `test`.
+- [x] Implement the `CodeReviewer` agent for static code analysis.
+- [x] Add proper error handling, async support, and resource cleanup.
 
-**Phase 1 Deliverable:** A command-line tool that successfully uses a single `Coder` agent to write a specified file.
+**Phase 1 Deliverable:** ✅ **DELIVERED** - A fully functional command-line tool with both `Coder` and `CodeReviewer` agents using the latest AutoGen 0.7.4 framework.
 
-### Phase 2: Adding Guardrails - The `Reviewer` and `Tester`
+### 🚧 Phase 2: Adding Guardrails - The `QA_Tester` and Orchestration - **IN PROGRESS**
 
-**Goal:** Establish a quality control process by adding static and dynamic analysis agents.
+**Goal:** Establish a quality control process by adding dynamic analysis and orchestration.
 
-- [ ] Implement the `CodeReviewer` agent with a system prompt focused on static analysis. It should only have a `read_file` tool.
-- [ ] Implement the `QA_Tester` agent with a system prompt focused on code execution and validation. It should have the `terminal` tool.
-- [ ] Create an orchestration script for the workflow: `Coder` writes -> `CodeReviewer` approves -> `QA_Tester` approves.
+**Status Update:** The `CodeReviewer` agent was completed in Phase 1 as it naturally paired with the `Coder` agent.
 
-**Phase 2 Deliverable:** A three-agent script that can write, review, and test a simple Python script, correctly identifying bugs and style issues.
+**Remaining Tasks:**
+- [ ] Implement the `QA_Tester` agent with system prompt focused on code execution and validation.
+- [ ] Add terminal/shell execution tools for the `QA_Tester` agent.
+- [ ] Create orchestration workflow: `Coder` writes -> `CodeReviewer` reviews -> `QA_Tester` validates.
+- [ ] Implement feedback loops where agents can communicate results to each other.
+- [ ] Add workflow command to CLI for running the full pipeline.
+
+**Phase 2 Deliverable:** A three-agent pipeline that can write, review, and test code with full feedback loops.
 
 ### Phase 3: Full Crew Orchestration
 
