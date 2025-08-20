@@ -92,6 +92,13 @@ class BamlSyncClient:
             "current_curriculum": current_curriculum,"performance_data": performance_data,"student_feedback": student_feedback,
         })
         return typing.cast(types.Curriculum, result.cast_to(types, types, stream_types, False, __runtime__))
+    def AnalyzeProjectComplexity(self, project_summary: str,technology_stack: typing.List[types.TechnologyStack],
+        baml_options: BamlCallOptions = {},
+    ) -> types.ProjectComplexityAnalysis:
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="AnalyzeProjectComplexity", args={
+            "project_summary": project_summary,"technology_stack": technology_stack,
+        })
+        return typing.cast(types.ProjectComplexityAnalysis, result.cast_to(types, types, stream_types, False, __runtime__))
     def AnswerQuestion(self, question: str,concept: str,user_profile: types.LearningProfile,context: str,
         baml_options: BamlCallOptions = {},
     ) -> types.Explanation:
@@ -141,6 +148,13 @@ class BamlSyncClient:
             "task_description": task_description,"working_directory": working_directory,"existing_tech_stack": existing_tech_stack,
         })
         return typing.cast(types.ProjectPlan, result.cast_to(types, types, stream_types, False, __runtime__))
+    def GetProjectTemplate(self, template_type: types.ProjectTemplate,customizations: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> types.ProjectPlan:
+        result = self.__options.merge_options(baml_options).call_function_sync(function_name="GetProjectTemplate", args={
+            "template_type": template_type,"customizations": customizations,
+        })
+        return typing.cast(types.ProjectPlan, result.cast_to(types, types, stream_types, False, __runtime__))
     def IdentifyLearningGaps(self, assessment_history: typing.List["types.AssessmentResult"],curriculum_area: str,
         baml_options: BamlCallOptions = {},
     ) -> typing.List[str]:
@@ -188,6 +202,18 @@ class BamlStreamClient:
           result,
           lambda x: typing.cast(stream_types.Curriculum, x.cast_to(types, types, stream_types, True, __runtime__)),
           lambda x: typing.cast(types.Curriculum, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
+    def AnalyzeProjectComplexity(self, project_summary: str,technology_stack: typing.List[types.TechnologyStack],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.ProjectComplexityAnalysis, types.ProjectComplexityAnalysis]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="AnalyzeProjectComplexity", args={
+            "project_summary": project_summary,"technology_stack": technology_stack,
+        })
+        return baml_py.BamlSyncStream[stream_types.ProjectComplexityAnalysis, types.ProjectComplexityAnalysis](
+          result,
+          lambda x: typing.cast(stream_types.ProjectComplexityAnalysis, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.ProjectComplexityAnalysis, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
     def AnswerQuestion(self, question: str,concept: str,user_profile: types.LearningProfile,context: str,
@@ -274,6 +300,18 @@ class BamlStreamClient:
           lambda x: typing.cast(types.ProjectPlan, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def GetProjectTemplate(self, template_type: types.ProjectTemplate,customizations: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlSyncStream[stream_types.ProjectPlan, types.ProjectPlan]:
+        ctx, result = self.__options.merge_options(baml_options).create_sync_stream(function_name="GetProjectTemplate", args={
+            "template_type": template_type,"customizations": customizations,
+        })
+        return baml_py.BamlSyncStream[stream_types.ProjectPlan, types.ProjectPlan](
+          result,
+          lambda x: typing.cast(stream_types.ProjectPlan, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.ProjectPlan, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def IdentifyLearningGaps(self, assessment_history: typing.List["types.AssessmentResult"],curriculum_area: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlSyncStream[typing.List[str], typing.List[str]]:
@@ -337,6 +375,13 @@ class BamlHttpRequestClient:
             "current_curriculum": current_curriculum,"performance_data": performance_data,"student_feedback": student_feedback,
         }, mode="request")
         return result
+    def AnalyzeProjectComplexity(self, project_summary: str,technology_stack: typing.List[types.TechnologyStack],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="AnalyzeProjectComplexity", args={
+            "project_summary": project_summary,"technology_stack": technology_stack,
+        }, mode="request")
+        return result
     def AnswerQuestion(self, question: str,concept: str,user_profile: types.LearningProfile,context: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -384,6 +429,13 @@ class BamlHttpRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="GenerateProjectPlan", args={
             "task_description": task_description,"working_directory": working_directory,"existing_tech_stack": existing_tech_stack,
+        }, mode="request")
+        return result
+    def GetProjectTemplate(self, template_type: types.ProjectTemplate,customizations: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="GetProjectTemplate", args={
+            "template_type": template_type,"customizations": customizations,
         }, mode="request")
         return result
     def IdentifyLearningGaps(self, assessment_history: typing.List["types.AssessmentResult"],curriculum_area: str,
@@ -429,6 +481,13 @@ class BamlHttpStreamRequestClient:
             "current_curriculum": current_curriculum,"performance_data": performance_data,"student_feedback": student_feedback,
         }, mode="stream")
         return result
+    def AnalyzeProjectComplexity(self, project_summary: str,technology_stack: typing.List[types.TechnologyStack],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="AnalyzeProjectComplexity", args={
+            "project_summary": project_summary,"technology_stack": technology_stack,
+        }, mode="stream")
+        return result
     def AnswerQuestion(self, question: str,concept: str,user_profile: types.LearningProfile,context: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -476,6 +535,13 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="GenerateProjectPlan", args={
             "task_description": task_description,"working_directory": working_directory,"existing_tech_stack": existing_tech_stack,
+        }, mode="stream")
+        return result
+    def GetProjectTemplate(self, template_type: types.ProjectTemplate,customizations: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = self.__options.merge_options(baml_options).create_http_request_sync(function_name="GetProjectTemplate", args={
+            "template_type": template_type,"customizations": customizations,
         }, mode="stream")
         return result
     def IdentifyLearningGaps(self, assessment_history: typing.List["types.AssessmentResult"],curriculum_area: str,

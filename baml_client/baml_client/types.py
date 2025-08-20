@@ -37,7 +37,7 @@ def get_checks(checks: typing.Dict[CheckName, Check]) -> typing.List[Check]:
 def all_succeeded(checks: typing.Dict[CheckName, Check]) -> bool:
     return all(check.status == "succeeded" for check in get_checks(checks))
 # #########################################################################
-# Generated enums (6)
+# Generated enums (8)
 # #########################################################################
 
 class EstimatedEffort(str, Enum):
@@ -64,6 +64,29 @@ class PhaseStatus(str, Enum):
     Completed = "Completed"
     Blocked = "Blocked"
     Failed = "Failed"
+
+class ProjectComplexity(str, Enum):
+    Simple = "Simple"
+    Moderate = "Moderate"
+    Complex = "Complex"
+    VeryComplex = "VeryComplex"
+
+class ProjectTemplate(str, Enum):
+    NextJSDashboard = "NextJSDashboard"
+    ReactApp = "ReactApp"
+    PythonAPI = "PythonAPI"
+    FullStackApp = "FullStackApp"
+    DataPipeline = "DataPipeline"
+    MLModel = "MLModel"
+    MobileApp = "MobileApp"
+    DesktopApp = "DesktopApp"
+    WebScraper = "WebScraper"
+    ChatBot = "ChatBot"
+    ECommerce = "ECommerce"
+    Blog = "Blog"
+    Portfolio = "Portfolio"
+    LandingPage = "LandingPage"
+    AdminPanel = "AdminPanel"
 
 class RiskLevel(str, Enum):
     Low = "Low"
@@ -102,7 +125,7 @@ class ValidationIssueType(str, Enum):
     TechnicalComplexity = "TechnicalComplexity"
 
 # #########################################################################
-# Generated classes (17)
+# Generated classes (18)
 # #########################################################################
 
 class AcceptanceCriterion(BaseModel):
@@ -187,6 +210,19 @@ class PhaseValidationResult(BaseModel):
     issues: typing.List["ValidationIssue"]
     recommendations: typing.List[str]
     adjusted_effort_estimate: typing.Optional[EstimatedEffort] = None
+
+class ProjectComplexityAnalysis(BaseModel):
+    overall_complexity: ProjectComplexity
+    technical_complexity_score: float
+    integration_complexity_score: float
+    deployment_complexity_score: float
+    maintenance_complexity_score: float
+    key_complexity_factors: typing.List[str]
+    recommendations: typing.List[str]
+    estimated_development_time: str
+    required_expertise_level: str
+    potential_blockers: typing.List[str]
+    complexity_justification: str
 
 class ProjectPhase(BaseModel):
     phase_number: int

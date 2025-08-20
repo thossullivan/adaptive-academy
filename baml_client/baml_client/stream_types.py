@@ -23,7 +23,7 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (17)
+# Generated classes (18)
 # #########################################################################
 
 class AcceptanceCriterion(BaseModel):
@@ -108,6 +108,19 @@ class PhaseValidationResult(BaseModel):
     issues: typing.List["ValidationIssue"]
     recommendations: typing.List[str]
     adjusted_effort_estimate: typing.Optional[types.EstimatedEffort] = None
+
+class ProjectComplexityAnalysis(BaseModel):
+    overall_complexity: typing.Optional[types.ProjectComplexity] = None
+    technical_complexity_score: typing.Optional[float] = None
+    integration_complexity_score: typing.Optional[float] = None
+    deployment_complexity_score: typing.Optional[float] = None
+    maintenance_complexity_score: typing.Optional[float] = None
+    key_complexity_factors: typing.List[str]
+    recommendations: typing.List[str]
+    estimated_development_time: typing.Optional[str] = None
+    required_expertise_level: typing.Optional[str] = None
+    potential_blockers: typing.List[str]
+    complexity_justification: typing.Optional[str] = None
 
 class ProjectPhase(BaseModel):
     phase_number: typing.Optional[int] = None

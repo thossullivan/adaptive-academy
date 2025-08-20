@@ -14,12 +14,14 @@ This approach is designed to maximize development velocity, ensure high code qua
 The Developer Crew is designed to complement and amplify the capabilities of interactive AI coding assistants like Claude Code. Here's how they work together:
 
 ### **Claude Code as the Strategic Partner**
+
 - **Planning & Architecture**: Use Claude Code for high-level planning, architectural decisions, and complex problem-solving
-- **Interactive Development**: Real-time collaboration on complex logic, debugging, and iterative refinement  
+- **Interactive Development**: Real-time collaboration on complex logic, debugging, and iterative refinement
 - **Code Review & Analysis**: Deep analysis of existing codebases, understanding patterns, and strategic refactoring
 - **Learning & Guidance**: Understanding new frameworks, best practices, and getting explanations
 
 ### **Developer Crew as the Execution Engine**
+
 - **Automated Implementation**: Execute well-defined tasks autonomously (e.g., "Create CRUD endpoints for User model")
 - **Batch Operations**: Handle repetitive tasks like file generation, boilerplate code, or mass refactoring
 - **Quality Assurance**: Automated testing, code review, and validation pipelines
@@ -36,24 +38,27 @@ graph TD
 ```
 
 **Example Scenario:**
+
 1. **Claude Code Session**: "Help me design a FastAPI service with user authentication"
-   - Discuss architecture, choose libraries, design endpoints
-   - Create initial project structure and key files
-   - Plan the implementation strategy
+    - Discuss architecture, choose libraries, design endpoints
+    - Create initial project structure and key files
+    - Plan the implementation strategy
 
 2. **Developer Crew Execution**: Hand off to autonomous agents
-   ```bash
-   uv run python -m developer_crew.main code "Implement JWT authentication middleware for FastAPI"
-   uv run python -m developer_crew.main code "Create User model with SQLAlchemy and Pydantic schemas"
-   uv run python -m developer_crew.main workflow "Build complete user registration endpoint"
-   ```
+
+    ```bash
+    uv run python -m developer_crew.main code "Implement JWT authentication middleware for FastAPI"
+    uv run python -m developer_crew.main code "Create User model with SQLAlchemy and Pydantic schemas"
+    uv run python -m developer_crew.main workflow "Build complete user registration endpoint"
+    ```
 
 3. **Claude Code Review**: Return for strategic oversight
-   - Review the generated code for architectural alignment
-   - Handle complex edge cases or business logic
-   - Plan next phase of development
+    - Review the generated code for architectural alignment
+    - Handle complex edge cases or business logic
+    - Plan next phase of development
 
 ### **Benefits of This Approach**
+
 - **Efficiency**: Handle routine tasks automatically while focusing human attention on complex problems
 - **Consistency**: Standardized code patterns and quality checks across all generated code
 - **Speed**: Parallel execution of multiple related tasks
@@ -90,6 +95,7 @@ This phase focuses on creating our "AI factory"—a command-line tool that orche
 **Status Update:** All components successfully implemented and tested.
 
 **Completed Tasks:**
+
 - [x] Implement the `QA_Tester` agent with system prompt focused on code execution and validation.
 - [x] Add comprehensive terminal/shell execution tools for the `QA_Tester` agent with security safeguards.
 - [x] Create orchestration workflow: `Coder` writes -> `CodeReviewer` reviews -> `QA_Tester` validates.
@@ -99,6 +105,7 @@ This phase focuses on creating our "AI factory"—a command-line tool that orche
 - [x] Add individual agent commands: `code`, `review`, `test` for targeted operations.
 
 **New Tools & Features:**
+
 - **Safe Command Execution**: Security-first approach with whitelist of allowed commands
 - **Python Script Execution**: Run and test Python files with proper error handling
 - **Test Framework Integration**: Support for pytest, unittest, and nose testing frameworks
@@ -107,27 +114,93 @@ This phase focuses on creating our "AI factory"—a command-line tool that orche
 
 **Phase 2 Deliverable:** ✅ **DELIVERED** - A complete three-agent pipeline with full orchestration, individual agent access, and comprehensive testing capabilities.
 
-### Phase 3: Full Crew Orchestration
+### ✅ Phase 3: Multi-Provider AI Support & Project Management - **COMPLETED**
 
-**Goal:** Build a fully autonomous, conversational development team that can manage a feedback loop.
+**Goal:** Add support for multiple AI providers and enterprise-scale project management capabilities.
 
-- [ ] Implement the `Architect` agent for high-level planning.
-- [ ] Implement the `Integrator` agent to act as the `GroupChatManager`, mediating the conversation.
-- [ ] Set up an Autogen `GroupChat` containing all agents.
-- [ ] Implement the full conversational workflow with feedback loops (e.g., `Reviewer` sends notes back to `Coder`).
-- [ ] Configure a `UserProxyAgent` with `human_input_mode="ALWAYS"` to require final human approval.
+**Status Update:** All Phase 3 objectives have been successfully completed.
 
-**Phase 3 Deliverable:** A fully orchestrated agent crew that can take a high-level request, plan it, code it, test it, and present the final code for human approval.
+**Completed Tasks:**
 
-### Phase 4: Polish & First Real Task
+- [x] **Multi-Provider Support**: Added support for Anthropic Claude, OpenAI GPT, and Google Gemini models with automatic provider detection
+- [x] **Project Manager Agent**: Implemented enterprise-ready project planning with intelligent task breakdown (3-8 phases)
+- [x] **BAML Integration**: Added type-safe AI interactions with structured output handling
+- [x] **Advanced Orchestration**: Full three-agent pipeline with customizable workflow phases
+- [x] **Rich CLI Interface**: Beautiful terminal output with progress tracking and detailed reports
+- [x] **Production Testing**: Successfully demonstrated with complete Next.js 14 project generation
 
-**Goal:** Refine the Developer Crew into a reusable tool and use it to build the foundation of the `adaptive-academy` application.
+**Phase 3 Deliverable:** ✅ **DELIVERED** - A production-ready AI development automation tool capable of handling enterprise-scale software projects with multi-provider AI support.
 
-- [ ] Refine all agent system prompts based on performance in prior phases.
-- [ ] Package the crew into a clean, reusable command-line interface.
-- [ ] **First Task:** Use the newly built Developer Crew to execute the prompt: _"Scaffold a new FastAPI application in a directory named `agent_service`. It should have a health check endpoint at `/api/health`. Include a `README.md` and a `.gitignore` file."_
+### 🚀 Phase 4: Library Extraction & Distribution - **IN PROGRESS**
 
-**Phase 4 Deliverable:** A polished, reusable AI developer tool and the initial, AI-generated project structure for the `adaptive-academy` application.
+**Goal:** Extract Developer Crew as a standalone, reusable library for use across multiple projects.
+
+**Strategic Decision:** The Developer Crew has evolved beyond being just a component of Adaptive Academy into a powerful, general-purpose development automation tool that deserves its own dedicated project and lifecycle.
+
+**Architecture Benefits:**
+
+- **🔄 Reusability**: Use across multiple projects and share with team
+- **📦 Independent Versioning**: Release updates without affecting parent projects
+- **🎯 Focused Development**: Dedicated repository, issues, and documentation
+- **🧪 Isolated Testing**: Comprehensive testing without project-specific concerns
+- **📚 Professional Packaging**: Standard Python library structure and distribution
+
+**Implementation Plan:**
+
+**Phase 4.1: Repository Setup & Extraction (2-3 days)**
+
+- [ ] **Create Private GitHub Repository**: `developer-crew-ai` (private during development)
+- [ ] **Extract Library Structure**: Move `developer_crew/` code to standalone package structure
+- [ ] **Setup Python Packaging**: Modern `pyproject.toml` with proper dependencies and metadata
+- [ ] **Migrate Documentation**: Move comprehensive docs to new repository
+- [ ] **Setup CI/CD**: GitHub Actions for automated testing and wheel building
+
+**Phase 4.2: Local Development Integration (1 day)**
+
+- [ ] **Git Dependency Configuration**: Update Adaptive Academy to use `pip install git+https://github.com/username/developer-crew-ai.git`
+- [ ] **Local Development Setup**: Enable editable installs for simultaneous development (`pip install -e ../developer-crew-ai`)
+- [ ] **Integration Testing**: Ensure seamless integration with Adaptive Academy workflows
+- [ ] **Documentation Updates**: Update all references and installation instructions
+
+**Phase 4.3: Production Testing & Validation (1-2 days)**
+
+- [ ] **Cross-Project Testing**: Test library in multiple project contexts
+- [ ] **Performance Validation**: Ensure no regression in functionality or performance
+- [ ] **API Stability**: Finalize public API interface and ensure backward compatibility
+- [ ] **Release Preparation**: Tag v1.0.0 release with comprehensive release notes
+
+**Proposed Library Structure:**
+
+```
+developer-crew-ai/
+├── src/
+│   └── developer_crew/
+│       ├── __init__.py
+│       ├── agents/
+│       ├── core/
+│       ├── cli/
+│       └── integrations/
+├── tests/
+├── docs/
+├── examples/
+├── pyproject.toml
+└── README.md
+```
+
+**Integration in Adaptive Academy:**
+
+```toml
+# pyproject.toml
+[project]
+dependencies = [
+    "developer-crew-ai @ git+https://github.com/username/developer-crew-ai.git@v1.0.0",
+    # ... other dependencies
+]
+```
+
+**Phase 4 Deliverable:** A standalone Developer Crew library distributed via Git dependency, ready for use across multiple projects while maintaining full functionality in Adaptive Academy.
+
+**Future Distribution Path:** Once stable and tested, the library can be published to PyPI for broader community access (`pip install developer-crew-ai`).
 
 ---
 
@@ -144,6 +217,7 @@ With the Developer Crew operational, we will now build the user-facing applicati
 **Status Update:** All Phase 1 objectives have been successfully completed.
 
 **Completed Tasks:**
+
 - [x] **Project Structure**: Modern monorepo layout with `backend/`, `frontend/`, `shared/`, and `developer_crew/` directories.
 - [x] **FastAPI Service**: Comprehensive backend service with 15 REST API endpoints.
 - [x] **Three Learning Agents**: `TutorAgent`, `CurriculumDirector`, and `AssessmentCoach` implemented using modern AutoGen 0.7.4 API.
@@ -161,14 +235,15 @@ With the Developer Crew operational, we will now build the user-facing applicati
 **Status Update:** All Phase 2 objectives have been successfully completed.
 
 **Completed Tasks:**
+
 - ✅ **BAML CLI Installation**: Successfully installed and configured BAML CLI (version 0.205.0)
 - ✅ **Project Structure**: Properly initialized BAML project with `baml_src` directory and `generators.baml`
 - ✅ **Schema Migration**: Moved and fixed existing schemas with correct Jinja templating syntax
 - ✅ **Client Generation**: Generated complete Python/Pydantic client with type-safe interfaces
 - ✅ **Agent Integration**: Updated all learning agents with BAML-powered methods:
-  - `TutorAgent`: `explain_concept_baml()`, `answer_question_baml()`, `create_physics_analogy_baml()`
-  - `CurriculumDirector`: `generate_curriculum_baml()`, `sequence_topics_baml()`, `adapt_curriculum_baml()`
-  - `AssessmentCoach`: `create_quiz_baml()`, `evaluate_performance_baml()`, `provide_detailed_feedback_baml()`, `identify_learning_gaps_baml()`
+    - `TutorAgent`: `explain_concept_baml()`, `answer_question_baml()`, `create_physics_analogy_baml()`
+    - `CurriculumDirector`: `generate_curriculum_baml()`, `sequence_topics_baml()`, `adapt_curriculum_baml()`
+    - `AssessmentCoach`: `create_quiz_baml()`, `evaluate_performance_baml()`, `provide_detailed_feedback_baml()`, `identify_learning_gaps_baml()`
 - ✅ **Test Suite**: Fixed all backend tests (15/15 passing) with proper API key independence and global state management
 - ✅ **Type Safety**: Full Pydantic model integration with fallback error handling
 
@@ -181,17 +256,18 @@ With the Developer Crew operational, we will now build the user-facing applicati
 **Status Update:** All Phase 3 objectives have been successfully completed.
 
 **Completed Tasks:**
+
 - ✅ **SQLite Integration**: Full database integration with comprehensive models and operations
 - ✅ **Learning Session Management**: Complete session lifecycle management with state persistence
 - ✅ **Agent State Tracking**: Persistent agent states across sessions with event logging
 - ✅ **Database Models**: Type-safe data models with BAML integration for user profiles and sessions
 - ✅ **Session API Endpoints**: New REST endpoints for session management:
-  - `POST /api/sessions/start` - Start new learning sessions
-  - `GET /api/sessions/{id}` - Get session information and context
-  - `POST /api/sessions/{id}/end` - End learning sessions
-  - `GET /api/sessions` - Get session history
-  - `POST /api/tutor/teach-with-context` - Context-aware teaching
-  - `POST /api/tutor/question-with-context` - Context-aware Q&A
+    - `POST /api/sessions/start` - Start new learning sessions
+    - `GET /api/sessions/{id}` - Get session information and context
+    - `POST /api/sessions/{id}/end` - End learning sessions
+    - `GET /api/sessions` - Get session history
+    - `POST /api/tutor/teach-with-context` - Context-aware teaching
+    - `POST /api/tutor/question-with-context` - Context-aware Q&A
 - ✅ **Context-Aware Agents**: Learning agents now use full session context for personalized responses
 - ✅ **Event Logging**: Comprehensive logging of all learning activities and agent actions
 
@@ -204,6 +280,7 @@ With the Developer Crew operational, we will now build the user-facing applicati
 **Frontend Architecture:** Next.js 14 + shadcn/ui + TypeScript for a desktop-first, local development experience.
 
 **Core Features:**
+
 - [ ] **Learning Command Center Dashboard**: Main interface showing current progress and next actions
 - [ ] **Interactive Concept Roadmap**: Visual graph of learning concepts and their relationships
 - [ ] **Structured Session Interface**: Concept deep-dives with explanations and resources
@@ -229,6 +306,7 @@ With the Developer Crew operational, we will now build the user-facing applicati
 ## Current Implementation Status Summary
 
 ### ✅ Completed Features
+
 - **Modern Development Environment**: Monorepo structure with uv package management
 - **Developer Crew**: Full three-agent development automation pipeline
 - **Backend Service**: FastAPI with 15 endpoints covering all learning agent interactions
@@ -240,22 +318,55 @@ With the Developer Crew operational, we will now build the user-facing applicati
 
 ### 🎯 Current Development Focus: Phase 4 Frontend Implementation
 
-**Immediate Priorities:**
-1. **Next.js Project Setup**: Initialize frontend with shadcn/ui and TypeScript
-2. **Core Dashboard**: Learning command center with session management
-3. **API Client**: Type-safe integration with existing backend endpoints
-4. **Concept Visualization**: Interactive roadmap showing learning relationships
-5. **Session Interface**: Structured learning experience with context-aware explanations
+**Updated Priorities (Post Library Extraction):**
 
-**Developer Crew Integration:**
-- Leverage existing development automation for frontend scaffolding
-- Use code generation agents for component creation and API client setup
-- Apply QA testing agents for frontend validation and integration testing
+1. **Developer Crew Library Extraction**: Complete standalone library creation and integration
+2. **Next.js Project Setup**: Initialize frontend using the extracted Developer Crew library
+3. **Core Dashboard**: Learning command center with session management
+4. **API Client**: Type-safe integration with existing backend endpoints
+5. **Concept Visualization**: Interactive roadmap showing learning relationships
+6. **Session Interface**: Structured learning experience with context-aware explanations
+
+**Developer Crew Integration (As External Library):**
+
+```bash
+# Install developer crew library
+pip install git+https://github.com/username/developer-crew-ai.git
+
+# Use for frontend development
+developer-crew plan "Create Next.js 14 learning dashboard with shadcn/ui"
+developer-crew workflow "Build React components for concept visualization"
+developer-crew code "Create TypeScript API client for backend integration"
+```
+
+**Benefits of Library Approach:**
+
+- **Clean Separation**: Learning application focuses purely on educational logic
+- **Standardized Development**: Consistent code generation patterns across all components
+- **Independent Updates**: Get Developer Crew improvements without touching core application
+- **Professional Workflow**: Standard dependency management and version control
 
 ### 📊 Progress Overview
-- **Part 1 (Developer Crew)**: 100% Complete ✅
+
+- **Part 1 Phase 1-3 (Developer Crew Core)**: 100% Complete ✅
+- **Part 1 Phase 4 (Library Extraction)**: 0% Complete 🚀
 - **Part 2 Phase 1 (Backend Foundation)**: 100% Complete ✅
 - **Part 2 Phase 2 (BAML Integration)**: 100% Complete ✅
 - **Part 2 Phase 3 (Database Integration)**: 100% Complete ✅
 - **Part 2 Phase 4 (Frontend Integration)**: 0% Complete 🏗️
-- **Overall MVP Progress**: ~90% Complete
+- **Overall MVP Progress**: ~85% Complete
+
+### 🎯 Current Priority: Developer Crew Library Extraction
+
+**Immediate Next Steps:**
+
+1. **Library Extraction** (Developer Crew → Standalone Package)
+2. **Frontend Development** (Learning Dashboard Implementation)
+3. **Integration & Testing** (End-to-end application validation)
+
+**Strategic Benefits of Library-First Approach:**
+
+- **Cleaner Architecture**: Clear separation between development tools and learning application
+- **Independent Evolution**: Developer Crew can evolve without impacting Adaptive Academy releases
+- **Reusability**: Same development automation can be used for future projects
+- **Professional Standards**: Both projects follow modern Python packaging and distribution practices
