@@ -20,6 +20,13 @@ Developer Crew is an internal tool for the Adaptive Academy project that automat
 - Suggests improvements for maintainability
 - Has read-only access to codebase
 
+### 🧪 QA Tester Agent (**New in Phase 2**)
+- Executes code to verify functionality
+- Runs automated tests (pytest, unittest, nose)
+- Performs code quality checks (ruff, mypy, black, flake8)
+- Validates runtime behavior and performance
+- Provides comprehensive test reports with recommendations
+
 ## Installation
 
 ```bash
@@ -65,23 +72,49 @@ uv run python -m developer_crew.main review src/main.py
 uv run python -m developer_crew.main review src/models.py --model gpt-4
 ```
 
+### Testing & Validation (**New in Phase 2**)
+```bash
+# Test a specific file or directory
+uv run python -m developer_crew.main test src/main.py
+
+# Test entire project
+uv run python -m developer_crew.main test . --working-dir ./my-project
+
+# Use different model for testing
+uv run python -m developer_crew.main test tests/ --model gpt-3.5-turbo
+```
+
+### Full Development Workflow (**New in Phase 2**)
+```bash
+# Run complete workflow: Code -> Review -> Test
+uv run python -m developer_crew.main workflow "Create a calculator class with add, subtract, multiply methods"
+
+# Skip specific phases
+uv run python -m developer_crew.main workflow "Fix bug in authentication" --skip-review
+
+# Custom working directory
+uv run python -m developer_crew.main workflow "Add logging to user service" --working-dir ./backend
+```
+
 ## Development Phases
 
-This is Phase 1 of the Developer Crew implementation:
+- ✅ **Phase 1**: Foundation & The Coder Agent (**COMPLETED**)
+  - Coder agent with comprehensive file system tools
+  - Code Reviewer agent for static analysis
+  - Rich CLI interface with individual agent commands
+  - Modern AutoGen 0.7.4 async API integration
 
-- ✅ **Phase 1**: Foundation & The Coder Agent
-  - Basic Coder agent with file system tools
-  - Simple CLI interface
-  - Code review capabilities
-
-- 🚧 **Phase 2**: Adding Guardrails (Coming Next)
-  - QA Tester agent with terminal tools
-  - Orchestration workflow: Coder → Reviewer → Tester
+- ✅ **Phase 2**: Adding Guardrails & Orchestration (**COMPLETED**)
+  - QA Tester agent with secure terminal execution
+  - Full three-agent orchestration pipeline
+  - Comprehensive testing framework integration
+  - Complete workflow command with customizable phases
 
 - 📋 **Phase 3**: Full Crew Orchestration (Future)
   - Architect agent for high-level planning
   - Integrator agent as GroupChatManager
-  - Full conversational workflow with feedback loops
+  - Advanced conversational workflows with iterative feedback
+  - Multi-agent collaboration and conflict resolution
 
 ## Project Structure
 

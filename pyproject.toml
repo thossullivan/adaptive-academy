@@ -1,10 +1,14 @@
 [project]
 name = "adaptive-academy"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI-powered personalized learning platform with development automation"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "python-dotenv>=1.0.0",
+]
 
 [dependency-groups]
 dev = [
@@ -12,5 +16,42 @@ dev = [
     "mypy>=1.17.1",
     "pre-commit>=4.3.0",
     "pytest>=8.4.1",
+    "pytest-asyncio>=0.24.0",
     "ruff>=0.12.9",
+]
+
+# Developer Crew specific dependencies
+developer-crew = [
+    "autogen-agentchat>=0.7.4",
+    "autogen-ext[openai]>=0.7.4",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+dev-crew = "developer_crew.main:app"
+backend = "backend.main:app"
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+markers = [
+    "asyncio: marks tests as async"
 ]
