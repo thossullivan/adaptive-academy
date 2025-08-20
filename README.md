@@ -1,46 +1,48 @@
 # Adaptive Academy - Personal MVP
 
-## Personal Use Architecture (Claude Code Implementation)
+## Core Architecture: A Hybrid Approach
 
-### Core Agents (Start with 3)
+This project uses a hybrid, microservice-based architecture to combine the strengths of a modern web framework with a powerful AI agent orchestration framework.
 
-1. **Curriculum Director** - Master planning and sequencing
-2. **Tutor Agent** - Interactive teaching and explanations
-3. **Assessment Coach** - Quizzing and progress evaluation
+- **Next.js / TypeScript Frontend**: The user-facing application, responsible for all UI, user interaction, and client-side state management.
+- **Python / Autogen Backend**: A separate service that hosts and orchestrates the AI agents. It handles all complex business logic and communication with the LLM.
+- **BAML (Boundary AI Markup Language)**: The shared, typed layer that defines the interface to the LLM. It acts as a contract, ensuring that the data passed between the frontend, backend, and the LLM is always structured and predictable.
 
-**Phase 2 Agents (Add Later):**
+This separation of concerns allows us to use the best tools for each task, creating a scalable and maintainable system.
 
-- Implementation Guide - Code reviews and project guidance
-- Research Assistant - Paper recommendations and summaries
-- Progress Tracker - Analytics and adaptation
+---
 
-### Integration Tools (MVP)
+## The Agent Team
 
-- **BAML** - Prompt management and structured outputs
-- **n8n** (self-hosted) - Workflow automation
-- **Obsidian** - Knowledge base and note-taking
-- **SQLite** - Local progress tracking
-- **GitHub** - Code repositories and version control
+### Core Agents (MVP)
 
-## BAML Integration Strategy
+1.  **Curriculum Director** - Master planning and sequencing of learning topics.
+2.  **Tutor Agent** - Interactive teaching, explanations, and answering questions.
+3.  **Assessment Coach** - Quizzing, progress evaluation, and identifying weak areas.
 
-### Prompt Management Structure
+**Phase 2 Agents (Future):**
 
-```
-baml/
-├── agents/
-│   ├── curriculum_director.baml
-│   ├── tutor_agent.baml
-│   └── assessment_coach.baml
-├── schemas/
-│   ├── curriculum_schema.baml
-│   ├── learning_profile.baml
-│   └── assessment_result.baml
-└── functions/
-    ├── generate_curriculum.baml
-    ├── explain_concept.baml
-    └── create_quiz.baml
-```
+- **Implementation Guide** - Code reviews and project guidance.
+- **Research Assistant** - Paper recommendations and summaries.
+- **Progress Tracker** - Analytics and adaptation.
+
+## The Tech Stack
+
+- **BAML**: The contract for generating structured, typed outputs from the LLM.
+- **FastAPI**: The web framework for the Python agent service.
+- **Autogen**: The framework for orchestrating AI agent conversations.
+- **Obsidian**: Knowledge base and note-taking.
+- **SQLite**: Local progress tracking for the MVP.
+- **GitHub**: Code repositories and version control.
+
+## BAML Integration Strategy: The AI Contract
+
+BAML is the single source of truth for all LLM interactions. It provides end-to-end type safety between the Python backend and the TypeScript frontend.
+
+1.  **Define in BAML**: Create functions and schemas in `.baml` files.
+2.  **Generate Code**: Run `baml build` to generate typed clients for both Python and TypeScript.
+3.  **Orchestrate in Python**: The Autogen agents use the Python BAML client to call LLM functions as tools. These functions return Pydantic objects that match the BAML schema.
+4.  **Consume in TypeScript**: The Next.js frontend uses the generated TypeScript types to safely handle data from the Python API.
 
 ### Key BAML Use Cases
 
@@ -80,94 +82,22 @@ function CreateQuiz(topic: string, difficulty: int, question_count: int) -> Quiz
 }
 ```
 
-## Simplified Agent Specifications
+## Agent Orchestration (Autogen)
 
-### 1. Curriculum Director Agent
+The Python backend uses Microsoft's Autogen to manage the conversational logic between agents. This replaces the need for a separate workflow tool like n8n.
 
-**Core Responsibilities (MVP):**
+### Core Conversation Flow
 
-- Generate learning roadmap for AI/ML topics
-- Track module completion
-- Adapt timeline based on performance
+1.  A user action in the Next.js app triggers an API call to the Python/FastAPI server.
+2.  The API endpoint initiates an Autogen `GroupChat` between the relevant agents (e.g., `UserProxyAgent`, `CurriculumDirector`, `TutorAgent`).
+3.  Agents converse and use their registered tools (which are powered by BAML functions) to perform tasks like generating curriculum or creating quizzes.
+4.  The results of the conversation are streamed back to the Next.js frontend in real-time using WebSockets.
 
-**BAML Integration:**
-
-- Structured curriculum generation
-- Progress milestone definitions
-- Prerequisite validation
-
-**Tools:**
-
-- BAML for curriculum prompts
-- SQLite for roadmap storage
-- n8n for scheduling
-
-### 2. Tutor Agent
-
-**Core Responsibilities (MVP):**
-
-- Explain AI/ML concepts with physics analogies
-- Answer specific questions during study
-- Provide multiple explanation approaches
-
-**BAML Integration:**
-
-- Concept explanation templates
-- Learning style adaptation prompts
-- Context-aware responses
-
-**Tools:**
-
-- BAML for teaching prompts
-- Obsidian for concept linking
-- Claude API for interactions
-
-### 3. Assessment Coach Agent
-
-**Core Responsibilities (MVP):**
-
-- Generate quizzes for completed modules
-- Track performance over time
-- Identify weak areas for review
-
-**BAML Integration:**
-
-- Quiz generation with consistent formats
-- Performance analysis prompts
-- Spaced repetition scheduling
-
-**Tools:**
-
-- BAML for assessment prompts
-- SQLite for performance data
-- Simple spaced repetition logic
-
-## n8n Workflow Simplification (MVP)
-
-### Core Workflows Only
-
-```
-Daily Study Trigger →
-├── Curriculum Director: Check today's plan
-├── Tutor Agent: Deliver content
-└── Assessment Coach: Check if quiz needed
-
-Weekly Review Trigger →
-├── Assessment Coach: Analyze performance
-├── Curriculum Director: Adjust timeline
-└── Generate progress report
-```
-
-### Removed Complexity (Add Later)
-
-- Multi-topic curriculum generation
-- Learning style detection workflows
-- Age-specific adaptations
-- Advanced automation triggers
+This approach creates a dynamic and flexible learning experience that can adapt to the user's needs.
 
 ## Data Models (SQLite)
 
-### Core Tables
+The initial database will be a local SQLite file, managed by the Python service.
 
 ```sql
 -- User profile and preferences
@@ -201,110 +131,43 @@ CREATE TABLE assessments (
 );
 ```
 
-## Implementation Priority (Claude Code)
+## Implementation Plan
 
-### Week 1: Foundation
+### Phase 1: Foundation & Backend Setup
 
-1. Set up BAML with basic agent prompts
-2. Create SQLite database schema
-3. Build Curriculum Director with hardcoded AI/ML roadmap
-4. Basic CLI interface for interaction
+1.  **Scaffold Python Service**: Create a new `agent_service` directory with a FastAPI application.
+2.  **Basic Agent**: Implement a single Autogen agent (e.g., `TutorAgent`) with a basic system message.
+3.  **BAML Integration**: Create one BAML function (e.g., `ExplainConcept`) and generate the Python client.
+4.  **API Endpoint**: Create a FastAPI endpoint that takes a user prompt and initiates a simple agent conversation.
+5.  **Frontend-Backend Communication**: Establish API communication between the Next.js app and the new Python service. Implement a basic WebSocket connection for real-time updates.
 
-### Week 2: Core Agents
+### Phase 2: Core MVP Agent Implementation
 
-1. Implement Tutor Agent with BAML prompts
-2. Add Assessment Coach with quiz generation
-3. Simple n8n workflows for daily/weekly triggers
-4. Obsidian integration for note-taking
+1.  **Implement All Agents**: Create Autogen versions of the `CurriculumDirector` and `AssessmentCoach`.
+2.  **Tool Integration**: Wrap all BAML functions as tools and register them with the appropriate agents.
+3.  **Database Access**: Connect the Python service to the SQLite database, with database operations exposed as tools for the agents.
+4.  **End-to-End Flow**: Build a complete, end-to-end learning module workflow orchestrated by Autogen.
 
-### Week 3: Integration & Testing
+### Phase 3: Polish & Documentation
 
-1. Agent-to-agent communication via JSON
-2. End-to-end learning workflow
-3. Progress tracking and reporting
-4. Basic performance analytics
+1.  **Error Handling**: Implement robust error handling and logging in both services.
+2.  **Configuration Management**: Centralize configuration for both Next.js and Python services.
+3.  **Testing**: Write unit and integration tests for the agent service.
+4.  **Documentation**: Fully document the new architecture, API endpoints, and agent capabilities.
 
-### Week 4: Polish & Documentation
+## Future Considerations & Enhancements
 
-1. Error handling and logging
-2. Configuration management
-3. Setup documentation
-4. Testing with your personal AI/ML curriculum
+### Features to Add Post-MVP
 
-## Removed from MVP (Future Enhancements)
+- **Multi-topic curriculum generation**
+- **Learning style detection and adaptation**
+- **Advanced analytics and progress tracking**
+- **Integration of `ResearchAssistant` and `ImplementationGuide` agents**
+- **Complex conversational flows using Autogen's `GroupChatManager`**
 
-### Features to Add Later
+### Technical Scaling
 
-- **Multi-topic curriculum generation** (focus on AI/ML only initially)
-- **Age-specific adaptations** (adult-only for MVP)
-- **Learning style detection** (use simple preferences)
-- **Advanced analytics** (basic progress tracking only)
-- **Research Assistant agent** (manual paper curation initially)
-- **Implementation Guide agent** (basic code review prompts)
-- **Complex n8n workflows** (keep workflows simple)
-- **External API integrations** (Anki, Calendar, etc.)
-
-### Technical Simplifications
-
-- **Local-only deployment** (no cloud infrastructure)
-- **Single-user system** (no multi-tenancy)
-- **File-based configuration** (no admin interface)
-- **Basic error handling** (no sophisticated retry logic)
-- **Simple authentication** (local system only)
-- **SQLite database** (PostgreSQL migration planned for future scaling)
-
-## Success Metrics (MVP)
-
-### Primary Goals
-
-- Successfully complete one AI/ML module using the system
-- Demonstrate agent coordination works
-- Validate BAML prompt effectiveness
-- Confirm n8n workflow automation
-
-### Measurement
-
-- Time to complete learning modules
-- Quiz performance improvement
-- System reliability (uptime, error rates)
-- Personal satisfaction with learning experience
-
-## Database Architecture & Future Migration
-
-### Current: SQLite (MVP)
-- **Perfect for MVP**: Zero configuration, single file, local deployment
-- **Performance**: Handles expected load (single user, thousands of records)
-- **Simplicity**: No server setup, automatic backups via file copy
-
-### Future: PostgreSQL Migration
-The system is designed for easy PostgreSQL migration when needed:
-
-**Migration Triggers:**
-- Multiple users required
-- Data size > 100GB  
-- Advanced analytics needs
-- Cloud deployment requirements
-
-**Migration Path (3-4 weeks):**
-1. **Database Interface**: Already abstracted via `DatabaseConnection` interface
-2. **Schema Translation**: Standard SQL with minor syntax adjustments
-3. **JSON Handling**: SQLite JSON → PostgreSQL JSONB (performance improvement)
-4. **Connection Pooling**: Add pg-pool for production scaling
-
-**Architecture Benefits:**
-- All TypeScript types remain unchanged
-- Agent logic unaffected
-- Business logic preserved
-- Configuration-driven database selection
-
-**Implementation Preview:**
-```typescript
-// Future configuration-based database selection
-const stateManager = createStateManager({
-  type: process.env.DB_TYPE || 'sqlite',
-  sqlite: { path: './database/adaptive-academy.db' },
-  postgres: { connectionString: process.env.DATABASE_URL }
-})
-```
-
-The current SQLite implementation provides all needed features for the MVP while maintaining a clear path to PostgreSQL when scaling requirements emerge.
+- **PostgreSQL Migration**: The system is designed for a future migration from SQLite to PostgreSQL when scaling is required. The database logic is abstracted to facilitate this.
+- **Asynchronous Tool Execution**: For long-running agent tools, explore and implement asynchronous execution patterns.
+- **Containerization**: Dockerize the Next.js and Python services for simplified deployment and scaling.
+- **Cloud Deployment**: Plan for deploying the services to a cloud provider.
