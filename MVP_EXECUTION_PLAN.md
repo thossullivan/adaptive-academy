@@ -1,403 +1,113 @@
-# MVP Execution Plan - Adaptive Academy
+# MVP Execution Plan: A Two-Part Strategy
 
 ## Overview
-Implementation plan to build a working personal learning system with 3 core agents, state management, and BAML integration. Pure TypeScript architecture with future Python agent extensibility.
 
-## Phase 1: Foundation & State Management
+This document outlines a two-part strategy to build the Adaptive Academy project. The core idea is to first build the tools, then use those tools to build the product.
 
-### Project Setup
-- [x] Initialize TypeScript project structure
-- [x] Set up basic dependencies (BAML, SQLite, testing)
-- [ ] Create database schema with proper indexing
-- [ ] Implement LearningContext and state management core
+1.  **Part 1: Build the AI Developer Crew.** We will first create an internal, AI-powered team of agents designed to automate our software development lifecycle. This is a reusable asset that acts as a force multiplier.
+2.  **Part 2: Build the Adaptive Academy Application.** With the Developer Crew operational, we will then use it to build, test, and deploy the user-facing learning application.
 
-### Core State System
-- [ ] Build `StateManager` class for SQLite operations
-- [ ] Implement `LearningContext` with proper TypeScript types
-- [ ] Create event logging system for agent actions
-- [ ] Add state validation and error handling
-
-### BAML Foundation
-- [ ] Set up BAML project structure (`baml/` directory)
-- [ ] Define core schemas (LearningContext, Module, Assessment, etc.)
-- [ ] Create first BAML function for curriculum generation
-- [ ] Test BAML integration with Claude API
-
-**Phase 1 Deliverable**: Working state management system with BAML integration
+This approach is designed to maximize development velocity, ensure high code quality through automated reviews and testing, and create a scalable development process.
 
 ---
 
-## Phase 2: Core Agents Implementation
+## Part 1: Build the AI Developer Crew
 
-### Curriculum Director Agent
-- [ ] Implement `CurriculumDirectorAgent` class
-- [ ] Create BAML prompts for curriculum generation
-- [ ] Build hardcoded AI/ML learning roadmap
-- [ ] Add module sequencing and prerequisite logic
+### Overview
 
-### Tutor Agent
-- [ ] Implement `TutorAgent` class  
-- [ ] Create BAML prompts for concept explanations
-- [ ] Add physics analogy generation capability
-- [ ] Implement context-aware explanations
+This phase focuses on creating our "AI factory"—a command-line tool that orchestrates a team of specialized AI agents to perform software engineering tasks.
 
-### Assessment Coach Agent
-- [ ] Implement `AssessmentCoachAgent` class
-- [ ] Create BAML prompts for quiz generation
-- [ ] Add performance tracking and analysis
-- [ ] Implement spaced repetition scheduling
+### Phase 1: Foundation & The `Coder` Agent
 
-**Phase 2 Deliverable**: Three working agents with BAML integration
+**Goal:** Create a single, functional agent that can write and modify code based on a precise instruction.
 
----
+- [ ] Create a new Python project directory: `developer_crew`.
+- [ ] Set up a `pyproject.toml` and a virtual environment.
+- [ ] Install core dependencies: `pyautogen`, `python-dotenv`, `typer`.
+- [ ] Implement the `Coder` agent with a focused system prompt.
+- [ ] Implement file system tools (`read_file`, `edit_file`) for the agent.
+- [ ] Create a simple CLI (`main.py`) to pass a prompt to the `Coder`.
 
-## Phase 3: Integration & Orchestration
+**Phase 1 Deliverable:** A command-line tool that successfully uses a single `Coder` agent to write a specified file.
 
-### Agent Orchestration
-- [ ] Build `AgentOrchestrator` class
-- [ ] Implement agent communication via shared context
-- [ ] Create workflow coordination logic
-- [ ] Add error handling and recovery
+### Phase 2: Adding Guardrails - The `Reviewer` and `Tester`
 
-### n8n Workflow Setup
-- [ ] Install and configure n8n locally
-- [ ] Create basic daily study workflow
-- [ ] Implement weekly review workflow
-- [ ] Connect n8n to agent orchestrator
+**Goal:** Establish a quality control process by adding static and dynamic analysis agents.
 
-### CLI Interface
-- [ ] Build command-line interface for user interactions
-- [ ] Add commands for starting study sessions
-- [ ] Implement progress viewing and module selection
-- [ ] Create configuration management
+- [ ] Implement the `CodeReviewer` agent with a system prompt focused on static analysis. It should only have a `read_file` tool.
+- [ ] Implement the `QA_Tester` agent with a system prompt focused on code execution and validation. It should have the `terminal` tool.
+- [ ] Create an orchestration script for the workflow: `Coder` writes -> `CodeReviewer` approves -> `QA_Tester` approves.
 
-**Phase 3 Deliverable**: End-to-end learning workflow with CLI interface
+**Phase 2 Deliverable:** A three-agent script that can write, review, and test a simple Python script, correctly identifying bugs and style issues.
 
----
+### Phase 3: Full Crew Orchestration
 
-## Phase 4: Polish & Testing
+**Goal:** Build a fully autonomous, conversational development team that can manage a feedback loop.
 
-### Testing & Validation
-- [ ] Write unit tests for core state management
-- [ ] Add integration tests for agent workflows
-- [ ] Test BAML prompt reliability and outputs
-- [ ] Validate database performance and integrity
+- [ ] Implement the `Architect` agent for high-level planning.
+- [ ] Implement the `Integrator` agent to act as the `GroupChatManager`, mediating the conversation.
+- [ ] Set up an Autogen `GroupChat` containing all agents.
+- [ ] Implement the full conversational workflow with feedback loops (e.g., `Reviewer` sends notes back to `Coder`).
+- [ ] Configure a `UserProxyAgent` with `human_input_mode="ALWAYS"` to require final human approval.
 
-### Error Handling & Logging
-- [ ] Implement comprehensive error handling
-- [ ] Add structured logging throughout system
-- [ ] Create diagnostic commands for troubleshooting
-- [ ] Add data backup and recovery procedures
+**Phase 3 Deliverable:** A fully orchestrated agent crew that can take a high-level request, plan it, code it, test it, and present the final code for human approval.
 
-### Documentation & User Testing
-- [ ] Write setup and usage documentation
-- [ ] Create troubleshooting guide
-- [ ] Test complete learning workflow personally
-- [ ] Refine based on real usage feedback
+### Phase 4: Polish & First Real Task
 
-**Phase 4 Deliverable**: Production-ready MVP with documentation
+**Goal:** Refine the Developer Crew into a reusable tool and use it to build the foundation of the `adaptive-academy` application.
+
+- [ ] Refine all agent system prompts based on performance in prior phases.
+- [ ] Package the crew into a clean, reusable command-line interface.
+- [ ] **First Task:** Use the newly built Developer Crew to execute the prompt: _"Scaffold a new FastAPI application in a directory named `agent_service`. It should have a health check endpoint at `/api/health`. Include a `README.md` and a `.gitignore` file."_
+
+**Phase 4 Deliverable:** A polished, reusable AI developer tool and the initial, AI-generated project structure for the `adaptive-academy` application.
 
 ---
 
-## Detailed Implementation Specs
+## Part 2: Build the Adaptive Academy Application
 
-### Database Schema (Phase 1)
-```sql
--- Core learning context
-CREATE TABLE learning_sessions (
-    id INTEGER PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    current_module_id INTEGER,
-    session_state JSON,
-    FOREIGN KEY (current_module_id) REFERENCES curriculum (id)
-);
+### Overview
 
--- Enhanced curriculum table
-CREATE TABLE curriculum (
-    id INTEGER PRIMARY KEY,
-    topic TEXT NOT NULL,
-    module_name TEXT NOT NULL,
-    description TEXT,
-    prerequisites JSON, -- Array of module IDs
-    estimated_hours REAL,
-    difficulty_level INTEGER, -- 1-10
-    status TEXT CHECK (status IN ('not_started', 'in_progress', 'completed')),
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    completed_at DATETIME
-);
+With the Developer Crew operational, we will now build the user-facing application. The Developer Crew will be used to execute the tasks in this plan, turning high-level goals into production code.
 
--- Agent state tracking
-CREATE TABLE agent_states (
-    id INTEGER PRIMARY KEY,
-    session_id INTEGER NOT NULL,
-    agent_type TEXT NOT NULL,
-    state_data JSON,
-    last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES learning_sessions (id),
-    UNIQUE(session_id, agent_type)
-);
+### Phase 1: Foundation & Backend Setup
 
--- Event logging for debugging and analytics
-CREATE TABLE learning_events (
-    id INTEGER PRIMARY KEY,
-    session_id INTEGER NOT NULL,
-    agent_type TEXT,
-    event_type TEXT NOT NULL,
-    event_data JSON,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES learning_sessions (id)
-);
+**Goal:** Create the core backend service and establish communication with the frontend.
 
--- Enhanced assessments
-CREATE TABLE assessments (
-    id INTEGER PRIMARY KEY,
-    session_id INTEGER NOT NULL,
-    module_id INTEGER NOT NULL,
-    quiz_data JSON, -- Questions and answers
-    user_responses JSON,
-    score REAL,
-    completion_time INTEGER, -- seconds
-    weak_areas JSON, -- Array of concepts
-    strengths JSON, -- Array of concepts
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES learning_sessions (id),
-    FOREIGN KEY (module_id) REFERENCES curriculum (id)
-);
+- [ ] **Task for Dev Crew:** "Scaffold the FastAPI service." (Completed in Part 1, Phase 4).
+- [ ] **Task for Dev Crew:** "Implement a single Autogen agent, the `TutorAgent`, with a basic system message. Create a basic API endpoint that takes a user prompt and initiates a conversation with this agent."
+- [ ] **Task for Dev Crew:** "Integrate BAML into the project. Create a single BAML function `ExplainConcept` and generate the Python client."
+- [ ] **Task for Dev Crew:** "Establish a WebSocket endpoint for streaming agent messages back to a client."
 
--- User profile and preferences
-CREATE TABLE user_profile (
-    id INTEGER PRIMARY KEY,
-    background TEXT,
-    hours_per_day REAL,
-    learning_style TEXT,
-    current_focus TEXT,
-    preferences JSON,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+**Phase 1 Deliverable:** A running FastAPI service that can host a single Autogen agent, with BAML integrated and real-time communication established.
 
--- Performance analytics
-CREATE TABLE performance_metrics (
-    id INTEGER PRIMARY KEY,
-    session_id INTEGER NOT NULL,
-    module_id INTEGER,
-    metric_type TEXT NOT NULL, -- 'completion_time', 'quiz_score', 'concept_mastery'
-    metric_value REAL,
-    recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES learning_sessions (id),
-    FOREIGN KEY (module_id) REFERENCES curriculum (id)
-);
+### Phase 2: Core MVP Agent Implementation
 
--- Indexes for performance
-CREATE INDEX idx_sessions_user ON learning_sessions(user_id);
-CREATE INDEX idx_curriculum_status ON curriculum(status);
-CREATE INDEX idx_events_session ON learning_events(session_id);
-CREATE INDEX idx_assessments_module ON assessments(module_id);
-CREATE INDEX idx_metrics_session_module ON performance_metrics(session_id, module_id);
-```
+**Goal:** Implement the full team of application agents and their primary tools.
 
-### TypeScript Core Types (Phase 1)
-```typescript
-// Core learning context - passed between all agents
-export interface LearningContext {
-  sessionId: string
-  userId: string
-  currentModule?: Module
-  learningGoals: LearningGoal[]
-  performanceData: PerformanceMetrics
-  agentStates: Record<AgentType, AgentState>
-  eventHistory: LearningEvent[]
-  userProfile: UserProfile
-  preferences: UserPreferences
-}
+- [ ] **Task for Dev Crew:** "Implement Autogen versions of the `CurriculumDirector` and `AssessmentCoach` agents."
+- [ ] **Task for Dev Crew:** "Create BAML functions for `GenerateCurriculum` and `CreateQuiz`."
+- [ ] **Task for Dev Crew:** "Wrap all BAML functions as tools and register them with the appropriate agents."
+- [ ] **Task for Dev Crew:** "Connect the Python service to a SQLite database. Create tools for the agents to read and write to the database."
 
-// Module definition
-export interface Module {
-  id: number
-  topic: string
-  moduleName: string
-  description: string
-  prerequisites: number[]
-  estimatedHours: number
-  difficultyLevel: number
-  status: 'not_started' | 'in_progress' | 'completed'
-}
+**Phase 2 Deliverable:** The three core application agents are fully implemented and can use BAML and SQLite as tools.
 
-// Agent types
-export type AgentType = 'curriculum_director' | 'tutor' | 'assessment_coach'
+### Phase 3: End-to-End Learning Flow
 
-// Base agent interface
-export interface Agent {
-  type: AgentType
-  processContext(context: LearningContext): Promise<AgentAction[]>
-  updateState(event: LearningEvent): Promise<void>
-  getState(): AgentState
-}
+**Goal:** Create a complete, user-driven learning experience from start to finish.
 
-// Actions agents can take
-export interface AgentAction {
-  type: 'update_curriculum' | 'provide_explanation' | 'generate_quiz' | 'log_event'
-  data: any
-  priority: number
-  agentId: string
-}
+- [ ] **Task for Dev Crew:** "Orchestrate the full agent `GroupChat` for the Application Crew."
+- [ ] **Task for Dev Crew:** "Build the API endpoints required to manage a full learning session: start, get status, send message, end."
+- [ ] **Task for Dev Crew:** "Work with the Next.js frontend team to integrate these API endpoints to display the agent conversation."
 
-// Events for logging and coordination
-export interface LearningEvent {
-  id: string
-  sessionId: string
-  agentType?: AgentType
-  eventType: string
-  eventData: any
-  timestamp: Date
-}
+**Phase 3 Deliverable:** A user can start a session in the Next.js UI and have a complete, interactive learning conversation with the backend agents.
 
-// Future: Interface for Python agents via JSON communication
-export interface PythonAgentInterface {
-  executeAgent(agentType: string, context: LearningContext): Promise<AgentAction[]>
-}
-```
+### Phase 4: Polish, Testing, and Documentation
 
-### BAML Structure (Phase 1)
-```
-baml/
-├── schemas/
-│   ├── learning_context.baml
-│   ├── curriculum.baml
-│   ├── assessment.baml
-│   └── explanation.baml
-├── agents/
-│   ├── curriculum_director/
-│   │   ├── generate_curriculum.baml
-│   │   ├── adapt_timeline.baml
-│   │   └── validate_prerequisites.baml
-│   ├── tutor/
-│   │   ├── explain_concept.baml
-│   │   ├── provide_analogy.baml
-│   │   └── answer_question.baml
-│   └── assessment_coach/
-│       ├── generate_quiz.baml
-│       ├── analyze_performance.baml
-│       └── recommend_review.baml
-└── functions/
-    ├── orchestration.baml
-    └── state_management.baml
-```
+**Goal:** Harden the application and prepare it for MVP release.
 
-### Agent Implementation Pattern (Phase 2)
-```typescript
-export class CurriculumDirectorAgent implements Agent {
-  type: AgentType = 'curriculum_director'
-  private state: CurriculumDirectorState
-  
-  async processContext(context: LearningContext): Promise<AgentAction[]> {
-    const actions: AgentAction[] = []
-    
-    // Check if curriculum needs generation or adaptation
-    if (this.shouldGenerateCurriculum(context)) {
-      const curriculum = await this.generateCurriculum(context)
-      actions.push({
-        type: 'update_curriculum',
-        data: curriculum,
-        priority: 1,
-        agentId: this.type
-      })
-    }
-    
-    // Check if timeline needs adjustment
-    if (this.shouldAdaptTimeline(context)) {
-      const adjustments = await this.adaptTimeline(context)
-      actions.push({
-        type: 'update_curriculum',
-        data: adjustments,
-        priority: 2,
-        agentId: this.type
-      })
-    }
-    
-    return actions
-  }
-  
-  private async generateCurriculum(context: LearningContext): Promise<Curriculum> {
-    // BAML call to generate structured curriculum
-    return await BAML.GenerateCurriculum({
-      topic: context.userProfile.currentFocus,
-      userProfile: context.userProfile,
-      performanceHistory: context.performanceData
-    })
-  }
-  
-  // ... other methods
-}
-```
+- [ ] **Task for Dev Crew:** "Implement robust error handling and structured logging across the Python service."
+- [ ] **Task for Dev Crew:** "Write unit and integration tests for the core agent interactions and API endpoints."
+- [ ] **Task for Dev Crew:** "Generate comprehensive API documentation."
 
-## Success Criteria
-
-### Phase 1 Success
-- [ ] Database schema created and validated
-- [ ] LearningContext flows through state management
-- [ ] First BAML function returns structured output
-- [ ] Basic error handling and logging works
-
-### Phase 2 Success  
-- [ ] All three agents respond to context changes
-- [ ] BAML prompts generate realistic curricula/quizzes/explanations
-- [ ] Agent state persistence works correctly
-- [ ] Performance is acceptable (< 3s response times)
-
-### Phase 3 Success
-- [ ] Complete learning workflow from start to assessment
-- [ ] n8n triggers daily and weekly workflows successfully
-- [ ] CLI allows interaction with all major features
-- [ ] Data flows correctly between agents and workflows
-
-### Phase 4 Success
-- [ ] System handles errors gracefully without data loss
-- [ ] Documentation allows new user to set up and run system
-- [ ] Personal testing shows genuine learning value
-- [ ] All success metrics from CLAUDE.md are measurable
-
-## Risk Mitigation
-
-### Technical Risks
-- **BAML API failures**: Implement retry logic and fallback prompts
-- **Database corruption**: Regular backups and transaction safety
-- **Agent coordination issues**: Comprehensive logging and state validation
-- **Performance problems**: Profile early and optimize bottlenecks
-
-### Schedule Risks
-- **Feature creep**: Stick strictly to MVP scope, document future features
-- **Integration complexity**: Test integrations continuously, not at the end
-- **BAML learning curve**: Start with simple prompts, iterate complexity
-- **n8n setup issues**: Have alternative local orchestration ready
-
-## Future Python Integration
-
-When we're ready to add Python agents:
-
-```typescript
-// TypeScript orchestrator can call Python agents
-class PythonAgentRunner {
-  async executeAgent(agentScript: string, context: LearningContext): Promise<AgentAction[]> {
-    const contextJson = JSON.stringify(context)
-    const result = await exec(`python agents/${agentScript} '${contextJson}'`)
-    return JSON.parse(result)
-  }
-}
-
-// Python agent example structure
-// agents/ml_analytics_agent.py
-// - Reads JSON context from stdin
-// - Performs ML analysis (learning patterns, recommendations)
-// - Returns JSON actions array
-```
-
-## Next Steps
-
-1. **Start Phase 1**: Set up database schema and core TypeScript types
-2. **Build incrementally**: Get each piece working before moving to the next
-3. **Test continuously**: Validate each component as we build it
-4. **Document as we go**: Keep this plan updated with learnings
-
-This plan maintains the same comprehensive scope while being more flexible and focused on deliverables rather than artificial timelines.
+**Phase 4 Deliverable:** A production-ready, tested, and documented MVP of the Adaptive Academy application.
