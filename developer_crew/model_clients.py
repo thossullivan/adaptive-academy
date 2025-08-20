@@ -28,9 +28,9 @@ class ModelClientFactory:
     """Factory for creating model clients from different providers."""
 
     SUPPORTED_PROVIDERS = {
-        "openai": [""],
-        "anthropic": ["claude-sonnet-4-20250514"],
-        "google": [""]
+        "openai": ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo", "gpt-4o"],
+        "anthropic": ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-haiku-20240307"],
+        "google": ["gemini-pro", "gemini-flash"]
     }
 
     @staticmethod
@@ -62,9 +62,16 @@ class ModelClientFactory:
     @staticmethod
     def _get_provider_from_model(model: str) -> str:
         """Determine provider from model name."""
+        # First check exact matches
         for provider, models in ModelClientFactory.SUPPORTED_PROVIDERS.items():
-            if any(model.startswith(m.split('-')[0]) for m in models) or model in models:
+            if model in models:
                 return provider
+
+        # Then check prefixes for models that start with known patterns
+        for provider, models in ModelClientFactory.SUPPORTED_PROVIDERS.items():
+            for supported_model in models:
+                if supported_model and model.startswith(supported_model.split('-')[0]):
+                    return provider
 
         # Fallback logic for common patterns
         if "gpt" in model.lower() or "openai" in model.lower():
