@@ -378,6 +378,45 @@ enum TechnologyStack {
   Firebase
 }
 
+enum ProjectComplexity {
+  Simple
+  Moderate
+  Complex
+  VeryComplex
+}
+
+enum ProjectTemplate {
+  NextJSDashboard
+  ReactApp
+  PythonAPI
+  FullStackApp
+  DataPipeline
+  MLModel
+  MobileApp
+  DesktopApp
+  WebScraper
+  ChatBot
+  ECommerce
+  Blog
+  Portfolio
+  LandingPage
+  AdminPanel
+}
+
+class ProjectComplexityAnalysis {
+  overall_complexity ProjectComplexity
+  technical_complexity_score float // 1.0 to 10.0
+  integration_complexity_score float // 1.0 to 10.0
+  deployment_complexity_score float // 1.0 to 10.0
+  maintenance_complexity_score float // 1.0 to 10.0
+  key_complexity_factors string[]
+  recommendations string[]
+  estimated_development_time string
+  required_expertise_level string // "junior", "mid", "senior", "expert"
+  potential_blockers string[]
+  complexity_justification string
+}
+
 enum RiskLevel {
   Low
   Medium
@@ -499,28 +538,86 @@ function GenerateProjectPlan(
 ) -> ProjectPlan {
   client Anthropic
   prompt #"
-    You are an expert Project Manager and Software Architect with deep expertise in breaking down complex software development tasks into manageable, executable phases.
+    You are an expert Project Manager. Create a comprehensive project plan for this task:
 
     Task: {{task_description}}
     Working Directory: {{working_directory}}
     Existing Technology Stack: {{existing_tech_stack}}
 
-    Create a comprehensive project plan that breaks this task into 3-8 logical phases. Each phase should be:
-    1. Independently executable (1-6 hours of work)
-    2. Have clear deliverables and acceptance criteria
-    3. Minimize dependencies between phases where possible
-    4. Include realistic risk assessment
-    5. Provide clear Git workflow strategy
+    Break this into 3-8 logical phases. Each phase should be 1-6 hours of work with clear deliverables.
 
-    Consider:
-    - What are the core requirements?
-    - What's the minimal viable first step?
-    - How can dependencies be minimized?
-    - What could go wrong and how to mitigate it?
-    - How will this be tested and deployed?
-    - What are the success metrics?
+    Provide a detailed project summary, list the technology stack to use, create phases with deliverables and acceptance criteria, include integration and deployment plans, estimate total effort, identify success metrics, list assumptions and constraints, and specify key stakeholders and timeline milestones.
+  "#
+}
 
-    Provide detailed phase breakdowns with specific deliverables, realistic effort estimates, and actionable acceptance criteria.
+function AnalyzeProjectComplexity(
+  project_summary: string,
+  technology_stack: TechnologyStack[]
+) -> ProjectComplexityAnalysis {
+  client Anthropic
+  prompt #"
+    Analyze the complexity of this software development project:
+
+    Project Summary: {{project_summary}}
+    Technology Stack: {{technology_stack}}
+
+    Provide a comprehensive complexity analysis considering:
+
+    1. Technical Complexity (1-10):
+       - Number and variety of technologies
+       - Integration complexity between components
+       - Custom vs off-the-shelf solutions
+       - Algorithm complexity requirements
+
+    2. Integration Complexity (1-10):
+       - Third-party API integrations
+       - Database integration complexity
+       - Authentication and authorization systems
+       - Cross-platform considerations
+
+    3. Deployment Complexity (1-10):
+       - Infrastructure requirements
+       - CI/CD pipeline needs
+       - Environment configuration
+       - Scaling considerations
+
+    4. Maintenance Complexity (1-10):
+       - Code maintainability
+       - Update frequency requirements
+       - Monitoring and debugging needs
+       - Documentation requirements
+
+    Consider the technology stack interactions, potential integration challenges, and overall project scope.
+    Provide specific recommendations for managing complexity and potential blockers to watch for.
+  "#
+}
+
+function GetProjectTemplate(
+  template_type: ProjectTemplate,
+  customizations: string[]
+) -> ProjectPlan {
+  client Anthropic
+  prompt #"
+    Generate a detailed project plan based on the {{template_type}} template with these customizations:
+    {{customizations}}
+
+    Create a comprehensive project plan that includes:
+
+    1. Technology stack appropriate for {{template_type}}
+    2. Phase breakdown optimized for this template type
+    3. Template-specific deliverables and acceptance criteria
+    4. Common patterns and best practices for {{template_type}}
+    5. Integration considerations specific to this template
+    6. Deployment strategy appropriate for {{template_type}}
+
+    Customize the plan based on the provided requirements while maintaining the core structure and best practices of the {{template_type}} template.
+
+    Ensure phases are:
+    - Logical and sequential
+    - Appropriately sized (1-6 hours each)
+    - Include realistic deliverables
+    - Have clear acceptance criteria
+    - Consider template-specific risks and mitigations
   "#
 }
 

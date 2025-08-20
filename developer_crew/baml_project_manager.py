@@ -1,9 +1,7 @@
 """BAML-integrated Project Manager Agent for structured project planning."""
 
-import asyncio
 import os
-from typing import Dict, Any, List, Optional
-from pathlib import Path
+from typing import Dict, Any, List
 
 from baml_client.baml_client import b
 from baml_client.baml_client.types import (
@@ -13,13 +11,11 @@ from baml_client.baml_client.types import (
     PhaseValidationResult,
     ProjectComplexityAnalysis,
     ProjectTemplate,
-    EstimatedEffort,
-    RiskLevel,
-    GitStrategy
+    AcceptanceCriterion
 )
 
 from .model_clients import get_default_model
-from .tools import get_project_structure, read_file, list_files
+from .tools import read_file, list_files
 
 
 class BAMLProjectManagerAgent:
@@ -166,8 +162,11 @@ class BAMLProjectManagerAgent:
     async def _validate_phase(self, phase: ProjectPhase, project_context: str) -> PhaseValidationResult:
         """Validate a project phase using BAML."""
         try:
-            return await b.ValidatePhase(
-                phase=phase,
+            return await b.ValidateProjectPhase(
+                phase_name=phase.phase_name,
+                phase_description=phase.description,
+                estimated_effort=phase.estimated_effort,
+                deliverables=phase.deliverables,
                 project_context=project_context
             )
         except Exception:
@@ -190,11 +189,12 @@ class BAMLProjectManagerAgent:
 
         # Add recommendations as additional acceptance criteria
         for recommendation in validation.recommendations:
-            improved_phase.acceptance_criteria.append({
-                "description": f"Address validation concern: {recommendation}",
-                "testable": True,
-                "priority": 3
-            })
+            criterion = AcceptanceCriterion(
+                description=f"Address validation concern: {recommendation}",
+                testable=True,
+                priority=3
+            )
+            improved_phase.acceptance_criteria.append(criterion)
 
         return improved_phase
 
@@ -241,12 +241,12 @@ class BAMLProjectManagerAgent:
             "python_api": ProjectTemplate.PythonAPI,
             "react_app": ProjectTemplate.ReactApp,
             "mobile_app": ProjectTemplate.MobileApp,
-            "ml_pipeline": ProjectTemplate.MLPipeline,
-            "ecommerce_store": ProjectTemplate.EcommerceStore,
-            "blog_cms": ProjectTemplate.BlogCMS,
-            "auth_system": ProjectTemplate.AuthSystem,
-            "data_visualization": ProjectTemplate.DataVisualization,
-            "microservice": ProjectTemplate.Microservice
+            "ml_model": ProjectTemplate.MLModel,
+            "ecommerce": ProjectTemplate.ECommerce,
+            "blog": ProjectTemplate.Blog,
+            "portfolio": ProjectTemplate.Portfolio,
+            "data_pipeline": ProjectTemplate.DataPipeline,
+            "fullstack_app": ProjectTemplate.FullStackApp
         }
 
         return template_mapping.get(template_type.lower(), ProjectTemplate.NextJSDashboard)

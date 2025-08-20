@@ -49,6 +49,9 @@ type_map = {
     "types.PhaseValidationResult": types.PhaseValidationResult,
     "stream_types.PhaseValidationResult": stream_types.PhaseValidationResult,
 
+    "types.ProjectComplexityAnalysis": types.ProjectComplexityAnalysis,
+    "stream_types.ProjectComplexityAnalysis": stream_types.ProjectComplexityAnalysis,
+
     "types.ProjectPhase": types.ProjectPhase,
     "stream_types.ProjectPhase": stream_types.ProjectPhase,
 
@@ -73,6 +76,10 @@ type_map = {
     "types.GitStrategy": types.GitStrategy,
 
     "types.PhaseStatus": types.PhaseStatus,
+
+    "types.ProjectComplexity": types.ProjectComplexity,
+
+    "types.ProjectTemplate": types.ProjectTemplate,
 
     "types.RiskLevel": types.RiskLevel,
 

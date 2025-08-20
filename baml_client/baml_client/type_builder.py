@@ -20,13 +20,13 @@ from .globals import DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIM
 class TypeBuilder(type_builder.TypeBuilder):
     def __init__(self):
         super().__init__(classes=set(
-          ["AcceptanceCriterion","AssessmentResult","Curriculum","CurriculumModule","Deliverable","Dependency","DeploymentConsiderations","Explanation","IntegrationPlan","LearningProfile","PhaseValidationResult","ProjectPhase","ProjectPlan","Question","Quiz","Risk","ValidationIssue",]
+          ["AcceptanceCriterion","AssessmentResult","Curriculum","CurriculumModule","Deliverable","Dependency","DeploymentConsiderations","Explanation","IntegrationPlan","LearningProfile","PhaseValidationResult","ProjectComplexityAnalysis","ProjectPhase","ProjectPlan","Question","Quiz","Risk","ValidationIssue",]
         ), enums=set(
-          ["EstimatedEffort","GitStrategy","PhaseStatus","RiskLevel","TechnologyStack","ValidationIssueType",]
+          ["EstimatedEffort","GitStrategy","PhaseStatus","ProjectComplexity","ProjectTemplate","RiskLevel","TechnologyStack","ValidationIssueType",]
         ), runtime=DO_NOT_USE_DIRECTLY_UNLESS_YOU_KNOW_WHAT_YOURE_DOING_RUNTIME)
 
     # #########################################################################
-    # Generated enums 6
+    # Generated enums 8
     # #########################################################################
 
     @property
@@ -42,6 +42,14 @@ class TypeBuilder(type_builder.TypeBuilder):
         return PhaseStatusViewer(self)
 
     @property
+    def ProjectComplexity(self) -> "ProjectComplexityViewer":
+        return ProjectComplexityViewer(self)
+
+    @property
+    def ProjectTemplate(self) -> "ProjectTemplateViewer":
+        return ProjectTemplateViewer(self)
+
+    @property
     def RiskLevel(self) -> "RiskLevelViewer":
         return RiskLevelViewer(self)
 
@@ -55,7 +63,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
     # #########################################################################
-    # Generated classes 17
+    # Generated classes 18
     # #########################################################################
 
     @property
@@ -103,6 +111,10 @@ class TypeBuilder(type_builder.TypeBuilder):
         return PhaseValidationResultViewer(self)
 
     @property
+    def ProjectComplexityAnalysis(self) -> "ProjectComplexityAnalysisViewer":
+        return ProjectComplexityAnalysisViewer(self)
+
+    @property
     def ProjectPhase(self) -> "ProjectPhaseViewer":
         return ProjectPhaseViewer(self)
 
@@ -129,7 +141,7 @@ class TypeBuilder(type_builder.TypeBuilder):
 
 
 # #########################################################################
-# Generated enums 6
+# Generated enums 8
 # #########################################################################
 
 class EstimatedEffortAst:
@@ -306,6 +318,150 @@ class PhaseStatusValues:
     @property
     def Failed(self) -> type_builder.EnumValueViewer:
         return type_builder.EnumValueViewer(self.__bldr.value("Failed"))
+    
+    
+
+
+class ProjectComplexityAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.enum("ProjectComplexity")
+        self._values: typing.Set[str] = set([  "Simple",  "Moderate",  "Complex",  "VeryComplex",  ])
+        self._vals = ProjectComplexityValues(self._bldr, self._values)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def values(self) -> "ProjectComplexityValues":
+        return self._vals
+
+
+class ProjectComplexityViewer(ProjectComplexityAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
+        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
+    
+
+class ProjectComplexityValues:
+    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
+        self.__bldr = enum_bldr
+        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def Simple(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Simple"))
+    
+    @property
+    def Moderate(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Moderate"))
+    
+    @property
+    def Complex(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Complex"))
+    
+    @property
+    def VeryComplex(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("VeryComplex"))
+    
+    
+
+
+class ProjectTemplateAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.enum("ProjectTemplate")
+        self._values: typing.Set[str] = set([  "NextJSDashboard",  "ReactApp",  "PythonAPI",  "FullStackApp",  "DataPipeline",  "MLModel",  "MobileApp",  "DesktopApp",  "WebScraper",  "ChatBot",  "ECommerce",  "Blog",  "Portfolio",  "LandingPage",  "AdminPanel",  ])
+        self._vals = ProjectTemplateValues(self._bldr, self._values)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def values(self) -> "ProjectTemplateValues":
+        return self._vals
+
+
+class ProjectTemplateViewer(ProjectTemplateAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_values(self) -> typing.List[typing.Tuple[str, type_builder.EnumValueViewer]]:
+        return [(name, type_builder.EnumValueViewer(self._bldr.value(name))) for name in self._values]
+    
+
+class ProjectTemplateValues:
+    def __init__(self, enum_bldr: baml_py.EnumBuilder, values: typing.Set[str]):
+        self.__bldr = enum_bldr
+        self.__values = values # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def NextJSDashboard(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("NextJSDashboard"))
+    
+    @property
+    def ReactApp(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("ReactApp"))
+    
+    @property
+    def PythonAPI(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("PythonAPI"))
+    
+    @property
+    def FullStackApp(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("FullStackApp"))
+    
+    @property
+    def DataPipeline(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("DataPipeline"))
+    
+    @property
+    def MLModel(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("MLModel"))
+    
+    @property
+    def MobileApp(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("MobileApp"))
+    
+    @property
+    def DesktopApp(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("DesktopApp"))
+    
+    @property
+    def WebScraper(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("WebScraper"))
+    
+    @property
+    def ChatBot(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("ChatBot"))
+    
+    @property
+    def ECommerce(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("ECommerce"))
+    
+    @property
+    def Blog(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Blog"))
+    
+    @property
+    def Portfolio(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("Portfolio"))
+    
+    @property
+    def LandingPage(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("LandingPage"))
+    
+    @property
+    def AdminPanel(self) -> type_builder.EnumValueViewer:
+        return type_builder.EnumValueViewer(self.__bldr.value("AdminPanel"))
     
     
 
@@ -534,7 +690,7 @@ class ValidationIssueTypeValues:
 
 
 # #########################################################################
-# Generated classes 17
+# Generated classes 18
 # #########################################################################
 
 class AcceptanceCriterionAst:
@@ -1162,6 +1318,85 @@ class PhaseValidationResultProperties:
     @property
     def adjusted_effort_estimate(self) -> type_builder.ClassPropertyViewer:
         return type_builder.ClassPropertyViewer(self.__bldr.property("adjusted_effort_estimate"))
+    
+    
+
+
+class ProjectComplexityAnalysisAst:
+    def __init__(self, tb: type_builder.TypeBuilder):
+        _tb = tb._tb # type: ignore (we know how to use this private attribute)
+        self._bldr = _tb.class_("ProjectComplexityAnalysis")
+        self._properties: typing.Set[str] = set([  "overall_complexity",  "technical_complexity_score",  "integration_complexity_score",  "deployment_complexity_score",  "maintenance_complexity_score",  "key_complexity_factors",  "recommendations",  "estimated_development_time",  "required_expertise_level",  "potential_blockers",  "complexity_justification",  ])
+        self._props = ProjectComplexityAnalysisProperties(self._bldr, self._properties)
+
+    def type(self) -> baml_py.FieldType:
+        return self._bldr.field()
+
+    @property
+    def props(self) -> "ProjectComplexityAnalysisProperties":
+        return self._props
+
+
+class ProjectComplexityAnalysisViewer(ProjectComplexityAnalysisAst):
+    def __init__(self, tb: type_builder.TypeBuilder):
+        super().__init__(tb)
+
+    
+    def list_properties(self) -> typing.List[typing.Tuple[str, type_builder.ClassPropertyViewer]]:
+        return [(name, type_builder.ClassPropertyViewer(self._bldr.property(name))) for name in self._properties]
+    
+
+
+class ProjectComplexityAnalysisProperties:
+    def __init__(self, bldr: baml_py.ClassBuilder, properties: typing.Set[str]):
+        self.__bldr = bldr
+        self.__properties = properties # type: ignore (we know how to use this private attribute) # noqa: F821
+
+    
+    
+    @property
+    def overall_complexity(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("overall_complexity"))
+    
+    @property
+    def technical_complexity_score(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("technical_complexity_score"))
+    
+    @property
+    def integration_complexity_score(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("integration_complexity_score"))
+    
+    @property
+    def deployment_complexity_score(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("deployment_complexity_score"))
+    
+    @property
+    def maintenance_complexity_score(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("maintenance_complexity_score"))
+    
+    @property
+    def key_complexity_factors(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("key_complexity_factors"))
+    
+    @property
+    def recommendations(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("recommendations"))
+    
+    @property
+    def estimated_development_time(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("estimated_development_time"))
+    
+    @property
+    def required_expertise_level(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("required_expertise_level"))
+    
+    @property
+    def potential_blockers(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("potential_blockers"))
+    
+    @property
+    def complexity_justification(self) -> type_builder.ClassPropertyViewer:
+        return type_builder.ClassPropertyViewer(self.__bldr.property("complexity_justification"))
     
     
 
