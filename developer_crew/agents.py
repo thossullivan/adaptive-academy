@@ -14,11 +14,11 @@ from .tools import (
 
 
 class CoderAgent:
-    """AI agent specialized in writing and modifying code using modern AutoGen API."""
-    
+    """AI agent specialized in writing and modifying code using modern AutoGen API. """
+
     def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
         """Initialize the Coder agent.
-        
+
         Args:
             model: Model to use (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4', 'gemini-pro')
                   If not provided, will use the best available model
@@ -31,10 +31,10 @@ class CoderAgent:
                 raise ValueError(
                     "No API keys found. Please set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY"
                 )
-        
+
         self.model = model
         self.model_client = ModelClientFactory.create_client(model, api_key)
-        
+
         system_message = """You are an expert full-stack software developer with deep expertise in modern web technologies. Your role is to write, modify, and improve code based on precise instructions.
 
 Core Responsibilities:
@@ -91,17 +91,17 @@ When you need to use a tool, describe what you're going to do first, then use th
 
         # Create tools first
         self.tools = self._create_tools()
-        
+
         self.agent = AssistantAgent(
             name="Coder",
             model_client=self.model_client,
             system_message=system_message,
             tools=self.tools,
         )
-    
+
     def _create_tools(self):
         """Create file system tools for the agent."""
-        
+
         def read_file_tool(file_path: str) -> str:
             """Read a file and return its contents."""
             result = read_file(file_path)
@@ -109,7 +109,7 @@ When you need to use a tool, describe what you're going to do first, then use th
                 return f"Successfully read {file_path}:\n\n{result['content']}"
             else:
                 return f"Error reading {file_path}: {result['error']}"
-        
+
         def write_file_tool(file_path: str, content: str) -> str:
             """Write content to a file."""
             result = write_file(file_path, content)
@@ -117,7 +117,7 @@ When you need to use a tool, describe what you're going to do first, then use th
                 return f"Successfully wrote to {file_path}: {result['message']}"
             else:
                 return f"Error writing to {file_path}: {result['error']}"
-        
+
         def edit_file_tool(file_path: str, old_content: str, new_content: str) -> str:
             """Edit a file by replacing old_content with new_content."""
             result = edit_file(file_path, old_content, new_content)
@@ -125,7 +125,7 @@ When you need to use a tool, describe what you're going to do first, then use th
                 return f"Successfully edited {file_path}: {result['message']}"
             else:
                 return f"Error editing {file_path}: {result['error']}"
-        
+
         def list_files_tool(directory_path: str, pattern: str = "*") -> str:
             """List files in a directory."""
             result = list_files(directory_path, pattern)
@@ -134,7 +134,7 @@ When you need to use a tool, describe what you're going to do first, then use th
                 return f"Files in {directory_path}:\n{files_list}"
             else:
                 return f"Error listing files in {directory_path}: {result['error']}"
-        
+
         def get_project_structure_tool(root_path: str = ".", max_depth: int = 3) -> str:
             """Get an overview of the project structure."""
             result = get_project_structure(root_path, max_depth)
@@ -147,16 +147,16 @@ When you need to use a tool, describe what you're going to do first, then use th
                 return structure_str
             else:
                 return f"Error analyzing project structure: {result['error']}"
-        
+
         # Return list of tools
         return [read_file_tool, write_file_tool, edit_file_tool, list_files_tool, get_project_structure_tool]
-    
+
     async def run(self, task: str) -> str:
         """Run a coding task.
-        
+
         Args:
             task: Description of the coding task to perform
-            
+
         Returns:
             The agent's response as a string
         """
@@ -172,7 +172,7 @@ When you need to use a tool, describe what you're going to do first, then use th
             return str(response)
         except Exception as e:
             return f"Error executing task: {str(e)}"
-    
+
     async def close(self):
         """Close the model client connection."""
         await self.model_client.close()
@@ -180,10 +180,10 @@ When you need to use a tool, describe what you're going to do first, then use th
 
 class CodeReviewerAgent:
     """AI agent specialized in reviewing code quality and suggesting improvements."""
-    
+
     def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
         """Initialize the Code Reviewer agent.
-        
+
         Args:
             model: Model to use (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4', 'gemini-pro')
                   If not provided, will use the best available model
@@ -196,10 +196,10 @@ class CodeReviewerAgent:
                 raise ValueError(
                     "No API keys found. Please set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY"
                 )
-        
+
         self.model = model
         self.model_client = ModelClientFactory.create_client(model, api_key)
-        
+
         system_message = """You are an expert code reviewer with deep knowledge of software engineering best practices. Your role is to review code for quality, correctness, and maintainability.
 
 Core Responsibilities:
@@ -234,17 +234,17 @@ Focus on providing constructive, actionable feedback that helps improve code qua
 
         # Create tools first
         self.tools = self._create_review_tools()
-        
+
         self.agent = AssistantAgent(
             name="CodeReviewer",
             model_client=self.model_client,
             system_message=system_message,
             tools=self.tools,
         )
-    
+
     def _create_review_tools(self):
         """Create read-only tools for code review."""
-        
+
         def read_file_tool(file_path: str) -> str:
             """Read a file and return its contents."""
             result = read_file(file_path)
@@ -252,7 +252,7 @@ Focus on providing constructive, actionable feedback that helps improve code qua
                 return f"Content of {file_path}:\n\n{result['content']}"
             else:
                 return f"Error reading {file_path}: {result['error']}"
-        
+
         def list_files_tool(directory_path: str, pattern: str = "*") -> str:
             """List files in a directory."""
             result = list_files(directory_path, pattern)
@@ -261,7 +261,7 @@ Focus on providing constructive, actionable feedback that helps improve code qua
                 return f"Files in {directory_path}:\n{files_list}"
             else:
                 return f"Error listing files in {directory_path}: {result['error']}"
-        
+
         def get_project_structure_tool(root_path: str = ".", max_depth: int = 3) -> str:
             """Get an overview of the project structure."""
             result = get_project_structure(root_path, max_depth)
@@ -274,16 +274,16 @@ Focus on providing constructive, actionable feedback that helps improve code qua
                 return structure_str
             else:
                 return f"Error analyzing project structure: {result['error']}"
-        
+
         # Return list of read-only tools
         return [read_file_tool, list_files_tool, get_project_structure_tool]
-    
+
     async def review(self, file_path: str) -> str:
         """Review a specific file.
-        
+
         Args:
             file_path: Path to the file to review
-            
+
         Returns:
             The review results as a string
         """
@@ -311,7 +311,7 @@ Start by reading the file, then provide your detailed review."""
             return str(response)
         except Exception as e:
             return f"Error during code review: {str(e)}"
-    
+
     async def close(self):
         """Close the model client connection."""
         await self.model_client.close()
@@ -319,10 +319,10 @@ Start by reading the file, then provide your detailed review."""
 
 class QA_TesterAgent:
     """AI agent specialized in testing and validating code through execution."""
-    
+
     def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
         """Initialize the QA Tester agent.
-        
+
         Args:
             model: Model to use (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4', 'gemini-pro')
                   If not provided, will use the best available model
@@ -335,10 +335,10 @@ class QA_TesterAgent:
                 raise ValueError(
                     "No API keys found. Please set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY"
                 )
-        
+
         self.model = model
         self.model_client = ModelClientFactory.create_client(model, api_key)
-        
+
         system_message = """You are an expert QA engineer and testing specialist. Your role is to validate code through execution, testing, and dynamic analysis.
 
 Core Responsibilities:
@@ -384,29 +384,29 @@ Security Note: Only execute safe, approved commands. Never run commands that cou
 
         # Create tools first
         self.tools = self._create_testing_tools()
-        
+
         self.agent = AssistantAgent(
             name="QA_Tester",
             model_client=self.model_client,
             system_message=system_message,
             tools=self.tools,
         )
-    
+
     def _create_testing_tools(self):
         """Create testing and execution tools for the agent."""
-        
+
         def execute_command_tool(
-            command: str, 
-            working_dir: Optional[str] = None, 
+            command: str,
+            working_dir: Optional[str] = None,
             timeout: int = 30
         ) -> str:
             """Execute a shell command safely."""
             result = execute_command(command, working_dir, timeout)
-            
+
             output = f"Command: {result['command']}\n"
             output += f"Return Code: {result['return_code']}\n"
             output += f"Working Directory: {result.get('working_dir', 'N/A')}\n"
-            
+
             if result["success"]:
                 output += f"✅ SUCCESS\nOutput:\n{result['stdout']}"
                 if result["stderr"]:
@@ -415,11 +415,11 @@ Security Note: Only execute safe, approved commands. Never run commands that cou
                 output += f"❌ FAILED\nError:\n{result['stderr']}"
                 if result["stdout"]:
                     output += f"\nOutput:\n{result['stdout']}"
-            
+
             return output
-        
+
         def run_python_script_tool(
-            script_path: str, 
+            script_path: str,
             args: Optional[str] = None,
             working_dir: Optional[str] = None,
             timeout: int = 30
@@ -427,21 +427,21 @@ Security Note: Only execute safe, approved commands. Never run commands that cou
             """Run a Python script with optional arguments."""
             args_list = args.split() if args else None
             result = run_python_script(script_path, args_list, working_dir, timeout)
-            
+
             output = f"Python Script: {script_path}\n"
             if args:
                 output += f"Arguments: {args}\n"
             output += f"Return Code: {result['return_code']}\n"
-            
+
             if result["success"]:
                 output += f"✅ SUCCESS\nOutput:\n{result['stdout']}"
             else:
                 output += f"❌ FAILED\nError:\n{result['stderr']}"
                 if result["stdout"]:
                     output += f"\nOutput:\n{result['stdout']}"
-            
+
             return output
-        
+
         def run_tests_tool(
             test_path: Optional[str] = None,
             test_framework: str = "pytest",
@@ -450,20 +450,20 @@ Security Note: Only execute safe, approved commands. Never run commands that cou
         ) -> str:
             """Run tests using specified framework."""
             result = run_tests(test_path, test_framework, working_dir, timeout)
-            
+
             output = f"Test Framework: {test_framework}\n"
             output += f"Test Path: {test_path or 'auto-detect'}\n"
             output += f"Return Code: {result['return_code']}\n"
-            
+
             if result["success"]:
                 output += f"✅ TESTS PASSED\nOutput:\n{result['stdout']}"
             else:
                 output += f"❌ TESTS FAILED\nError:\n{result['stderr']}"
                 if result["stdout"]:
                     output += f"\nOutput:\n{result['stdout']}"
-            
+
             return output
-        
+
         def check_code_quality_tool(
             file_or_dir: str,
             tools: Optional[str] = None,
@@ -474,13 +474,13 @@ Security Note: Only execute safe, approved commands. Never run commands that cou
             tools_list = tools.split(",") if tools else None
             if tools_list:
                 tools_list = [t.strip() for t in tools_list]
-                
+
             result = check_code_quality(file_or_dir, tools_list, working_dir, timeout)
-            
+
             output = f"Code Quality Check: {file_or_dir}\n"
             output += f"Tools: {', '.join(result.get('summary', []))}\n"
             output += f"Overall Status: {'✅ PASSED' if result['overall_success'] else '❌ FAILED'}\n\n"
-            
+
             for tool, tool_result in result.get('tool_results', {}).items():
                 output += f"\n--- {tool.upper()} ---\n"
                 if tool_result.get("success"):
@@ -493,9 +493,9 @@ Security Note: Only execute safe, approved commands. Never run commands that cou
                         output += f"Error: {tool_result['error']}\n"
                     if tool_result.get("stderr"):
                         output += f"Issues: {tool_result['stderr']}\n"
-            
+
             return output
-        
+
         def read_file_tool(file_path: str) -> str:
             """Read a file to understand test requirements."""
             result = read_file(file_path)
@@ -503,7 +503,7 @@ Security Note: Only execute safe, approved commands. Never run commands that cou
                 return f"Content of {file_path}:\n\n{result['content']}"
             else:
                 return f"Error reading {file_path}: {result['error']}"
-        
+
         def list_files_tool(directory_path: str, pattern: str = "*") -> str:
             """List files to find tests and code to analyze."""
             result = list_files(directory_path, pattern)
@@ -512,24 +512,24 @@ Security Note: Only execute safe, approved commands. Never run commands that cou
                 return f"Files in {directory_path}:\n{files_list}"
             else:
                 return f"Error listing files in {directory_path}: {result['error']}"
-        
+
         # Return list of all tools
         return [
-            execute_command_tool, 
-            run_python_script_tool, 
-            run_tests_tool, 
-            check_code_quality_tool, 
-            read_file_tool, 
+            execute_command_tool,
+            run_python_script_tool,
+            run_tests_tool,
+            check_code_quality_tool,
+            read_file_tool,
             list_files_tool
         ]
-    
+
     async def test(self, target: str, working_dir: Optional[str] = None) -> str:
         """Test a file, directory, or specific functionality.
-        
+
         Args:
             target: File, directory, or description of what to test
             working_dir: Directory to run tests in
-            
+
         Returns:
             The test results and recommendations
         """
@@ -565,7 +565,7 @@ Start by analyzing what type of testing is most appropriate for the target."""
             return str(response)
         except Exception as e:
             return f"Error during testing: {str(e)}"
-    
+
     async def close(self):
         """Close the model client connection."""
         await self.model_client.close()
