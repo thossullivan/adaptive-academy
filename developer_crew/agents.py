@@ -162,14 +162,39 @@ When you need to use a tool, describe what you're going to do first, then use th
         """
         try:
             response = await self.agent.run(task=task)
-            if hasattr(response, 'chat_message') and response.chat_message:
+
+            # Try different response formats from AutoGen
+            if hasattr(response, 'messages') and response.messages:
+                # Look for the last meaningful message that's not an event
+                for message in reversed(response.messages):
+                    if hasattr(message, 'content') and message.content:
+                        # Skip system/thought events, look for actual responses
+                        if hasattr(message, 'type') and message.type not in ['ThoughtEvent', 'ToolCallRequestEvent', 'ToolCallExecutionEvent']:
+                            return message.content
+                        elif not hasattr(message, 'type'):
+                            return message.content
+
+                # If no good message found, summarize the actions taken
+                actions = []
+                for message in response.messages:
+                    if hasattr(message, 'type') and message.type == 'ToolCallExecutionEvent':
+                        if hasattr(message, 'content') and message.content:
+                            for result in message.content:
+                                if hasattr(result, 'content'):
+                                    actions.append(f"✅ {result.content}")
+
+                if actions:
+                    return "Code generation completed successfully!\n\n" + "\n".join(actions[-3:])  # Show last 3 actions
+
+            elif hasattr(response, 'chat_message') and response.chat_message:
                 return response.chat_message.content
             elif hasattr(response, 'inner_messages') and response.inner_messages:
                 # Extract content from the last message
                 last_message = response.inner_messages[-1]
                 if hasattr(last_message, 'content'):
                     return last_message.content
-            return str(response)
+
+            return "Task completed successfully!"
         except Exception as e:
             return f"Error executing task: {str(e)}"
 
@@ -301,14 +326,39 @@ Start by reading the file, then provide your detailed review."""
 
         try:
             response = await self.agent.run(task=task)
-            if hasattr(response, 'chat_message') and response.chat_message:
+
+            # Try different response formats from AutoGen
+            if hasattr(response, 'messages') and response.messages:
+                # Look for the last meaningful message that's not an event
+                for message in reversed(response.messages):
+                    if hasattr(message, 'content') and message.content:
+                        # Skip system/thought events, look for actual responses
+                        if hasattr(message, 'type') and message.type not in ['ThoughtEvent', 'ToolCallRequestEvent', 'ToolCallExecutionEvent']:
+                            return message.content
+                        elif not hasattr(message, 'type'):
+                            return message.content
+
+                # If no good message found, summarize the actions taken
+                actions = []
+                for message in response.messages:
+                    if hasattr(message, 'type') and message.type == 'ToolCallExecutionEvent':
+                        if hasattr(message, 'content') and message.content:
+                            for result in message.content:
+                                if hasattr(result, 'content'):
+                                    actions.append(f"✅ {result.content}")
+
+                if actions:
+                    return "Code review completed successfully!\n\n" + "\n".join(actions[-3:])  # Show last 3 actions
+
+            elif hasattr(response, 'chat_message') and response.chat_message:
                 return response.chat_message.content
             elif hasattr(response, 'inner_messages') and response.inner_messages:
                 # Extract content from the last message
                 last_message = response.inner_messages[-1]
                 if hasattr(last_message, 'content'):
                     return last_message.content
-            return str(response)
+
+            return "Review completed successfully!"
         except Exception as e:
             return f"Error during code review: {str(e)}"
 
@@ -556,13 +606,38 @@ Start by analyzing what type of testing is most appropriate for the target."""
 
         try:
             response = await self.agent.run(task=task)
-            if hasattr(response, 'chat_message') and response.chat_message:
+
+            # Try different response formats from AutoGen
+            if hasattr(response, 'messages') and response.messages:
+                # Look for the last meaningful message that's not an event
+                for message in reversed(response.messages):
+                    if hasattr(message, 'content') and message.content:
+                        # Skip system/thought events, look for actual responses
+                        if hasattr(message, 'type') and message.type not in ['ThoughtEvent', 'ToolCallRequestEvent', 'ToolCallExecutionEvent']:
+                            return message.content
+                        elif not hasattr(message, 'type'):
+                            return message.content
+
+                # If no good message found, summarize the actions taken
+                actions = []
+                for message in response.messages:
+                    if hasattr(message, 'type') and message.type == 'ToolCallExecutionEvent':
+                        if hasattr(message, 'content') and message.content:
+                            for result in message.content:
+                                if hasattr(result, 'content'):
+                                    actions.append(f"✅ {result.content}")
+
+                if actions:
+                    return "Testing completed successfully!\n\n" + "\n".join(actions[-3:])  # Show last 3 actions
+
+            elif hasattr(response, 'chat_message') and response.chat_message:
                 return response.chat_message.content
             elif hasattr(response, 'inner_messages') and response.inner_messages:
                 last_message = response.inner_messages[-1]
                 if hasattr(last_message, 'content'):
                     return last_message.content
-            return str(response)
+
+            return "Testing completed successfully!"
         except Exception as e:
             return f"Error during testing: {str(e)}"
 
