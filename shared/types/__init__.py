@@ -1,0 +1,1 @@
+"""Shared TypeScript and Python type definitions."""

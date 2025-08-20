@@ -1,0 +1,1 @@
+"""Adaptive Academy backend package."""
