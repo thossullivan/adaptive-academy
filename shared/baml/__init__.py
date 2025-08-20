@@ -1,1 +1,0 @@
-"""BAML schemas and configurations for AI agents."""

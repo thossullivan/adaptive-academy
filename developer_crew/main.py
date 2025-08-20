@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from .agents import CoderAgent, CodeReviewerAgent, QA_TesterAgent, ProjectManagerAgent
 from .model_clients import ModelClientFactory, get_default_model
+from .baml_project_manager_simple import SimpleBAMLProjectManager
 
 # Load environment variables
 load_dotenv()
@@ -643,6 +644,120 @@ def plan_project(
 
     # Run the async task
     asyncio.run(create_project_plan())
+
+
+@app.command("plan-baml")
+def plan_project_baml(
+    task: str = typer.Argument(..., help="Development task to create a BAML-powered plan for"),
+    working_dir: str = typer.Option(".", help="Working directory to analyze for context"),
+    output_file: str = typer.Option("", help="Optional file to save the project plan")
+):
+    """Create a project plan using BAML structured outputs (EXPERIMENTAL)."""
+
+    if not check_api_key():
+        raise typer.Exit(1)
+
+    console.print(Panel(
+        f"🧪 Initializing BAML Project Manager (EXPERIMENTAL)\n"
+        f"📝 Task: {task}\n"
+        f"📁 Working Directory: {working_dir}",
+        title="Developer Crew - BAML Project Planning",
+        border_style="cyan"
+    ))
+
+    async def create_baml_project_plan():
+        pm = None
+
+        try:
+            console.print("🔍 Analyzing project with BAML structured outputs...")
+
+            pm = SimpleBAMLProjectManager()
+
+            # Create the project plan using BAML
+            plan = await pm.create_project_plan(task, working_dir)
+
+            if plan.get("error"):
+                console.print(Panel(
+                    f"⚠️ BAML Error (using fallback): {plan['error']}",
+                    title="BAML Integration Warning",
+                    border_style="yellow"
+                ))
+
+            # Display the plan
+            plan_display = f"📋 **PROJECT**: {plan.get('project_summary', 'Development Task')}\n\n"
+
+            if plan.get('technology_stack'):
+                plan_display += f"🛠️ **TECH STACK**: {', '.join(plan['technology_stack'])}\n\n"
+
+            plan_display += "📅 **EXECUTION PHASES**:\n\n"
+
+            for phase in plan.get('phases', []):
+                plan_display += f"**Phase {phase.get('phase_number', 1)}: {phase.get('phase_name', 'Unnamed Phase')}**\n"
+                plan_display += f"└ {phase.get('description', 'No description')}\n"
+
+                if phase.get('deliverables'):
+                    deliverable_names = [d.get('name', d) if isinstance(d, dict) else d for d in phase['deliverables']]
+                    plan_display += f"├ Deliverables: {', '.join(deliverable_names)}\n"
+
+                if phase.get('estimated_effort'):
+                    plan_display += f"├ Effort: {phase['estimated_effort']}\n"
+
+                if phase.get('git_strategy'):
+                    plan_display += f"├ Git: {phase['git_strategy']}\n"
+
+                plan_display += "\n"
+
+            plan_display += f"⚡ **TOTAL EFFORT**: {plan.get('total_estimated_effort', 'Unknown')}\n"
+            plan_display += f"🎯 **SUCCESS METRICS**: {', '.join(plan.get('success_metrics', ['Project completion']))}\n"
+            plan_display += f"🔧 **BAML POWERED**: {'✅ Yes' if plan.get('baml_powered') else '❌ Fallback used'}"
+
+            console.print(Panel(
+                plan_display,
+                title="✅ BAML Project Plan Created",
+                border_style="green"
+            ))
+
+            # Save to file if requested
+            if output_file:
+                import json
+                try:
+                    with open(output_file, 'w') as f:
+                        json.dump(plan, f, indent=2)
+                    console.print(f"📄 BAML plan saved to: {output_file}")
+                except Exception as e:
+                    console.print(f"❌ Error saving plan: {str(e)}")
+
+            # Show next steps
+            console.print(Panel(
+                "🎯 **BAML INTEGRATION STATUS**:\n"
+                f"• Structured outputs: {'✅ Working' if plan.get('baml_powered') else '❌ Failed, used fallback'}\n"
+                f"• Type safety: {'✅ Enabled' if plan.get('baml_powered') else '⚠️ Limited'}\n"
+                f"• Validation: {'✅ Automatic' if plan.get('baml_powered') else '⚠️ Manual'}\n\n"
+                "💡 **NEXT STEPS**:\n"
+                "1. Compare with regular `plan` command output\n"
+                "2. Use `workflow` command to execute phases\n"
+                "3. Report any BAML integration issues\n\n"
+                f"🚀 **EXECUTE FIRST PHASE**:\n"
+                f"`uv run python -m developer_crew.main workflow \"Phase 1\" --working-dir {working_dir}`",
+                title="BAML Integration Test Complete",
+                border_style="blue"
+            ))
+
+        except Exception as e:
+            console.print(Panel(
+                f"❌ BAML Test Error: {str(e)}",
+                title="BAML Integration Error",
+                border_style="red"
+            ))
+            raise typer.Exit(1)
+
+        finally:
+            # Clean up
+            if pm:
+                await pm.close()
+
+    # Run the async task
+    asyncio.run(create_baml_project_plan())
 
 
 @app.command("setup-test")

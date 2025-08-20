@@ -28,6 +28,12 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="AdaptCurriculum", llm_response=llm_response, mode="request")
         return typing.cast(types.Curriculum, result)
 
+    def AnalyzeProjectComplexity(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.ProjectComplexityAnalysis:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="AnalyzeProjectComplexity", llm_response=llm_response, mode="request")
+        return typing.cast(types.ProjectComplexityAnalysis, result)
+
     def AnswerQuestion(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> types.Explanation:
@@ -64,6 +70,18 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateCurriculum", llm_response=llm_response, mode="request")
         return typing.cast(types.Curriculum, result)
 
+    def GenerateProjectPlan(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.ProjectPlan:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateProjectPlan", llm_response=llm_response, mode="request")
+        return typing.cast(types.ProjectPlan, result)
+
+    def GetProjectTemplate(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.ProjectPlan:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="GetProjectTemplate", llm_response=llm_response, mode="request")
+        return typing.cast(types.ProjectPlan, result)
+
     def IdentifyLearningGaps(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> typing.List[str]:
@@ -82,6 +100,12 @@ class LlmResponseParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="SequenceTopics", llm_response=llm_response, mode="request")
         return typing.cast(typing.List[str], result)
 
+    def ValidateProjectPhase(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> types.PhaseValidationResult:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateProjectPhase", llm_response=llm_response, mode="request")
+        return typing.cast(types.PhaseValidationResult, result)
+
     
 
 class LlmStreamParser:
@@ -95,6 +119,12 @@ class LlmStreamParser:
     ) -> stream_types.Curriculum:
         result = self.__options.merge_options(baml_options).parse_response(function_name="AdaptCurriculum", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.Curriculum, result)
+
+    def AnalyzeProjectComplexity(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.ProjectComplexityAnalysis:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="AnalyzeProjectComplexity", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.ProjectComplexityAnalysis, result)
 
     def AnswerQuestion(
         self, llm_response: str, baml_options: BamlCallOptions = {},
@@ -132,6 +162,18 @@ class LlmStreamParser:
         result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateCurriculum", llm_response=llm_response, mode="stream")
         return typing.cast(stream_types.Curriculum, result)
 
+    def GenerateProjectPlan(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.ProjectPlan:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="GenerateProjectPlan", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.ProjectPlan, result)
+
+    def GetProjectTemplate(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.ProjectPlan:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="GetProjectTemplate", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.ProjectPlan, result)
+
     def IdentifyLearningGaps(
         self, llm_response: str, baml_options: BamlCallOptions = {},
     ) -> typing.List[str]:
@@ -149,5 +191,11 @@ class LlmStreamParser:
     ) -> typing.List[str]:
         result = self.__options.merge_options(baml_options).parse_response(function_name="SequenceTopics", llm_response=llm_response, mode="stream")
         return typing.cast(typing.List[str], result)
+
+    def ValidateProjectPhase(
+        self, llm_response: str, baml_options: BamlCallOptions = {},
+    ) -> stream_types.PhaseValidationResult:
+        result = self.__options.merge_options(baml_options).parse_response(function_name="ValidateProjectPhase", llm_response=llm_response, mode="stream")
+        return typing.cast(stream_types.PhaseValidationResult, result)
 
     
