@@ -1,10 +1,12 @@
 """FastAPI application for Adaptive Academy backend."""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
 import os
+import json
+import asyncio
 from dotenv import load_dotenv
 
 from .agents import TutorAgent, CurriculumDirector, AssessmentCoach
@@ -31,6 +33,33 @@ app.add_middleware(
 tutor_agent = None
 curriculum_director = None
 assessment_coach = None
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        self.user_sessions: Dict[str, WebSocket] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: str):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        self.user_sessions[user_id] = websocket
+
+    def disconnect(self, websocket: WebSocket, user_id: str):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        if user_id in self.user_sessions:
+            del self.user_sessions[user_id]
+
+    async def send_personal_message(self, message: str, user_id: str):
+        if user_id in self.user_sessions:
+            await self.user_sessions[user_id].send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            await connection.send_text(message)
+
+manager = ConnectionManager()
 
 
 def get_tutor_agent() -> TutorAgent:
@@ -252,6 +281,192 @@ async def get_agents_status():
         "api_key_configured": os.getenv("OPENAI_API_KEY") is not None,
         "status": "ready"
     }
+
+
+# WebSocket endpoints for real-time agent communication
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    """WebSocket endpoint for real-time agent communication."""
+    await manager.connect(websocket, user_id)
+    
+    try:
+        # Send welcome message
+        await manager.send_personal_message(
+            json.dumps({
+                "type": "connection",
+                "message": f"Connected to Adaptive Academy learning session",
+                "user_id": user_id,
+                "timestamp": asyncio.get_event_loop().time()
+            }),
+            user_id
+        )
+        
+        while True:
+            # Wait for message from client
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                await handle_websocket_message(message, user_id)
+            except json.JSONDecodeError:
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "error",
+                        "message": "Invalid JSON format"
+                    }),
+                    user_id
+                )
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, user_id)
+
+
+async def handle_websocket_message(message: Dict[str, Any], user_id: str):
+    """Handle incoming WebSocket messages from the client."""
+    message_type = message.get("type")
+    
+    try:
+        if message_type == "tutor_question":
+            # Handle real-time tutoring questions
+            question = message.get("question", "")
+            context = message.get("context", "")
+            user_level = message.get("user_level", "intermediate")
+            
+            if not os.getenv("OPENAI_API_KEY"):
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "error",
+                        "message": "AI agents not configured - missing API key"
+                    }),
+                    user_id
+                )
+                return
+            
+            # Send "thinking" message
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "agent_thinking",
+                    "agent": "TutorAgent",
+                    "message": "Let me think about that question..."
+                }),
+                user_id
+            )
+            
+            # Get tutor response
+            tutor = get_tutor_agent()
+            answer = await tutor.answer_student_question(question, context, user_level)
+            
+            # Send response
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "tutor_response",
+                    "agent": "TutorAgent",
+                    "question": question,
+                    "answer": answer,
+                    "timestamp": asyncio.get_event_loop().time()
+                }),
+                user_id
+            )
+            
+        elif message_type == "concept_explanation":
+            # Handle concept explanation requests
+            concept = message.get("concept", "")
+            user_context = message.get("user_context", {})
+            
+            if not os.getenv("OPENAI_API_KEY"):
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "error", 
+                        "message": "AI agents not configured - missing API key"
+                    }),
+                    user_id
+                )
+                return
+            
+            # Send "thinking" message
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "agent_thinking",
+                    "agent": "TutorAgent",
+                    "message": f"Let me explain {concept} for you..."
+                }),
+                user_id
+            )
+            
+            # Get explanation
+            tutor = get_tutor_agent()
+            explanation = await tutor.teach_concept(concept, user_context)
+            
+            # Send response
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "concept_explanation",
+                    "agent": "TutorAgent",
+                    "concept": concept,
+                    "explanation": explanation,
+                    "timestamp": asyncio.get_event_loop().time()
+                }),
+                user_id
+            )
+            
+        elif message_type == "curriculum_request":
+            # Handle curriculum planning requests
+            learning_goal = message.get("learning_goal", "")
+            student_profile = message.get("student_profile", {})
+            
+            if not os.getenv("OPENAI_API_KEY"):
+                await manager.send_personal_message(
+                    json.dumps({
+                        "type": "error",
+                        "message": "AI agents not configured - missing API key"
+                    }),
+                    user_id
+                )
+                return
+            
+            # Send "thinking" message
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "agent_thinking",
+                    "agent": "CurriculumDirector",
+                    "message": "Creating your personalized learning path..."
+                }),
+                user_id
+            )
+            
+            # Get curriculum
+            director = get_curriculum_director()
+            curriculum = await director.create_personalized_curriculum(student_profile, learning_goal)
+            
+            # Send response
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "curriculum_response",
+                    "agent": "CurriculumDirector",
+                    "learning_goal": learning_goal,
+                    "curriculum": curriculum,
+                    "timestamp": asyncio.get_event_loop().time()
+                }),
+                user_id
+            )
+            
+        else:
+            # Unknown message type
+            await manager.send_personal_message(
+                json.dumps({
+                    "type": "error",
+                    "message": f"Unknown message type: {message_type}"
+                }),
+                user_id
+            )
+            
+    except Exception as e:
+        # Handle errors gracefully
+        await manager.send_personal_message(
+            json.dumps({
+                "type": "error",
+                "message": f"Error processing request: {str(e)}"
+            }),
+            user_id
+        )
 
 
 if __name__ == "__main__":
