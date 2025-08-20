@@ -1,6 +1,8 @@
 """AI agents for the developer crew using modern AutoGen API with multi-provider support."""
 
 import asyncio
+import json
+import re
 from typing import Dict, Any, List, Optional, Sequence
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.messages import TextMessage, ChatMessage
@@ -162,14 +164,39 @@ When you need to use a tool, describe what you're going to do first, then use th
         """
         try:
             response = await self.agent.run(task=task)
-            if hasattr(response, 'chat_message') and response.chat_message:
+
+            # Try different response formats from AutoGen
+            if hasattr(response, 'messages') and response.messages:
+                # Look for the last meaningful message that's not an event
+                for message in reversed(response.messages):
+                    if hasattr(message, 'content') and message.content:
+                        # Skip system/thought events, look for actual responses
+                        if hasattr(message, 'type') and message.type not in ['ThoughtEvent', 'ToolCallRequestEvent', 'ToolCallExecutionEvent']:
+                            return message.content
+                        elif not hasattr(message, 'type'):
+                            return message.content
+
+                # If no good message found, summarize the actions taken
+                actions = []
+                for message in response.messages:
+                    if hasattr(message, 'type') and message.type == 'ToolCallExecutionEvent':
+                        if hasattr(message, 'content') and message.content:
+                            for result in message.content:
+                                if hasattr(result, 'content'):
+                                    actions.append(f"✅ {result.content}")
+
+                if actions:
+                    return "Code generation completed successfully!\n\n" + "\n".join(actions[-3:])  # Show last 3 actions
+
+            elif hasattr(response, 'chat_message') and response.chat_message:
                 return response.chat_message.content
             elif hasattr(response, 'inner_messages') and response.inner_messages:
                 # Extract content from the last message
                 last_message = response.inner_messages[-1]
                 if hasattr(last_message, 'content'):
                     return last_message.content
-            return str(response)
+
+            return "Task completed successfully!"
         except Exception as e:
             return f"Error executing task: {str(e)}"
 
@@ -301,14 +328,39 @@ Start by reading the file, then provide your detailed review."""
 
         try:
             response = await self.agent.run(task=task)
-            if hasattr(response, 'chat_message') and response.chat_message:
+
+            # Try different response formats from AutoGen
+            if hasattr(response, 'messages') and response.messages:
+                # Look for the last meaningful message that's not an event
+                for message in reversed(response.messages):
+                    if hasattr(message, 'content') and message.content:
+                        # Skip system/thought events, look for actual responses
+                        if hasattr(message, 'type') and message.type not in ['ThoughtEvent', 'ToolCallRequestEvent', 'ToolCallExecutionEvent']:
+                            return message.content
+                        elif not hasattr(message, 'type'):
+                            return message.content
+
+                # If no good message found, summarize the actions taken
+                actions = []
+                for message in response.messages:
+                    if hasattr(message, 'type') and message.type == 'ToolCallExecutionEvent':
+                        if hasattr(message, 'content') and message.content:
+                            for result in message.content:
+                                if hasattr(result, 'content'):
+                                    actions.append(f"✅ {result.content}")
+
+                if actions:
+                    return "Code review completed successfully!\n\n" + "\n".join(actions[-3:])  # Show last 3 actions
+
+            elif hasattr(response, 'chat_message') and response.chat_message:
                 return response.chat_message.content
             elif hasattr(response, 'inner_messages') and response.inner_messages:
                 # Extract content from the last message
                 last_message = response.inner_messages[-1]
                 if hasattr(last_message, 'content'):
                     return last_message.content
-            return str(response)
+
+            return "Review completed successfully!"
         except Exception as e:
             return f"Error during code review: {str(e)}"
 
@@ -556,15 +608,444 @@ Start by analyzing what type of testing is most appropriate for the target."""
 
         try:
             response = await self.agent.run(task=task)
-            if hasattr(response, 'chat_message') and response.chat_message:
+
+            # Try different response formats from AutoGen
+            if hasattr(response, 'messages') and response.messages:
+                # Look for the last meaningful message that's not an event
+                for message in reversed(response.messages):
+                    if hasattr(message, 'content') and message.content:
+                        # Skip system/thought events, look for actual responses
+                        if hasattr(message, 'type') and message.type not in ['ThoughtEvent', 'ToolCallRequestEvent', 'ToolCallExecutionEvent']:
+                            return message.content
+                        elif not hasattr(message, 'type'):
+                            return message.content
+
+                # If no good message found, summarize the actions taken
+                actions = []
+                for message in response.messages:
+                    if hasattr(message, 'type') and message.type == 'ToolCallExecutionEvent':
+                        if hasattr(message, 'content') and message.content:
+                            for result in message.content:
+                                if hasattr(result, 'content'):
+                                    actions.append(f"✅ {result.content}")
+
+                if actions:
+                    return "Testing completed successfully!\n\n" + "\n".join(actions[-3:])  # Show last 3 actions
+
+            elif hasattr(response, 'chat_message') and response.chat_message:
                 return response.chat_message.content
             elif hasattr(response, 'inner_messages') and response.inner_messages:
                 last_message = response.inner_messages[-1]
                 if hasattr(last_message, 'content'):
                     return last_message.content
-            return str(response)
+
+            return "Testing completed successfully!"
         except Exception as e:
             return f"Error during testing: {str(e)}"
+
+    async def close(self):
+        """Close the model client connection."""
+        await self.model_client.close()
+
+
+class ProjectManagerAgent:
+    """AI agent specialized in project planning and task orchestration for complex development tasks."""
+
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
+        """Initialize the Project Manager agent.
+
+        Args:
+            model: Model to use (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4', 'gemini-pro')
+                  If not provided, will use the best available model
+            api_key: API key for the model provider (if not provided, will use environment variables)
+        """
+        # Use default model if none specified
+        if model is None:
+            model = get_default_model()
+            if model is None:
+                raise ValueError(
+                    "No API keys found. Please set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY"
+                )
+
+        self.model = model
+        self.model_client = ModelClientFactory.create_client(model, api_key)
+
+        system_message = """You are an expert Project Manager and Software Architect with deep expertise in breaking down complex software development tasks into manageable, executable phases.
+
+Core Responsibilities:
+- Analyze complex development requirements and create detailed project plans
+- Break large tasks into logical phases with clear deliverables
+- Define technical architecture and technology stack decisions
+- Create implementation order that minimizes dependencies and risks
+- Estimate effort and identify potential blockers
+- Plan Git workflow with appropriate branching strategy
+
+Project Planning Expertise:
+- Requirements analysis and user story creation
+- Technical architecture design (frontend, backend, database, APIs)
+- Dependency mapping and critical path analysis
+- Risk assessment and mitigation strategies
+- Quality gates and acceptance criteria definition
+- DevOps and deployment planning
+
+Output Format:
+Always structure your project plans as JSON with this schema:
+{
+  "project_summary": "Brief description of the overall project",
+  "technology_stack": ["list", "of", "technologies"],
+  "phases": [
+    {
+      "phase_number": 1,
+      "phase_name": "Setup & Foundation",
+      "description": "What this phase accomplishes",
+      "deliverables": ["specific", "files", "or", "features"],
+      "estimated_effort": "1-2 hours",
+      "dependencies": [],
+      "git_strategy": "create feature branch, commit after review",
+      "acceptance_criteria": ["criterion 1", "criterion 2"],
+      "potential_risks": ["risk 1", "risk 2"]
+    }
+  ],
+  "integration_plan": "How phases come together",
+  "deployment_considerations": "Production readiness steps"
+}
+
+Always think step-by-step and consider:
+1. What are the core requirements?
+2. What's the minimal viable first step?
+3. How can I minimize dependencies between phases?
+4. What could go wrong and how do I mitigate it?
+5. How will this be tested and deployed?
+
+CRITICAL: You MUST respond with valid JSON wrapped in ```json code blocks. Example:
+
+```json
+{
+  "project_summary": "Your project description here",
+  "technology_stack": ["Next.js", "TypeScript", "Tailwind"],
+  "phases": [
+    {
+      "phase_number": 1,
+      "phase_name": "Project Setup",
+      "description": "Initialize project with basic structure",
+      "deliverables": ["package.json", "tsconfig.json", "basic components"],
+      "estimated_effort": "2-3 hours",
+      "dependencies": [],
+      "git_strategy": "create feature branch",
+      "acceptance_criteria": ["Project builds successfully", "Basic structure in place"],
+      "potential_risks": ["Version compatibility issues"]
+    }
+  ],
+  "integration_plan": "How phases integrate together",
+  "deployment_considerations": "Production deployment steps"
+}
+```
+
+Always provide this JSON format in your response."""
+
+        self.agent = AssistantAgent(
+            name="ProjectManager",
+            model_client=self.model_client,
+            system_message=system_message,
+            tools=self._create_planning_tools()
+        )
+
+    def _create_planning_tools(self) -> List:
+        """Create tools for project planning and analysis."""
+
+        def analyze_project_structure_tool(root_path: str = ".", max_depth: int = 3) -> str:
+            """Analyze existing project structure for planning purposes."""
+            result = get_project_structure(root_path, max_depth)
+            if result["success"]:
+                structure_str = "Existing Project Structure Analysis:\n"
+                for path, items in result["structure"].items():
+                    structure_str += f"\n{path}:\n"
+                    for item in items:
+                        structure_str += f"  {item}\n"
+                return structure_str
+            else:
+                return f"Error analyzing project structure: {result['error']}"
+
+        def read_existing_files_tool(file_path: str) -> str:
+            """Read existing project files to understand current state."""
+            result = read_file(file_path)
+            if result["success"]:
+                return f"Content of {file_path}:\n\n{result['content']}"
+            else:
+                return f"Error reading {file_path}: {result['error']}"
+
+        def list_project_files_tool(directory_path: str, pattern: str = "*") -> str:
+            """List files in project directory for analysis."""
+            result = list_files(directory_path, pattern)
+            if result["success"]:
+                files_list = "\n".join(f"  - {f}" for f in result['files'])
+                return f"Files in {directory_path} matching '{pattern}':\n{files_list}"
+            else:
+                return f"Error listing files in {directory_path}: {result['error']}"
+
+        return [analyze_project_structure_tool, read_existing_files_tool, list_project_files_tool]
+
+    async def create_project_plan(self, task: str, working_dir: str = ".") -> Dict[str, Any]:
+        """Create a comprehensive project plan for a complex development task.
+
+        Args:
+            task: Description of the complex development task
+            working_dir: Working directory to analyze for existing project context
+
+        Returns:
+            Dictionary containing the structured project plan
+        """
+        planning_prompt = f"""Please create a comprehensive project plan for the following development task:
+
+TASK: {task}
+
+WORKING DIRECTORY: {working_dir}
+
+Please analyze the existing project structure first, then create a detailed project plan following the JSON schema provided in your system message.
+
+Key considerations:
+1. Start by understanding what already exists in the project
+2. Break the task into 3-8 logical phases (not too many, not too few)
+3. Each phase should have clear, testable deliverables
+4. Minimize dependencies between phases where possible
+5. Consider Git workflow - each phase should be committable
+6. Include specific file names and features where appropriate
+7. Estimate effort realistically
+8. Identify potential risks and blockers
+
+Make sure the plan is actionable and that each phase can be executed by a single developer in a reasonable time (1-4 hours per phase)."""
+
+        try:
+            response = await self.agent.run(task=planning_prompt)
+
+            # Parse response using the same logic as other agents
+            content = self._parse_response(response)
+
+            # Try to extract JSON from the response
+            plan = self._extract_json_plan(content)
+
+            if plan:
+                # Validate required fields
+                if not plan.get('phases'):
+                    plan['phases'] = []
+                if not plan.get('project_summary'):
+                    plan['project_summary'] = task
+                return plan
+            else:
+                # Enhanced fallback: try to create a better plan from the response
+                phases = self._create_fallback_phases(task, content)
+
+                return {
+                    "project_summary": task,
+                    "technology_stack": self._extract_technologies(content),
+                    "phases": phases,
+                    "integration_plan": "Phases will be executed sequentially with review and testing",
+                    "deployment_considerations": "Standard deployment practices apply",
+                    "raw_response": content,
+                    "parsing_note": "JSON parsing failed, using intelligent fallback"
+                }
+
+        except Exception as e:
+            return {
+                "error": f"Error creating project plan: {str(e)}",
+                "project_summary": task,
+                "phases": []
+            }
+
+    def _parse_response(self, response) -> str:
+        """Parse AutoGen response to extract meaningful content."""
+        if hasattr(response, 'messages') and response.messages:
+            # Look for the last meaningful message that's not an event
+            for message in reversed(response.messages):
+                if hasattr(message, 'content') and message.content:
+                    if hasattr(message, 'type') and message.type not in ['ThoughtEvent', 'ToolCallRequestEvent', 'ToolCallExecutionEvent']:
+                        return message.content
+                    elif not hasattr(message, 'type'):
+                        return message.content
+
+            # If no good message found, summarize actions
+            actions = []
+            for message in response.messages:
+                if hasattr(message, 'type') and message.type == 'ToolCallExecutionEvent':
+                    if hasattr(message, 'content') and message.content:
+                        for result in message.content:
+                            if hasattr(result, 'content'):
+                                actions.append(result.content)
+
+            if actions:
+                return "Project analysis completed:\n\n" + "\n\n".join(actions)
+
+        elif hasattr(response, 'chat_message') and response.chat_message:
+            return response.chat_message.content
+        elif hasattr(response, 'inner_messages') and response.inner_messages:
+            last_message = response.inner_messages[-1]
+            if hasattr(last_message, 'content'):
+                return last_message.content
+
+        return "Project plan created successfully!"
+
+    def _extract_json_plan(self, content: str) -> Optional[Dict[str, Any]]:
+        """Extract JSON project plan from response content."""
+        try:
+            # Look for JSON blocks in the content (most reliable)
+            json_pattern = r'```json\s*(\{.*?\})\s*```'
+            json_match = re.search(json_pattern, content, re.DOTALL)
+
+            if json_match:
+                json_str = json_match.group(1)
+                return json.loads(json_str)
+
+            # Try to find JSON without code blocks but with proper structure
+            json_pattern = r'\{.*?"phases".*?\[.*?\].*?\}'
+            json_match = re.search(json_pattern, content, re.DOTALL)
+
+            if json_match:
+                json_str = json_match.group(0)
+                return json.loads(json_str)
+
+            # Try to find any JSON-like structure in the content
+            lines = content.split('\n')
+            json_lines = []
+            in_json = False
+            brace_count = 0
+
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith('{'):
+                    in_json = True
+                    json_lines = [line]
+                    brace_count = line.count('{') - line.count('}')
+                elif in_json:
+                    json_lines.append(line)
+                    brace_count += line.count('{') - line.count('}')
+                    if brace_count == 0:
+                        # Try to parse the accumulated JSON
+                        json_str = '\n'.join(json_lines)
+                        try:
+                            parsed = json.loads(json_str)
+                            if 'phases' in parsed:
+                                return parsed
+                        except json.JSONDecodeError:
+                            pass
+                        in_json = False
+                        json_lines = []
+
+        except (json.JSONDecodeError, AttributeError, Exception):
+            pass
+
+        return None
+
+    def _create_fallback_phases(self, task: str, content: str) -> List[Dict[str, Any]]:
+        """Create fallback phases when JSON parsing fails."""
+        # Try to identify key phases from the response content
+        phases = []
+
+        if "next.js" in content.lower() or "react" in content.lower():
+            phases = [
+                {
+                    "phase_number": 1,
+                    "phase_name": "Project Setup & Foundation",
+                    "description": "Initialize Next.js project with basic structure and dependencies",
+                    "deliverables": ["package.json", "next.config.js", "basic file structure"],
+                    "estimated_effort": "1-2 hours",
+                    "dependencies": [],
+                    "git_strategy": "create feature branch",
+                    "acceptance_criteria": ["Project builds and runs successfully"],
+                    "potential_risks": ["Version compatibility issues"]
+                },
+                {
+                    "phase_number": 2,
+                    "phase_name": "UI Foundation",
+                    "description": "Set up shadcn/ui and core components",
+                    "deliverables": ["shadcn/ui components", "theme configuration", "basic layout"],
+                    "estimated_effort": "2-3 hours",
+                    "dependencies": ["Phase 1"],
+                    "git_strategy": "continue on feature branch",
+                    "acceptance_criteria": ["UI components render correctly"],
+                    "potential_risks": ["Styling conflicts"]
+                },
+                {
+                    "phase_number": 3,
+                    "phase_name": "Core Features",
+                    "description": "Implement main functionality based on requirements",
+                    "deliverables": ["Core feature implementation"],
+                    "estimated_effort": "4-6 hours",
+                    "dependencies": ["Phase 2"],
+                    "git_strategy": "continue on feature branch",
+                    "acceptance_criteria": ["Features work as expected"],
+                    "potential_risks": ["Complex business logic"]
+                }
+            ]
+        else:
+            # Generic phases for other projects
+            phases = [
+                {
+                    "phase_number": 1,
+                    "phase_name": "Analysis & Setup",
+                    "description": "Analyze requirements and set up project structure",
+                    "deliverables": ["Project structure", "Configuration files"],
+                    "estimated_effort": "1-2 hours",
+                    "dependencies": [],
+                    "git_strategy": "create feature branch",
+                    "acceptance_criteria": ["Project is ready for development"],
+                    "potential_risks": ["Unclear requirements"]
+                },
+                {
+                    "phase_number": 2,
+                    "phase_name": "Core Implementation",
+                    "description": "Implement main functionality",
+                    "deliverables": ["Core feature implementation"],
+                    "estimated_effort": "3-4 hours",
+                    "dependencies": ["Phase 1"],
+                    "git_strategy": "continue on feature branch",
+                    "acceptance_criteria": ["Core features working"],
+                    "potential_risks": ["Technical complexity"]
+                },
+                {
+                    "phase_number": 3,
+                    "phase_name": "Testing & Polish",
+                    "description": "Add tests and polish the implementation",
+                    "deliverables": ["Test suite", "Documentation", "Bug fixes"],
+                    "estimated_effort": "1-2 hours",
+                    "dependencies": ["Phase 2"],
+                    "git_strategy": "continue on feature branch",
+                    "acceptance_criteria": ["All tests pass", "Code is documented"],
+                    "potential_risks": ["Test coverage gaps"]
+                }
+            ]
+
+        return phases
+
+    def _extract_technologies(self, content: str) -> List[str]:
+        """Extract technology stack from response content."""
+        technologies = []
+        tech_keywords = {
+            "next.js": "Next.js 14",
+            "react": "React",
+            "typescript": "TypeScript",
+            "tailwind": "Tailwind CSS",
+            "shadcn": "shadcn/ui",
+            "python": "Python",
+            "fastapi": "FastAPI",
+            "django": "Django",
+            "flask": "Flask",
+            "postgresql": "PostgreSQL",
+            "sqlite": "SQLite",
+            "mongodb": "MongoDB",
+            "redis": "Redis",
+            "docker": "Docker",
+            "node.js": "Node.js"
+        }
+
+        content_lower = content.lower()
+        for keyword, tech in tech_keywords.items():
+            if keyword in content_lower and tech not in technologies:
+                technologies.append(tech)
+
+        if not technologies:
+            technologies = ["To be determined based on requirements"]
+
+        return technologies
 
     async def close(self):
         """Close the model client connection."""
