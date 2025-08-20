@@ -15,6 +15,11 @@ from backend.main import app
 @pytest.fixture
 def client():
     """Create test client for FastAPI app."""
+    # Reset global agents before each test
+    import backend.main
+    backend.main.tutor_agent = None
+    backend.main.curriculum_director = None 
+    backend.main.assessment_coach = None
     return TestClient(app)
 
 

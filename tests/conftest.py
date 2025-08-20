@@ -6,6 +6,12 @@ import os
 from pathlib import Path
 
 
+def pytest_configure(config):
+    """Configure pytest settings."""
+    # Set a test API key to avoid authentication errors in tests
+    os.environ.setdefault('OPENAI_API_KEY', 'test-key-for-testing')
+
+
 @pytest.fixture
 def temp_workspace():
     """Create a temporary workspace for testing."""

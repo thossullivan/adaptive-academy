@@ -10,6 +10,8 @@ import asyncio
 from dotenv import load_dotenv
 
 from .agents import TutorAgent, CurriculumDirector, AssessmentCoach
+from shared.database.session_manager import get_session_manager
+from shared.database.models import get_db
 
 # Load environment variables
 load_dotenv()
@@ -127,6 +129,24 @@ class CreateAssessmentRequest(BaseModel):
 class EvaluatePerformanceRequest(BaseModel):
     student_responses: List[Dict[str, Any]]
     topic: str
+
+
+# Session management request models
+class StartSessionRequest(BaseModel):
+    user_id: int = 1
+    module_id: Optional[int] = None
+    session_type: str = "study"
+
+
+class TeachWithContextRequest(BaseModel):
+    session_id: int
+    concept: str
+
+
+class QuestionWithContextRequest(BaseModel):
+    session_id: int
+    question: str
+    current_concept: str = ""
 
 
 # Health check endpoints
@@ -266,6 +286,126 @@ async def evaluate_performance(request: EvaluatePerformanceRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error evaluating performance: {str(e)}")
+
+
+# Session management endpoints
+
+@app.post("/api/sessions/start")
+async def start_learning_session(request: StartSessionRequest):
+    """Start a new learning session."""
+    try:
+        session_manager = get_session_manager()
+        session = session_manager.start_session(
+            user_id=request.user_id,
+            module_id=request.module_id,
+            session_type=request.session_type
+        )
+        
+        # Initialize agents for the session
+        session_manager.initialize_agents(session.id)
+        
+        return {
+            "session_id": session.id,
+            "user_id": session.user_id,
+            "started_at": session.started_at.isoformat() if session.started_at else None,
+            "session_type": session.session_type,
+            "current_module_id": session.current_module_id,
+            "status": "started"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error starting session: {str(e)}")
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session_info(session_id: int):
+    """Get information about a learning session."""
+    try:
+        session_manager = get_session_manager()
+        context = session_manager.get_session_context(session_id)
+        
+        if not context.get('session'):
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        return {
+            "session": context['session'],
+            "user_profile": context['user_profile'].__dict__,
+            "current_module": context['current_module'],
+            "recent_assessments": context['recent_assessments'],
+            "agent_states": context['agent_states']
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting session: {str(e)}")
+
+
+@app.post("/api/sessions/{session_id}/end")
+async def end_learning_session(session_id: int):
+    """End a learning session."""
+    try:
+        session_manager = get_session_manager()
+        success = session_manager.end_session(session_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Session not found or already ended")
+        
+        return {"session_id": session_id, "status": "ended"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error ending session: {str(e)}")
+
+
+@app.post("/api/tutor/teach-with-context")
+async def teach_concept_with_context(request: TeachWithContextRequest):
+    """Have the tutor explain a concept with full session context."""
+    try:
+        tutor = get_tutor_agent()
+        explanation = await tutor.teach_concept_with_context(
+            session_id=request.session_id,
+            concept=request.concept
+        )
+        
+        return {
+            "session_id": request.session_id,
+            "concept": request.concept,
+            "explanation": explanation.__dict__,
+            "agent": "TutorAgent"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error teaching concept: {str(e)}")
+
+
+@app.post("/api/tutor/question-with-context")
+async def answer_question_with_context(request: QuestionWithContextRequest):
+    """Have the tutor answer a question with full session context."""
+    try:
+        tutor = get_tutor_agent()
+        answer = await tutor.answer_question_with_context(
+            session_id=request.session_id,
+            question=request.question,
+            current_concept=request.current_concept
+        )
+        
+        return {
+            "session_id": request.session_id,
+            "question": request.question,
+            "answer": answer.__dict__,
+            "agent": "TutorAgent"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error answering question: {str(e)}")
+
+
+@app.get("/api/sessions")
+async def get_session_history(user_id: int = 1, limit: int = 10):
+    """Get session history for a user."""
+    try:
+        session_manager = get_session_manager()
+        history = session_manager.get_session_history(user_id, limit)
+        return {
+            "user_id": user_id,
+            "sessions": history,
+            "total": len(history)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting session history: {str(e)}")
 
 
 # Agent status endpoint

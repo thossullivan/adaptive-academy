@@ -7,6 +7,10 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_agentchat.messages import TextMessage, ChatMessage
 from autogen_agentchat.base import Response
 
+# Import BAML generated client and types
+from baml_client.baml_client import b
+from baml_client.baml_client.types import LearningProfile, Quiz, AssessmentResult, Question
+
 
 class AssessmentCoach:
     """AI agent specialized in creating and evaluating learning assessments.
@@ -588,6 +592,127 @@ Use your identify_gaps tool to find knowledge gaps and provide targeted recommen
         except Exception as e:
             return f"Error analyzing gaps: {str(e)}"
     
+    async def create_quiz_baml(
+        self,
+        topic: str,
+        difficulty_level: int,
+        question_count: int,
+        learning_objectives: List[str]
+    ) -> Quiz:
+        """Create a quiz using BAML type-safe interface.
+        
+        Args:
+            topic: The topic to create a quiz about
+            difficulty_level: Difficulty level 1-10
+            question_count: Number of questions to include
+            learning_objectives: List of learning objectives to assess
+            
+        Returns:
+            Structured Quiz object with questions
+        """
+        try:
+            quiz = await b.CreateQuiz(
+                topic=topic,
+                difficulty_level=difficulty_level,
+                question_count=question_count,
+                learning_objectives=learning_objectives
+            )
+            return quiz
+        except Exception as e:
+            # Return a fallback quiz on error
+            return Quiz(
+                title=f"Quiz on {topic}",
+                description=f"Error creating quiz: {str(e)}",
+                questions=[],
+                estimated_time_minutes=30,
+                difficulty_level=difficulty_level,
+                learning_objectives=learning_objectives
+            )
+    
+    async def evaluate_performance_baml(
+        self,
+        quiz_responses: Dict[str, str],
+        quiz: Quiz,
+        student_profile: LearningProfile
+    ) -> AssessmentResult:
+        """Evaluate student performance using BAML type-safe interface.
+        
+        Args:
+            quiz_responses: Student's responses to quiz questions
+            quiz: The quiz that was taken
+            student_profile: Student's learning profile
+            
+        Returns:
+            Structured AssessmentResult with performance analysis
+        """
+        try:
+            result = await b.EvaluatePerformance(
+                quiz_responses=quiz_responses,
+                quiz=quiz,
+                student_profile=student_profile
+            )
+            return result
+        except Exception as e:
+            # Return a fallback result on error
+            return AssessmentResult(
+                quiz_id=quiz.title,
+                score_percentage=0.0,
+                time_taken_minutes=0,
+                strengths=[],
+                weak_areas=[f"Error evaluating performance: {str(e)}"],
+                feedback="Unable to evaluate performance at this time.",
+                recommendations=["Please try again later."]
+            )
+    
+    async def provide_detailed_feedback_baml(
+        self,
+        question: Question,
+        student_answer: str,
+        correct_answer: str
+    ) -> str:
+        """Provide detailed feedback using BAML type-safe interface.
+        
+        Args:
+            question: The question that was answered
+            student_answer: Student's answer
+            correct_answer: The correct answer
+            
+        Returns:
+            Detailed feedback as a string
+        """
+        try:
+            feedback = await b.ProvideDetailedFeedback(
+                question=question,
+                student_answer=student_answer,
+                correct_answer=correct_answer
+            )
+            return feedback
+        except Exception as e:
+            return f"Error providing feedback: {str(e)}"
+    
+    async def identify_learning_gaps_baml(
+        self,
+        assessment_history: List[AssessmentResult],
+        curriculum_area: str
+    ) -> List[str]:
+        """Identify learning gaps using BAML type-safe interface.
+        
+        Args:
+            assessment_history: History of assessment results
+            curriculum_area: The curriculum area to analyze
+            
+        Returns:
+            List of identified learning gaps
+        """
+        try:
+            gaps = await b.IdentifyLearningGaps(
+                assessment_history=assessment_history,
+                curriculum_area=curriculum_area
+            )
+            return gaps
+        except Exception as e:
+            return [f"Error identifying learning gaps: {str(e)}"]
+
     async def close(self):
         """Close the model client connection."""
         await self.model_client.close()
