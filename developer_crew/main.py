@@ -9,7 +9,7 @@ from rich.panel import Panel
 from rich.text import Text
 from dotenv import load_dotenv
 
-from .agents import CoderAgent, CodeReviewerAgent, QA_TesterAgent
+from .agents import CoderAgent, CodeReviewerAgent, QA_TesterAgent, ProjectManagerAgent
 from .model_clients import ModelClientFactory, get_default_model
 
 # Load environment variables
@@ -518,6 +518,131 @@ def init_project():
         title="Getting Started",
         border_style="green"
     ))
+
+
+@app.command("plan")
+def plan_project(
+    task: str = typer.Argument(..., help="Complex development task to create a plan for"),
+    working_dir: str = typer.Option(".", help="Working directory to analyze for context"),
+    model: str = typer.Option(None, help="Model to use (supports OpenAI, Anthropic, Google - auto-detects from available APIs)"),
+    output_file: str = typer.Option("", help="Optional file to save the project plan")
+):
+    """Create a comprehensive project plan for complex development tasks."""
+
+    if not check_api_key():
+        raise typer.Exit(1)
+
+    # Use default model if none specified
+    if model is None:
+        model = get_default_model()
+        if model is None:
+            console.print("❌ No supported model available. Please configure an API key.")
+            raise typer.Exit(1)
+
+    console.print(Panel(
+        f"📋 Initializing Project Manager Agent\n"
+        f"📝 Task: {task}\n"
+        f"📁 Working Directory: {working_dir}\n"
+        f"🔧 Model: {model}",
+        title="Developer Crew - Project Planning",
+        border_style="cyan"
+    ))
+
+    async def create_project_plan():
+        pm = None
+
+        try:
+            console.print("🔍 Analyzing project and creating comprehensive plan...")
+
+            pm = ProjectManagerAgent(model=model)
+
+            # Create the project plan
+            plan = await pm.create_project_plan(task, working_dir)
+
+            if "error" in plan:
+                console.print(Panel(
+                    plan["error"],
+                    title="❌ Error Creating Project Plan",
+                    border_style="red"
+                ))
+                return
+
+            # Display the plan
+            plan_display = f"📋 **PROJECT**: {plan.get('project_summary', 'Complex Development Task')}\n\n"
+
+            if plan.get('technology_stack'):
+                plan_display += f"🛠️ **TECH STACK**: {', '.join(plan['technology_stack'])}\n\n"
+
+            plan_display += "📅 **EXECUTION PHASES**:\n\n"
+
+            for i, phase in enumerate(plan.get('phases', []), 1):
+                plan_display += f"**Phase {phase.get('phase_number', i)}: {phase.get('phase_name', f'Phase {i}')}**\n"
+                plan_display += f"└ {phase.get('description', 'No description')}\n"
+
+                if phase.get('deliverables'):
+                    plan_display += f"├ Deliverables: {', '.join(phase['deliverables'])}\n"
+
+                if phase.get('estimated_effort'):
+                    plan_display += f"├ Effort: {phase['estimated_effort']}\n"
+
+                if phase.get('git_strategy'):
+                    plan_display += f"├ Git: {phase['git_strategy']}\n"
+
+                if phase.get('potential_risks'):
+                    plan_display += f"└ Risks: {', '.join(phase['potential_risks'])}\n"
+
+                plan_display += "\n"
+
+            if plan.get('integration_plan'):
+                plan_display += f"🔗 **INTEGRATION**: {plan['integration_plan']}\n\n"
+
+            if plan.get('deployment_considerations'):
+                plan_display += f"🚀 **DEPLOYMENT**: {plan['deployment_considerations']}"
+
+            console.print(Panel(
+                plan_display,
+                title="✅ Project Plan Created",
+                border_style="green"
+            ))
+
+            # Save to file if requested
+            if output_file:
+                import json
+                try:
+                    with open(output_file, 'w') as f:
+                        json.dump(plan, f, indent=2)
+                    console.print(f"📄 Plan saved to: {output_file}")
+                except Exception as e:
+                    console.print(f"❌ Error saving plan: {str(e)}")
+
+            # Show next steps
+            console.print(Panel(
+                "🎯 **NEXT STEPS**:\n"
+                "1. Review the project plan and adjust if needed\n"
+                "2. Use `workflow` command to execute individual phases\n"
+                "3. Consider using git branches for each phase\n"
+                "4. Execute phases in order, with review and testing\n\n"
+                f"💡 **TIP**: Execute Phase 1 with:\n"
+                f"`uv run python -m developer_crew.main workflow \"Phase 1: {plan.get('phases', [{}])[0].get('phase_name', 'Setup')}\" --working-dir {working_dir}`",
+                title="Project Planning Complete",
+                border_style="blue"
+            ))
+
+        except Exception as e:
+            console.print(Panel(
+                f"❌ Error: {str(e)}",
+                title="Error",
+                border_style="red"
+            ))
+            raise typer.Exit(1)
+
+        finally:
+            # Clean up
+            if pm:
+                await pm.close()
+
+    # Run the async task
+    asyncio.run(create_project_plan())
 
 
 @app.command("setup-test")
