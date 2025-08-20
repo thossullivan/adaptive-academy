@@ -197,16 +197,21 @@ With the Developer Crew operational, we will now build the user-facing applicati
 
 **Phase 3 Deliverable:** ✅ **DELIVERED** - Complete learning application with persistent user data, session management, and context-aware agent interactions.
 
-### Phase 4: Frontend Integration & End-to-End Flow
+### Phase 4: Frontend Learning Command Center - **IN PROGRESS**
 
-**Goal:** Create a complete user experience from frontend to backend.
+**Goal:** Create a structured learning dashboard with concept visualization and intelligent recommendations.
 
-- [ ] **Next.js Integration**: Connect frontend with backend API endpoints
-- [ ] **Real-time UI**: Implement WebSocket client for live agent interactions
-- [ ] **Learning Dashboard**: User interface for curriculum progress and assessments
-- [ ] **Session Management**: Start, pause, resume, and complete learning sessions
+**Frontend Architecture:** Next.js 14 + shadcn/ui + TypeScript for a desktop-first, local development experience.
 
-**Phase 4 Deliverable:** A fully integrated learning platform with complete user experience.
+**Core Features:**
+- [ ] **Learning Command Center Dashboard**: Main interface showing current progress and next actions
+- [ ] **Interactive Concept Roadmap**: Visual graph of learning concepts and their relationships
+- [ ] **Structured Session Interface**: Concept deep-dives with explanations and resources
+- [ ] **Progress Intelligence**: Visual curriculum progression and completion tracking
+- [ ] **Smart Recommendations**: AI-powered next-step suggestions based on learning context
+- [ ] **API Integration**: Connect frontend with existing backend session management APIs
+
+**Phase 4 Deliverable:** A functional learning command center that provides structured, visual learning experiences with intelligent guidance.
 
 ### Phase 5: Polish, Testing, and Documentation
 
@@ -233,12 +238,19 @@ With the Developer Crew operational, we will now build the user-facing applicati
 - **Testing Infrastructure**: Comprehensive test coverage with pytest
 - **BAML Schema Design**: Complete type-safe interface definitions
 
-### 🎯 Next Priorities
-1. **Frontend Integration**: Connect Next.js frontend with backend session management APIs
-2. **Real-time UI**: Implement WebSocket client for live agent interactions
-3. **Learning Dashboard**: User interface for curriculum progress and assessments
-4. **Assessment Results Storage**: Complete assessment workflow with database persistence
-5. **End-to-End Testing**: Full integration tests across the complete stack
+### 🎯 Current Development Focus: Phase 4 Frontend Implementation
+
+**Immediate Priorities:**
+1. **Next.js Project Setup**: Initialize frontend with shadcn/ui and TypeScript
+2. **Core Dashboard**: Learning command center with session management
+3. **API Client**: Type-safe integration with existing backend endpoints
+4. **Concept Visualization**: Interactive roadmap showing learning relationships
+5. **Session Interface**: Structured learning experience with context-aware explanations
+
+**Developer Crew Integration:**
+- Leverage existing development automation for frontend scaffolding
+- Use code generation agents for component creation and API client setup
+- Apply QA testing agents for frontend validation and integration testing
 
 ### 📊 Progress Overview
 - **Part 1 (Developer Crew)**: 100% Complete ✅

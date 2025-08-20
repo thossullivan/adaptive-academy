@@ -1,12 +1,12 @@
-"""AI agents for the developer crew using modern AutoGen API."""
+"""AI agents for the developer crew using modern AutoGen API with multi-provider support."""
 
 import asyncio
 from typing import Dict, Any, List, Optional, Sequence
 from autogen_agentchat.agents import AssistantAgent
-from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_agentchat.messages import TextMessage, ChatMessage
 from autogen_agentchat.base import Response
 
+from .model_clients import ModelClientFactory, get_default_model
 from .tools import (
     read_file, write_file, edit_file, list_files, get_project_structure,
     execute_command, run_python_script, run_tests, check_code_quality
@@ -16,19 +16,26 @@ from .tools import (
 class CoderAgent:
     """AI agent specialized in writing and modifying code using modern AutoGen API."""
     
-    def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None):
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
         """Initialize the Coder agent.
         
         Args:
-            model: OpenAI model to use (default: gpt-4)
-            api_key: OpenAI API key (if not provided, will use environment variable)
+            model: Model to use (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4', 'gemini-pro')
+                  If not provided, will use the best available model
+            api_key: API key for the model provider (if not provided, will use environment variables)
         """
-        self.model_client = OpenAIChatCompletionClient(
-            model=model,
-            api_key=api_key
-        )
+        # Use default model if none specified
+        if model is None:
+            model = get_default_model()
+            if model is None:
+                raise ValueError(
+                    "No API keys found. Please set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY"
+                )
         
-        system_message = """You are an expert software developer and coding specialist. Your role is to write, modify, and improve code based on precise instructions.
+        self.model = model
+        self.model_client = ModelClientFactory.create_client(model, api_key)
+        
+        system_message = """You are an expert full-stack software developer with deep expertise in modern web technologies. Your role is to write, modify, and improve code based on precise instructions.
 
 Core Responsibilities:
 - Write clean, well-structured, and maintainable code
@@ -37,14 +44,39 @@ Core Responsibilities:
 - Fix bugs and improve code quality
 - Add appropriate comments and documentation
 
+Backend Expertise:
+- Python (FastAPI, Django, Flask), Node.js, databases (SQLite, PostgreSQL)
+- RESTful APIs, GraphQL, WebSocket implementations
+- Authentication, authorization, and security best practices
+
+Frontend Expertise:
+- React 18+, Next.js 14+ (App Router), TypeScript, modern JavaScript (ES2022+)
+- Component patterns: composition, compound components, render props, custom hooks
+- State management: React Context, Zustand, React Query/TanStack Query
+- Styling: Tailwind CSS, CSS Modules, styled-components
+- UI Libraries: shadcn/ui, Radix UI, Headless UI
+- Performance: Code splitting, lazy loading, React.memo, useMemo, useCallback
+- Accessibility: ARIA labels, semantic HTML, keyboard navigation
+- Testing: Jest, React Testing Library, Playwright, Vitest
+
+Modern Development Practices:
+- TypeScript best practices: strict mode, proper typing, generic constraints
+- Code organization: barrel exports, folder structure, separation of concerns
+- Error boundaries, loading states, optimistic updates
+- Progressive enhancement, responsive design
+- Bundle optimization, tree shaking, performance monitoring
+
 Guidelines:
 1. Always read existing files before modifying to understand context and patterns
 2. Follow the existing code style and conventions
 3. Write code that is readable, maintainable, and follows best practices
 4. Test your understanding by summarizing what you're going to implement before coding
 5. Use appropriate data structures and algorithms for the task
-6. Handle errors gracefully and add appropriate error checking
+6. Handle errors gracefully with proper TypeScript error types
 7. When creating new files, include proper imports and structure
+8. For React components: use TypeScript interfaces, proper prop validation, and accessibility
+9. For Next.js: leverage App Router patterns, server components when appropriate
+10. For API integration: implement proper error handling, loading states, and type safety
 
 Available Tools:
 - read_file: Read the contents of a file
@@ -149,17 +181,24 @@ When you need to use a tool, describe what you're going to do first, then use th
 class CodeReviewerAgent:
     """AI agent specialized in reviewing code quality and suggesting improvements."""
     
-    def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None):
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
         """Initialize the Code Reviewer agent.
         
         Args:
-            model: OpenAI model to use (default: gpt-4)
-            api_key: OpenAI API key (if not provided, will use environment variable)
+            model: Model to use (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4', 'gemini-pro')
+                  If not provided, will use the best available model
+            api_key: API key for the model provider (if not provided, will use environment variables)
         """
-        self.model_client = OpenAIChatCompletionClient(
-            model=model,
-            api_key=api_key
-        )
+        # Use default model if none specified
+        if model is None:
+            model = get_default_model()
+            if model is None:
+                raise ValueError(
+                    "No API keys found. Please set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY"
+                )
+        
+        self.model = model
+        self.model_client = ModelClientFactory.create_client(model, api_key)
         
         system_message = """You are an expert code reviewer with deep knowledge of software engineering best practices. Your role is to review code for quality, correctness, and maintainability.
 
@@ -281,17 +320,24 @@ Start by reading the file, then provide your detailed review."""
 class QA_TesterAgent:
     """AI agent specialized in testing and validating code through execution."""
     
-    def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None):
+    def __init__(self, model: Optional[str] = None, api_key: Optional[str] = None):
         """Initialize the QA Tester agent.
         
         Args:
-            model: OpenAI model to use (default: gpt-4)
-            api_key: OpenAI API key (if not provided, will use environment variable)
+            model: Model to use (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4', 'gemini-pro')
+                  If not provided, will use the best available model
+            api_key: API key for the model provider (if not provided, will use environment variables)
         """
-        self.model_client = OpenAIChatCompletionClient(
-            model=model,
-            api_key=api_key
-        )
+        # Use default model if none specified
+        if model is None:
+            model = get_default_model()
+            if model is None:
+                raise ValueError(
+                    "No API keys found. Please set one of: ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY"
+                )
+        
+        self.model = model
+        self.model_client = ModelClientFactory.create_client(model, api_key)
         
         system_message = """You are an expert QA engineer and testing specialist. Your role is to validate code through execution, testing, and dynamic analysis.
 
