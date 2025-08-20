@@ -7,6 +7,10 @@ from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_agentchat.messages import TextMessage, ChatMessage
 from autogen_agentchat.base import Response
 
+# Import BAML generated client and types
+from baml_client.baml_client import b
+from baml_client.baml_client.types import LearningProfile, Curriculum
+
 
 class CurriculumDirector:
     """AI agent specialized in creating personalized learning curricula.
@@ -407,6 +411,95 @@ Use your recommend_projects tool to suggest a portfolio of projects that will re
         except Exception as e:
             return f"Error suggesting projects: {str(e)}"
     
+    async def generate_curriculum_baml(
+        self,
+        learning_goal: str,
+        user_profile: LearningProfile,
+        timeline_weeks: int
+    ) -> Curriculum:
+        """Generate a personalized curriculum using BAML type-safe interface.
+        
+        Args:
+            learning_goal: The learning objective to achieve
+            user_profile: User's learning profile and preferences
+            timeline_weeks: Number of weeks for the curriculum
+            
+        Returns:
+            Structured Curriculum object with modules and learning path
+        """
+        try:
+            curriculum = await b.GenerateCurriculum(
+                learning_goal=learning_goal,
+                user_profile=user_profile,
+                timeline_weeks=timeline_weeks
+            )
+            return curriculum
+        except Exception as e:
+            # Return a fallback curriculum on error
+            return Curriculum(
+                title=f"Learning {learning_goal}",
+                description=f"Error generating curriculum: {str(e)}",
+                total_duration_weeks=timeline_weeks,
+                modules=[],
+                learning_path=[],
+                milestones=[],
+                assessment_strategy="Regular quizzes and projects"
+            )
+    
+    async def sequence_topics_baml(
+        self,
+        topics: List[str],
+        user_background: str,
+        learning_goals: List[str]
+    ) -> List[str]:
+        """Sequence topics optimally using BAML type-safe interface.
+        
+        Args:
+            topics: List of topics to sequence
+            user_background: User's background for context
+            learning_goals: User's learning goals
+            
+        Returns:
+            Optimally sequenced list of topics
+        """
+        try:
+            sequenced_topics = await b.SequenceTopics(
+                topics=topics,
+                user_background=user_background,
+                learning_goals=learning_goals
+            )
+            return sequenced_topics
+        except Exception as e:
+            # Return original topics on error
+            return topics
+    
+    async def adapt_curriculum_baml(
+        self,
+        current_curriculum: Curriculum,
+        performance_data: Dict[str, float],
+        student_feedback: str
+    ) -> Curriculum:
+        """Adapt curriculum based on performance using BAML type-safe interface.
+        
+        Args:
+            current_curriculum: The current curriculum to adapt
+            performance_data: Student performance metrics
+            student_feedback: Feedback from the student
+            
+        Returns:
+            Adapted Curriculum object
+        """
+        try:
+            adapted_curriculum = await b.AdaptCurriculum(
+                current_curriculum=current_curriculum,
+                performance_data=performance_data,
+                student_feedback=student_feedback
+            )
+            return adapted_curriculum
+        except Exception as e:
+            # Return original curriculum on error
+            return current_curriculum
+
     async def close(self):
         """Close the model client connection."""
         await self.model_client.close()

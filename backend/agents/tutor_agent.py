@@ -2,10 +2,18 @@
 
 import asyncio
 from typing import Dict, Any, List, Optional, Sequence
+from datetime import datetime
 from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_agentchat.messages import TextMessage, ChatMessage
 from autogen_agentchat.base import Response
+
+# Import BAML generated client and types
+from baml_client.baml_client import b
+from baml_client.baml_client.types import LearningProfile, Explanation
+
+# Import database integration
+from shared.database.session_manager import get_session_manager, SessionManager
 
 
 class TutorAgent:
@@ -18,17 +26,20 @@ class TutorAgent:
     - Adaptive teaching based on user understanding
     """
     
-    def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None):
+    def __init__(self, model: str = "gpt-4", api_key: Optional[str] = None, 
+                 session_manager: SessionManager = None):
         """Initialize the Tutor agent.
         
         Args:
             model: OpenAI model to use (default: gpt-4)
             api_key: OpenAI API key (if not provided, will use environment variable)
+            session_manager: Session manager for database operations
         """
         self.model_client = OpenAIChatCompletionClient(
             model=model,
             api_key=api_key
         )
+        self.session_manager = session_manager or get_session_manager()
         
         system_message = """You are an expert AI/ML tutor with a PhD in both Computer Science and Physics. Your specialty is making complex AI and machine learning concepts accessible through personalized instruction.
 
@@ -337,6 +348,242 @@ Use your assess_understanding tool to generate questions that reveal how well th
         except Exception as e:
             return f"Error creating assessment: {str(e)}"
     
+    async def explain_concept_baml(
+        self, 
+        concept: str, 
+        user_profile: LearningProfile, 
+        context: str = ""
+    ) -> Explanation:
+        """Explain a concept using BAML type-safe interface.
+        
+        Args:
+            concept: The concept to explain
+            user_profile: User's learning profile and preferences
+            context: Additional context for the explanation
+            
+        Returns:
+            Structured Explanation object with concept details
+        """
+        try:
+            explanation = await b.ExplainConcept(
+                concept=concept,
+                user_profile=user_profile,
+                context=context
+            )
+            return explanation
+        except Exception as e:
+            # Return a fallback explanation on error
+            return Explanation(
+                concept=concept,
+                explanation=f"Error generating explanation: {str(e)}",
+                analogies=[],
+                examples=[],
+                follow_up_questions=[],
+                related_concepts=[],
+                difficulty_level=5
+            )
+    
+    async def answer_question_baml(
+        self,
+        question: str,
+        concept: str,
+        user_profile: LearningProfile,
+        context: str = ""
+    ) -> Explanation:
+        """Answer a student question using BAML type-safe interface.
+        
+        Args:
+            question: The student's question
+            concept: The concept being learned
+            user_profile: User's learning profile
+            context: Additional learning context
+            
+        Returns:
+            Structured Explanation object with the answer
+        """
+        try:
+            answer = await b.AnswerQuestion(
+                question=question,
+                concept=concept,
+                user_profile=user_profile,
+                context=context
+            )
+            return answer
+        except Exception as e:
+            return Explanation(
+                concept=concept,
+                explanation=f"Error answering question: {str(e)}",
+                analogies=[],
+                examples=[],
+                follow_up_questions=[],
+                related_concepts=[],
+                difficulty_level=5
+            )
+    
+    async def create_physics_analogy_baml(self, concept: str, user_background: str) -> str:
+        """Create physics analogies using BAML type-safe interface.
+        
+        Args:
+            concept: The ML concept to create analogies for
+            user_background: User's background for context
+            
+        Returns:
+            Physics analogies as a string
+        """
+        try:
+            analogy = await b.CreatePhysicsAnalogy(
+                concept=concept,
+                user_background=user_background
+            )
+            return analogy
+        except Exception as e:
+            return f"Error creating physics analogy: {str(e)}"
+    
+    # Database-integrated methods
+    
+    async def teach_concept_with_context(self, session_id: int, concept: str) -> Explanation:
+        """Teach a concept with full session context from database.
+        
+        Args:
+            session_id: Current learning session ID
+            concept: The concept to teach
+            
+        Returns:
+            Structured explanation with context from user's learning history
+        """
+        try:
+            # Get session context from database
+            context = self.session_manager.get_session_context(session_id)
+            user_profile = context['user_profile']
+            
+            # Build context string from session data
+            context_str = self._build_context_string(context, concept)
+            
+            # Use BAML to generate explanation
+            explanation = await self.explain_concept_baml(concept, user_profile, context_str)
+            
+            # Log the teaching action
+            self.session_manager.log_agent_action(
+                session_id=session_id,
+                agent_type="tutor",
+                action="teach_concept",
+                action_data={
+                    'concept': concept,
+                    'explanation_length': len(explanation.explanation),
+                    'analogies_count': len(explanation.analogies),
+                    'examples_count': len(explanation.examples)
+                }
+            )
+            
+            # Update agent state with teaching history
+            current_state = self.session_manager.get_agent_state(session_id, "tutor")
+            if 'taught_concepts' not in current_state:
+                current_state['taught_concepts'] = []
+            current_state['taught_concepts'].append({
+                'concept': concept,
+                'timestamp': datetime.now().isoformat(),
+                'difficulty_level': explanation.difficulty_level
+            })
+            self.session_manager.save_agent_state(session_id, "tutor", current_state)
+            
+            return explanation
+            
+        except Exception as e:
+            # Return fallback explanation
+            return Explanation(
+                concept=concept,
+                explanation=f"I encountered an error while preparing your explanation: {str(e)}. Let me provide a basic overview of {concept}.",
+                analogies=[],
+                examples=[],
+                follow_up_questions=[f"Would you like me to try explaining {concept} in a different way?"],
+                related_concepts=[],
+                difficulty_level=5
+            )
+    
+    async def answer_question_with_context(self, session_id: int, question: str, 
+                                         current_concept: str = "") -> Explanation:
+        """Answer a question with full session context.
+        
+        Args:
+            session_id: Current learning session ID
+            question: Student's question
+            current_concept: Current concept being studied
+            
+        Returns:
+            Structured answer with personalized context
+        """
+        try:
+            # Get session context
+            context = self.session_manager.get_session_context(session_id)
+            user_profile = context['user_profile']
+            
+            # Build context for the question
+            context_str = self._build_context_string(context, current_concept)
+            
+            # Use BAML to generate answer
+            answer = await self.answer_question_baml(question, current_concept, user_profile, context_str)
+            
+            # Log the question answering
+            self.session_manager.log_agent_action(
+                session_id=session_id,
+                agent_type="tutor",
+                action="answer_question",
+                action_data={
+                    'question': question,
+                    'concept': current_concept,
+                    'answer_length': len(answer.explanation)
+                }
+            )
+            
+            return answer
+            
+        except Exception as e:
+            return Explanation(
+                concept=current_concept,
+                explanation=f"I'm having trouble processing your question right now: {str(e)}. Could you please rephrase it?",
+                analogies=[],
+                examples=[],
+                follow_up_questions=["Could you rephrase your question?", "What specific aspect are you confused about?"],
+                related_concepts=[],
+                difficulty_level=5
+            )
+    
+    def _build_context_string(self, session_context: Dict[str, Any], current_concept: str) -> str:
+        """Build context string from session data."""
+        context_parts = []
+        
+        # Current learning session info
+        if session_context.get('current_module'):
+            module = session_context['current_module']
+            context_parts.append(f"Currently studying: {module['module_name']} (Topic: {module['topic']})")
+        
+        # Recent performance
+        if session_context.get('recent_assessments'):
+            recent = session_context['recent_assessments'][:2]  # Last 2 assessments
+            if recent:
+                avg_score = sum(a['score'] for a in recent) / len(recent)
+                context_parts.append(f"Recent performance: {avg_score:.1f}% average on last {len(recent)} assessments")
+                
+                # Mention weak areas if any
+                all_weak_areas = []
+                for assessment in recent:
+                    all_weak_areas.extend(assessment['weak_areas'])
+                if all_weak_areas:
+                    unique_weak_areas = list(set(all_weak_areas))[:3]  # Top 3 unique weak areas
+                    context_parts.append(f"Areas to focus on: {', '.join(unique_weak_areas)}")
+        
+        # Agent's teaching history
+        agent_state = session_context.get('agent_states', {}).get('tutor', {})
+        if agent_state.get('taught_concepts'):
+            recent_concepts = [tc['concept'] for tc in agent_state['taught_concepts'][-3:]]
+            context_parts.append(f"Recently covered: {', '.join(recent_concepts)}")
+        
+        # Current concept
+        if current_concept:
+            context_parts.append(f"Focus concept: {current_concept}")
+        
+        return ". ".join(context_parts) if context_parts else "Beginning of learning session"
+
     async def close(self):
         """Close the model client connection."""
         await self.model_client.close()

@@ -38,7 +38,7 @@ requires-dist = [
     { name = "autogen-agentchat", specifier = ">=0.7.4" },
     { name = "autogen-ext", extras = ["openai"], specifier = ">=0.7.4" },
     { name = "baml-cli", specifier = ">=0.1.0" },
-    { name = "baml-py", specifier = ">=0.71.0" },
+    { name = "baml-py", specifier = "==0.205.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24.0" },
