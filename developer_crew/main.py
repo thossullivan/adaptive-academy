@@ -10,6 +10,7 @@ from rich.text import Text
 from dotenv import load_dotenv
 
 from .agents import CoderAgent, CodeReviewerAgent, QA_TesterAgent
+from .model_clients import ModelClientFactory
 
 # Load environment variables
 load_dotenv()
@@ -19,19 +20,38 @@ console = Console()
 
 
 def check_api_key() -> bool:
-    """Check if OpenAI API key is configured."""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    """Check if any supported API key is configured."""
+    status = ModelClientFactory.validate_setup()
+    
+    if not status["available_models"]:
+        missing_deps = "\n".join([f"  pip install {dep}" for dep in status["missing_dependencies"]])
+        missing_keys = "\n".join([f"  export {key}='your-key-here'" for key in status["missing_api_keys"]])
+        
+        error_msg = "❌ No API keys found for supported providers.\n\n"
+        
+        if missing_deps:
+            error_msg += f"Missing dependencies:\n{missing_deps}\n\n"
+        
+        if missing_keys:
+            error_msg += f"Missing API keys:\n{missing_keys}\n\n"
+        
+        error_msg += "Supported providers: Anthropic (Claude), OpenAI (GPT), Google (Gemini)"
+        
         console.print(Panel(
-            Text("❌ OPENAI_API_KEY not found in environment variables.\n\n"
-                 "Please set your OpenAI API key:\n"
-                 "export OPENAI_API_KEY='your-api-key-here'\n\n"
-                 "Or create a .env file with:\n"
-                 "OPENAI_API_KEY=your-api-key-here", style="red"),
-            title="Configuration Error",
+            Text(error_msg, style="red"),
+            title="API Configuration Required",
             border_style="red"
         ))
         return False
+    
+    # Show available models
+    console.print(Panel(
+        Text(f"✅ Found {len(status['available_models'])} available models:\n" + 
+             "\n".join([f"  • {model}" for model in status['available_models']]), 
+             style="green"),
+        title="API Configuration",
+        border_style="green"
+    ))
     return True
 
 
