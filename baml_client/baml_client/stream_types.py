@@ -23,8 +23,13 @@ class StreamState(BaseModel, typing.Generic[StreamStateValueT]):
     value: StreamStateValueT
     state: typing_extensions.Literal["Pending", "Incomplete", "Complete"]
 # #########################################################################
-# Generated classes (7)
+# Generated classes (17)
 # #########################################################################
+
+class AcceptanceCriterion(BaseModel):
+    description: typing.Optional[str] = None
+    testable: typing.Optional[bool] = None
+    priority: typing.Optional[int] = None
 
 class AssessmentResult(BaseModel):
     quiz_id: typing.Optional[str] = None
@@ -54,6 +59,26 @@ class CurriculumModule(BaseModel):
     difficulty_level: typing.Optional[int] = None
     topics: typing.List[str]
 
+class Deliverable(BaseModel):
+    name: typing.Optional[str] = None
+    description: typing.Optional[str] = None
+    file_path: typing.Optional[str] = None
+    acceptance_criteria: typing.List["AcceptanceCriterion"]
+
+class Dependency(BaseModel):
+    phase_number: typing.Optional[int] = None
+    description: typing.Optional[str] = None
+    type: typing.Optional[str] = None
+
+class DeploymentConsiderations(BaseModel):
+    environment_setup: typing.List[str]
+    infrastructure_requirements: typing.List[str]
+    security_considerations: typing.List[str]
+    performance_requirements: typing.List[str]
+    scaling_considerations: typing.List[str]
+    backup_strategy: typing.Optional[str] = None
+    monitoring_setup: typing.List[str]
+
 class Explanation(BaseModel):
     concept: typing.Optional[str] = None
     explanation: typing.Optional[str] = None
@@ -63,12 +88,55 @@ class Explanation(BaseModel):
     related_concepts: typing.List[str]
     difficulty_level: typing.Optional[int] = None
 
+class IntegrationPlan(BaseModel):
+    strategy: typing.Optional[str] = None
+    testing_approach: typing.Optional[str] = None
+    deployment_steps: typing.List[str]
+    rollback_plan: typing.Optional[str] = None
+    monitoring_requirements: typing.List[str]
+
 class LearningProfile(BaseModel):
     background: typing.Optional[str] = None
     learning_style: typing.Optional[str] = None
     time_commitment: typing.Optional[str] = None
     goals: typing.List[str]
     current_level: typing.Optional[str] = None
+
+class PhaseValidationResult(BaseModel):
+    is_valid: typing.Optional[bool] = None
+    confidence_score: typing.Optional[float] = None
+    issues: typing.List["ValidationIssue"]
+    recommendations: typing.List[str]
+    adjusted_effort_estimate: typing.Optional[types.EstimatedEffort] = None
+
+class ProjectPhase(BaseModel):
+    phase_number: typing.Optional[int] = None
+    phase_name: typing.Optional[str] = None
+    description: typing.Optional[str] = None
+    deliverables: typing.List["Deliverable"]
+    estimated_effort: typing.Optional[types.EstimatedEffort] = None
+    dependencies: typing.List["Dependency"]
+    git_strategy: typing.Optional[types.GitStrategy] = None
+    acceptance_criteria: typing.List["AcceptanceCriterion"]
+    potential_risks: typing.List["Risk"]
+    prerequisites: typing.List[str]
+    success_metrics: typing.List[str]
+    status: typing.Optional[types.PhaseStatus] = None
+
+class ProjectPlan(BaseModel):
+    project_summary: typing.Optional[str] = None
+    technology_stack: typing.List[types.TechnologyStack]
+    phases: typing.List["ProjectPhase"]
+    integration_plan: typing.Optional["IntegrationPlan"] = None
+    deployment_considerations: typing.Optional["DeploymentConsiderations"] = None
+    total_estimated_effort: typing.Optional[str] = None
+    critical_path_phases: typing.List[int]
+    success_metrics: typing.List[str]
+    assumptions: typing.List[str]
+    constraints: typing.List[str]
+    stakeholders: typing.List[str]
+    budget_considerations: typing.Optional[str] = None
+    timeline_milestones: typing.Dict[str, str]
 
 class Question(BaseModel):
     id: typing.Optional[str] = None
@@ -87,6 +155,18 @@ class Quiz(BaseModel):
     estimated_time_minutes: typing.Optional[int] = None
     difficulty_level: typing.Optional[int] = None
     learning_objectives: typing.List[str]
+
+class Risk(BaseModel):
+    description: typing.Optional[str] = None
+    level: typing.Optional[types.RiskLevel] = None
+    mitigation_strategy: typing.Optional[str] = None
+    impact: typing.Optional[str] = None
+
+class ValidationIssue(BaseModel):
+    type: typing.Optional[types.ValidationIssueType] = None
+    severity: typing.Optional[types.RiskLevel] = None
+    description: typing.Optional[str] = None
+    suggested_fix: typing.Optional[str] = None
 
 # #########################################################################
 # Generated type aliases (0)
