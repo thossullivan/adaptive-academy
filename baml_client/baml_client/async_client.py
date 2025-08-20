@@ -80,6 +80,13 @@ class BamlAsyncClient:
             "current_curriculum": current_curriculum,"performance_data": performance_data,"student_feedback": student_feedback,
         })
         return typing.cast(types.Curriculum, result.cast_to(types, types, stream_types, False, __runtime__))
+    async def AnalyzeProjectComplexity(self, project_summary: str,technology_stack: typing.List[types.TechnologyStack],
+        baml_options: BamlCallOptions = {},
+    ) -> types.ProjectComplexityAnalysis:
+        result = await self.__options.merge_options(baml_options).call_function_async(function_name="AnalyzeProjectComplexity", args={
+            "project_summary": project_summary,"technology_stack": technology_stack,
+        })
+        return typing.cast(types.ProjectComplexityAnalysis, result.cast_to(types, types, stream_types, False, __runtime__))
     async def AnswerQuestion(self, question: str,concept: str,user_profile: types.LearningProfile,context: str,
         baml_options: BamlCallOptions = {},
     ) -> types.Explanation:
@@ -122,6 +129,20 @@ class BamlAsyncClient:
             "learning_goal": learning_goal,"user_profile": user_profile,"timeline_weeks": timeline_weeks,
         })
         return typing.cast(types.Curriculum, result.cast_to(types, types, stream_types, False, __runtime__))
+    async def GenerateProjectPlan(self, task_description: str,working_directory: str,existing_tech_stack: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> types.ProjectPlan:
+        result = await self.__options.merge_options(baml_options).call_function_async(function_name="GenerateProjectPlan", args={
+            "task_description": task_description,"working_directory": working_directory,"existing_tech_stack": existing_tech_stack,
+        })
+        return typing.cast(types.ProjectPlan, result.cast_to(types, types, stream_types, False, __runtime__))
+    async def GetProjectTemplate(self, template_type: types.ProjectTemplate,customizations: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> types.ProjectPlan:
+        result = await self.__options.merge_options(baml_options).call_function_async(function_name="GetProjectTemplate", args={
+            "template_type": template_type,"customizations": customizations,
+        })
+        return typing.cast(types.ProjectPlan, result.cast_to(types, types, stream_types, False, __runtime__))
     async def IdentifyLearningGaps(self, assessment_history: typing.List["types.AssessmentResult"],curriculum_area: str,
         baml_options: BamlCallOptions = {},
     ) -> typing.List[str]:
@@ -143,6 +164,13 @@ class BamlAsyncClient:
             "topics": topics,"user_background": user_background,"learning_goals": learning_goals,
         })
         return typing.cast(typing.List[str], result.cast_to(types, types, stream_types, False, __runtime__))
+    async def ValidateProjectPhase(self, phase_name: str,phase_description: str,estimated_effort: types.EstimatedEffort,deliverables: typing.List["types.Deliverable"],project_context: str,
+        baml_options: BamlCallOptions = {},
+    ) -> types.PhaseValidationResult:
+        result = await self.__options.merge_options(baml_options).call_function_async(function_name="ValidateProjectPhase", args={
+            "phase_name": phase_name,"phase_description": phase_description,"estimated_effort": estimated_effort,"deliverables": deliverables,"project_context": project_context,
+        })
+        return typing.cast(types.PhaseValidationResult, result.cast_to(types, types, stream_types, False, __runtime__))
     
 
 
@@ -162,6 +190,18 @@ class BamlStreamClient:
           result,
           lambda x: typing.cast(stream_types.Curriculum, x.cast_to(types, types, stream_types, True, __runtime__)),
           lambda x: typing.cast(types.Curriculum, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
+    def AnalyzeProjectComplexity(self, project_summary: str,technology_stack: typing.List[types.TechnologyStack],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.ProjectComplexityAnalysis, types.ProjectComplexityAnalysis]:
+        ctx, result = self.__options.merge_options(baml_options).create_async_stream(function_name="AnalyzeProjectComplexity", args={
+            "project_summary": project_summary,"technology_stack": technology_stack,
+        })
+        return baml_py.BamlStream[stream_types.ProjectComplexityAnalysis, types.ProjectComplexityAnalysis](
+          result,
+          lambda x: typing.cast(stream_types.ProjectComplexityAnalysis, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.ProjectComplexityAnalysis, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
     def AnswerQuestion(self, question: str,concept: str,user_profile: types.LearningProfile,context: str,
@@ -236,6 +276,30 @@ class BamlStreamClient:
           lambda x: typing.cast(types.Curriculum, x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def GenerateProjectPlan(self, task_description: str,working_directory: str,existing_tech_stack: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.ProjectPlan, types.ProjectPlan]:
+        ctx, result = self.__options.merge_options(baml_options).create_async_stream(function_name="GenerateProjectPlan", args={
+            "task_description": task_description,"working_directory": working_directory,"existing_tech_stack": existing_tech_stack,
+        })
+        return baml_py.BamlStream[stream_types.ProjectPlan, types.ProjectPlan](
+          result,
+          lambda x: typing.cast(stream_types.ProjectPlan, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.ProjectPlan, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
+    def GetProjectTemplate(self, template_type: types.ProjectTemplate,customizations: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.ProjectPlan, types.ProjectPlan]:
+        ctx, result = self.__options.merge_options(baml_options).create_async_stream(function_name="GetProjectTemplate", args={
+            "template_type": template_type,"customizations": customizations,
+        })
+        return baml_py.BamlStream[stream_types.ProjectPlan, types.ProjectPlan](
+          result,
+          lambda x: typing.cast(stream_types.ProjectPlan, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.ProjectPlan, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     def IdentifyLearningGaps(self, assessment_history: typing.List["types.AssessmentResult"],curriculum_area: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.BamlStream[typing.List[str], typing.List[str]]:
@@ -272,6 +336,18 @@ class BamlStreamClient:
           lambda x: typing.cast(typing.List[str], x.cast_to(types, types, stream_types, False, __runtime__)),
           ctx,
         )
+    def ValidateProjectPhase(self, phase_name: str,phase_description: str,estimated_effort: types.EstimatedEffort,deliverables: typing.List["types.Deliverable"],project_context: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.BamlStream[stream_types.PhaseValidationResult, types.PhaseValidationResult]:
+        ctx, result = self.__options.merge_options(baml_options).create_async_stream(function_name="ValidateProjectPhase", args={
+            "phase_name": phase_name,"phase_description": phase_description,"estimated_effort": estimated_effort,"deliverables": deliverables,"project_context": project_context,
+        })
+        return baml_py.BamlStream[stream_types.PhaseValidationResult, types.PhaseValidationResult](
+          result,
+          lambda x: typing.cast(stream_types.PhaseValidationResult, x.cast_to(types, types, stream_types, True, __runtime__)),
+          lambda x: typing.cast(types.PhaseValidationResult, x.cast_to(types, types, stream_types, False, __runtime__)),
+          ctx,
+        )
     
 
 class BamlHttpRequestClient:
@@ -285,6 +361,13 @@ class BamlHttpRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="AdaptCurriculum", args={
             "current_curriculum": current_curriculum,"performance_data": performance_data,"student_feedback": student_feedback,
+        }, mode="request")
+        return result
+    async def AnalyzeProjectComplexity(self, project_summary: str,technology_stack: typing.List[types.TechnologyStack],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="AnalyzeProjectComplexity", args={
+            "project_summary": project_summary,"technology_stack": technology_stack,
         }, mode="request")
         return result
     async def AnswerQuestion(self, question: str,concept: str,user_profile: types.LearningProfile,context: str,
@@ -329,6 +412,20 @@ class BamlHttpRequestClient:
             "learning_goal": learning_goal,"user_profile": user_profile,"timeline_weeks": timeline_weeks,
         }, mode="request")
         return result
+    async def GenerateProjectPlan(self, task_description: str,working_directory: str,existing_tech_stack: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="GenerateProjectPlan", args={
+            "task_description": task_description,"working_directory": working_directory,"existing_tech_stack": existing_tech_stack,
+        }, mode="request")
+        return result
+    async def GetProjectTemplate(self, template_type: types.ProjectTemplate,customizations: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="GetProjectTemplate", args={
+            "template_type": template_type,"customizations": customizations,
+        }, mode="request")
+        return result
     async def IdentifyLearningGaps(self, assessment_history: typing.List["types.AssessmentResult"],curriculum_area: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -348,6 +445,13 @@ class BamlHttpRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="SequenceTopics", args={
             "topics": topics,"user_background": user_background,"learning_goals": learning_goals,
+        }, mode="request")
+        return result
+    async def ValidateProjectPhase(self, phase_name: str,phase_description: str,estimated_effort: types.EstimatedEffort,deliverables: typing.List["types.Deliverable"],project_context: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ValidateProjectPhase", args={
+            "phase_name": phase_name,"phase_description": phase_description,"estimated_effort": estimated_effort,"deliverables": deliverables,"project_context": project_context,
         }, mode="request")
         return result
     
@@ -365,6 +469,13 @@ class BamlHttpStreamRequestClient:
             "current_curriculum": current_curriculum,"performance_data": performance_data,"student_feedback": student_feedback,
         }, mode="stream")
         return result
+    async def AnalyzeProjectComplexity(self, project_summary: str,technology_stack: typing.List[types.TechnologyStack],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="AnalyzeProjectComplexity", args={
+            "project_summary": project_summary,"technology_stack": technology_stack,
+        }, mode="stream")
+        return result
     async def AnswerQuestion(self, question: str,concept: str,user_profile: types.LearningProfile,context: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -407,6 +518,20 @@ class BamlHttpStreamRequestClient:
             "learning_goal": learning_goal,"user_profile": user_profile,"timeline_weeks": timeline_weeks,
         }, mode="stream")
         return result
+    async def GenerateProjectPlan(self, task_description: str,working_directory: str,existing_tech_stack: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="GenerateProjectPlan", args={
+            "task_description": task_description,"working_directory": working_directory,"existing_tech_stack": existing_tech_stack,
+        }, mode="stream")
+        return result
+    async def GetProjectTemplate(self, template_type: types.ProjectTemplate,customizations: typing.List[str],
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="GetProjectTemplate", args={
+            "template_type": template_type,"customizations": customizations,
+        }, mode="stream")
+        return result
     async def IdentifyLearningGaps(self, assessment_history: typing.List["types.AssessmentResult"],curriculum_area: str,
         baml_options: BamlCallOptions = {},
     ) -> baml_py.baml_py.HTTPRequest:
@@ -426,6 +551,13 @@ class BamlHttpStreamRequestClient:
     ) -> baml_py.baml_py.HTTPRequest:
         result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="SequenceTopics", args={
             "topics": topics,"user_background": user_background,"learning_goals": learning_goals,
+        }, mode="stream")
+        return result
+    async def ValidateProjectPhase(self, phase_name: str,phase_description: str,estimated_effort: types.EstimatedEffort,deliverables: typing.List["types.Deliverable"],project_context: str,
+        baml_options: BamlCallOptions = {},
+    ) -> baml_py.baml_py.HTTPRequest:
+        result = await self.__options.merge_options(baml_options).create_http_request_async(function_name="ValidateProjectPhase", args={
+            "phase_name": phase_name,"phase_description": phase_description,"estimated_effort": estimated_effort,"deliverables": deliverables,"project_context": project_context,
         }, mode="stream")
         return result
     
