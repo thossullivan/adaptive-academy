@@ -10,7 +10,6 @@ This project is organized by function for maximum clarity and scalability:
 adaptive-academy/                    # Monorepo root
 ├── frontend/                       # Next.js/TypeScript UI
 ├── backend/                        # FastAPI Python service
-├── developer_crew/                 # AI development automation tools
 ├── baml_src/                       # BAML AI schemas & functions
 ├── baml_client/                    # Generated BAML client (auto-generated)
 ├── shared/                         # Common code & schemas
@@ -25,6 +24,9 @@ adaptive-academy/                    # Monorepo root
 │   ├── developer_crew/
 │   └── baml/                       # BAML functionality tests
 └── scripts/                        # Utility scripts and analysis
+
+Note: Developer Crew is now available as a standalone library:
+developer-crew-ai @ https://github.com/adaptive-academy/developer-crew-ai
 ```
 
 ## 🚀 Quick Start
@@ -53,18 +55,20 @@ cd frontend && npm install
 
 **🤖 Developer Crew (AI Development Tools)**
 
+Developer Crew is now available as a standalone library. See: [developer-crew-ai](https://github.com/adaptive-academy/developer-crew-ai)
+
 ```bash
 # Set up API key
 echo "ANTHROPIC_API_KEY=your_key_here" >> .env
 
 # Test setup
-uv run python -m developer_crew.main setup-test
+uv run dev-crew setup-test
 
 # Generate comprehensive project plans
-uv run python -m developer_crew.main plan "Create a todo app with React and Node.js"
+uv run dev-crew plan "Create a todo app with React and Node.js"
 
 # Full development workflow (Code → Review → Test)
-uv run python -m developer_crew.main workflow "Add user authentication"
+uv run dev-crew workflow "Add user authentication"
 uv run dev-crew code "Create a user authentication endpoint"
 
 # Run full workflow (code → review → test)

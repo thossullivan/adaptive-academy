@@ -1,1 +1,0 @@
-"""Tests for developer_crew module."""
