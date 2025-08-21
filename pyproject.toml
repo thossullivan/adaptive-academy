@@ -8,10 +8,9 @@ dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "python-dotenv>=1.0.0",
-    "autogen-agentchat>=0.7.4",
-    "autogen-ext[openai,anthropic]>=0.7.4",
     "baml-py==0.205.0",
     "baml-cli>=0.1.0",
+    "developer-crew-ai[baml]",
 ]
 
 [dependency-groups]
@@ -25,16 +24,12 @@ dev = [
     "ruff>=0.12.9",
 ]
 
-# Developer Crew specific dependencies
+# Developer Crew specific dependencies (now provided by the library)
 developer-crew = [
-    "autogen-agentchat>=0.7.4",
-    "autogen-ext[openai,anthropic]>=0.7.4",
-    "typer>=0.9.0",
-    "rich>=13.0.0",
+    "developer-crew-ai[baml] @ file:///Users/tomsullivan/Projects/developer-crew-ai",
 ]
 
 [project.scripts]
-dev-crew = "developer_crew.main:app"
 backend = "backend.main:app"
 
 [tool.black]
@@ -58,3 +53,6 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 markers = ["asyncio: marks tests as async"]
+
+[tool.uv.sources]
+developer-crew-ai = { path = "../developer-crew-ai", editable = true }
