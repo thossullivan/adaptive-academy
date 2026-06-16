@@ -13,6 +13,8 @@
   let busy = $state(false);
   let saved = $state(false);
   let generating = $state(false);
+  let generatingAnchors = $state(false);
+  let anchorCount = $state<number | null>(null);
 
   onMount(async () => {
     try {
@@ -42,6 +44,16 @@
       await goto(`/topics/${topicId}/track`);
     } finally {
       generating = false;
+    }
+  }
+
+  async function generateAnchors() {
+    generatingAnchors = true;
+    try {
+      const r = await api.generateAnchors(topicId);
+      anchorCount = r.anchors.length;
+    } finally {
+      generatingAnchors = false;
     }
   }
 </script>
@@ -89,6 +101,14 @@
             onclick={generate} disabled={generating}>
       {generating ? 'Generating…' : 'Generate curriculum →'}
     </button>
+  {/if}
+
+  <button class="border rounded px-4 py-2 disabled:opacity-50 self-start"
+          onclick={generateAnchors} disabled={generatingAnchors}>
+    {generatingAnchors ? 'Generating…' : 'Generate quizzes from sources'}
+  </button>
+  {#if anchorCount != null}
+    <p class="text-sm text-gray-600">Generated {anchorCount} quiz anchor(s).</p>
   {/if}
 
   {#if events.length}

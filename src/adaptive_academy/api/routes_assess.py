@@ -3,7 +3,7 @@ from sqlmodel import Session, select
 
 from adaptive_academy.api.deps import get_llm, get_session
 from adaptive_academy.api.schemas import AssessIn, AssessmentOut, RubricOut
-from adaptive_academy.engine.assess import assess_concept, ensure_rubric
+from adaptive_academy.engine.assess import AnchorError, assess_concept, ensure_rubric
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import Assessment, Concept
 
@@ -23,9 +23,13 @@ def assess(concept_id: int, body: AssessIn, session: Session = Depends(get_sessi
     concept = session.get(Concept, concept_id)
     if concept is None:
         raise HTTPException(404, "concept not found")
-    result = assess_concept(session, concept, body.kind, body.response, llm=llm,
-                            confidence_predicted=body.confidence_predicted,
-                            baseline_id=body.baseline_id, item_id=body.item_id)
+    try:
+        result = assess_concept(session, concept, body.kind, body.response, llm=llm,
+                                confidence_predicted=body.confidence_predicted,
+                                baseline_id=body.baseline_id, item_id=body.item_id,
+                                anchor_id=body.anchor_id)
+    except AnchorError as e:
+        raise HTTPException(400, str(e))
     return _assessment_out(result.assessment, result.estimate.level)
 
 

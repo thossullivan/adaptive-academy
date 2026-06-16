@@ -44,6 +44,7 @@ from adaptive_academy.models import (
     Item,
     KnowledgeEstimate,
     Phase,
+    ReferenceAnchor,
     Sidebar,
     SourceDoc,
     Topic,
@@ -59,6 +60,11 @@ def _concepts_for(session: Session, topic_id: int) -> list[Concept]:
     return session.exec(
         select(Concept).join(Track).where(Track.topic_id == topic_id)
     ).all()
+
+
+def _has_anchor(session: Session, concept_id: int) -> bool:
+    return session.exec(
+        select(ReferenceAnchor).where(ReferenceAnchor.concept_id == concept_id)).first() is not None
 
 
 def _topic_out(session: Session, topic: Topic) -> TopicOut:
@@ -87,6 +93,7 @@ def _topic_out(session: Session, topic: Topic) -> TopicOut:
                         .order_by(Assessment.id.desc())
                     ).first()
                 ),
+                has_anchor=_has_anchor(session, c.id),
             )
             for c in concepts
         ],
@@ -264,7 +271,8 @@ def _curriculum_out(session: Session, track: Track, events=None) -> CurriculumOu
         phases=phase_outs,
         sidebars=[SidebarOut(id=s.id, kind=s.kind, title=s.title, body=s.body,
                              position=s.position) for s in sidebars],
-        concepts=[ConceptOut(id=c.id, name=c.name, is_load_bearing=c.is_load_bearing)
+        concepts=[ConceptOut(id=c.id, name=c.name, is_load_bearing=c.is_load_bearing,
+                             has_anchor=_has_anchor(session, c.id))
                   for c in concepts],
         events=[EventOut(kind=e.kind, detail=e.detail) for e in (events or [])],
     )
