@@ -43,7 +43,6 @@
         <option value="self_explanation">Self-explanation</option>
         <option value="calibration">Calibration</option>
         <option value="artifact_review">Artifact review</option>
-        <option value="source_quiz">Source quiz</option>
       </select>
     </label>
     {#if kind === 'calibration'}

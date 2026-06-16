@@ -64,8 +64,13 @@ export const api = {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ from_assessment_id })
     }).then(j<Retention>),
-  listRetention: (topicId: number, status?: string) =>
-    fetch(`/api/topics/${topicId}/retention${status ? `?status=${status}` : ''}`).then(j<Retention>),
+  listRetention: (topicId: number, opts?: { status?: string; due?: boolean }) => {
+    const q = new URLSearchParams();
+    if (opts?.status) q.set('status', opts.status);
+    if (opts?.due) q.set('due', 'true');
+    const qs = q.toString();
+    return fetch(`/api/topics/${topicId}/retention${qs ? `?${qs}` : ''}`).then(j<Retention>);
+  },
   reviewCard: (cardId: number, status: string) =>
     fetch(`/api/retention/cards/${cardId}/review`, {
       method: 'POST', headers: { 'content-type': 'application/json' },

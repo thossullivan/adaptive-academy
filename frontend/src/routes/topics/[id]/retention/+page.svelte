@@ -6,8 +6,12 @@
 
   const topicId = Number($page.params.id);
   let data = $state<Retention | null>(null);
+  let due = $state<Retention | null>(null);
 
-  async function load() { data = await api.listRetention(topicId); }
+  async function load() {
+    data = await api.listRetention(topicId);
+    due = await api.listRetention(topicId, { due: true });
+  }
   onMount(load);
 
   async function review(id: number, status: string) { await api.reviewCard(id, status); await load(); }
@@ -16,6 +20,21 @@
 
 <main class="mx-auto max-w-3xl p-6 flex flex-col gap-4">
   <h1 class="text-xl font-semibold">Retention</h1>
+  {#if due && due.cards.length}
+    <section class="border rounded p-3 bg-amber-50 flex flex-col gap-2">
+      <h2 class="font-medium text-sm">Due now ({due.cards.length})</h2>
+      {#each due.cards as c (c.id)}
+        <div class="flex flex-col gap-1 text-sm">
+          <div><b>{c.front}</b> — {c.back}</div>
+          <div class="flex gap-2">
+            {#each ['again', 'hard', 'good', 'easy'] as r}
+              <button class="border rounded px-2" onclick={() => grade(c.id, r)}>{r}</button>
+            {/each}
+          </div>
+        </div>
+      {/each}
+    </section>
+  {/if}
   {#if data}
     <h2 class="font-medium text-sm">Cards</h2>
     <ul class="flex flex-col gap-2">
