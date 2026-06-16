@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -18,5 +18,24 @@ export const api = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ content })
-    }).then(j<SendResult>)
+    }).then(j<SendResult>),
+  createTopic: (body: CreateTopicBody) =>
+    fetch('/api/topics', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(j<Topic>),
+  runResearch: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/research`, { method: 'POST' }).then(j<ResearchResult>),
+  getFoundation: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/foundation`).then(j<Foundation>),
+  listEvents: (topicId: number) => fetch(`/api/topics/${topicId}/events`).then(j<EventOut[]>),
+  listSources: (topicId: number, status?: string) =>
+    fetch(`/api/topics/${topicId}/sources${status ? `?status=${status}` : ''}`).then(j<SourceDoc[]>),
+  reviewSources: (topicId: number, accepted_ids: number[], pruned_ids: number[]) =>
+    fetch(`/api/topics/${topicId}/sources/review`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ accepted_ids, pruned_ids })
+    }).then(j<SourceDoc[]>)
 };

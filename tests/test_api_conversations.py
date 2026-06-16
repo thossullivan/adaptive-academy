@@ -7,7 +7,7 @@ from adaptive_academy.api.app import create_app
 from adaptive_academy.api.deps import get_llm, get_session
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse, ToolCall
-from adaptive_academy.models import Concept, Conversation, KnowledgeEstimate, Topic, Track
+from adaptive_academy.models import Concept, KnowledgeEstimate, Topic, Track
 
 
 @pytest.fixture
