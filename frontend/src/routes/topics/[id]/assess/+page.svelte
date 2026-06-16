@@ -18,9 +18,21 @@
     if (cur?.concepts.length) conceptId = cur.concepts[0].id;
   });
 
+  let remediating = $state(false);
+  let remediatedCount = $state<number | null>(null);
+  async function remediate() {
+    if (conceptId == null) return;
+    remediating = true;
+    try {
+      const r = await api.remediate(conceptId);
+      remediatedCount = r.items.length;
+    } finally { remediating = false; }
+  }
+
   async function run() {
     if (conceptId == null) return;
     busy = true;
+    remediatedCount = null;
     try {
       result = await api.assess(conceptId, {
         kind, response,
@@ -73,6 +85,18 @@
           <ul class="list-disc ml-5 text-sm text-gray-700">
             {#each result.gaps as g}<li>{g}</li>{/each}
           </ul>
+          <button class="border rounded px-3 py-1 text-sm self-start disabled:opacity-50"
+                  onclick={remediate} disabled={remediating}>
+            {remediating ? 'Remediating…' : 'Remediate these gaps'}
+          </button>
+          {#if remediatedCount != null}
+            <p class="text-xs text-gray-600">
+              {remediatedCount > 0
+                ? `Injected ${remediatedCount} item(s) — see the track.`
+                : 'Already covered by an open remediation item.'}
+              <a class="underline" href="/topics/{topicId}/track">Open track →</a>
+            </p>
+          {/if}
         {/if}
         <a class="text-sm underline" href="/topics/{topicId}/retention">Review retention →</a>
       </section>
