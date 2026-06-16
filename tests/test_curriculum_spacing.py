@@ -37,3 +37,29 @@ def test_unreferenced_concept_is_touched_then_no_crash_single_phase():
     # single phase: cannot space, but should not crash and should touch it once
     refs = [c for p in out for it in p.items for c in it.concept_refs]
     assert "ghost" in refs
+
+
+def _phases_referencing(phases, concept):
+    return [i for i, p in enumerate(phases)
+            if any(concept in it.concept_refs for it in p.items)]
+
+
+def test_concept_only_in_last_phase_is_spaced_into_an_earlier_phase():
+    # A concept the LLM put only in the LAST phase must still span 2 phases.
+    phases = _phases()
+    phases[2].items.append(ItemView(text="late", type="read", concept_refs=["onlylast"]))
+    insert_spaced_revisits(phases, {"onlylast"})
+    assert len(_phases_referencing(phases, "onlylast")) >= 2
+
+
+def test_unreferenced_concept_spans_two_phases_when_multiple_phases():
+    phases = _phases()
+    insert_spaced_revisits(phases, {"ghost"})
+    assert len(_phases_referencing(phases, "ghost")) >= 2
+
+
+def test_spacing_is_idempotent():
+    phases = insert_spaced_revisits(_phases(), {"softmax", "ghost"})
+    count_before = sum(len(p.items) for p in phases)
+    insert_spaced_revisits(phases, {"softmax", "ghost"})
+    assert sum(len(p.items) for p in phases) == count_before  # no further injections

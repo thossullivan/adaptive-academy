@@ -51,13 +51,16 @@ def _revisit_item(concept: str) -> ItemView:
 
 
 def insert_spaced_revisits(phases: list[PhaseView], load_bearing: set[str]) -> list[PhaseView]:
-    """Guarantee every load-bearing concept is revisited across phases (code-enforced).
+    """Guarantee every load-bearing concept spans >=2 phases (code-enforced spacing).
+
+    Whenever at least two phases exist, every load-bearing concept ends up referenced
+    in >=2 distinct phases (the evidence rule: spaced, not massed). Idempotent.
 
     - referenced in >=2 phases -> already spaced, no-op
-    - referenced in exactly 1 phase p -> inject a 'revisit' write-item into the
-      earliest later phase that doesn't already reference it
-    - referenced in 0 phases -> inject a touch into the last phase
-    - single phase total -> can't space; ensure at least one touch in that phase
+    - referenced in exactly 1 phase p -> inject a 'revisit' write-item into a DIFFERENT
+      phase (the next one if it exists, else the previous), so it spans two
+    - referenced in 0 phases -> inject into the first and last phases (two distinct)
+    - single phase total -> cannot space; ensure at least one touch in that phase
     """
     for concept in sorted(load_bearing):
         refs = _phases_referencing(phases, concept)
@@ -65,13 +68,16 @@ def insert_spaced_revisits(phases: list[PhaseView], load_bearing: set[str]) -> l
             continue
         if not phases:
             break
+        if len(phases) == 1:
+            if not refs:  # cannot space with one phase; at least touch it once
+                phases[0].items.append(_revisit_item(concept))
+            continue
         if len(refs) == 1:
             p = refs[0]
-            target = next((j for j in range(p + 1, len(phases))), None)
-            if target is None:
-                continue  # only earlier/this phase exists; cannot space
-            phases[target].items.append(_revisit_item(concept))
-        else:  # 0 references
+            other = p + 1 if p + 1 < len(phases) else p - 1  # a different existing phase
+            phases[other].items.append(_revisit_item(concept))
+        else:  # 0 references, >=2 phases -> two distinct touches
+            phases[0].items.append(_revisit_item(concept))
             phases[-1].items.append(_revisit_item(concept))
     return phases
 

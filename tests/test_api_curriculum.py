@@ -71,3 +71,40 @@ def test_generate_400_without_foundation_or_accepted(session):
     r = client.post(f"/api/topics/{topic.id}/curriculum")
     assert r.status_code == 400
     app.dependency_overrides.clear()
+
+
+def test_generate_400_with_foundation_but_no_accepted_sources(session):
+    # Foundation present, but the reading list was never accepted -> distinct 400.
+    from adaptive_academy.models import Topic
+    client = _client(session)
+    topic = Topic(title="unreviewed")
+    session.add(topic)
+    session.commit()
+    session.add(TopicIntent(topic_id=topic.id, goal="g"))
+    session.add(TopicFoundation(topic_id=topic.id, overview="o",
+                key_concepts=["la"], prerequisite_map={}))
+    session.add(SourceDoc(topic_id=topic.id, title="S", url="u", tier=1, status="proposed"))
+    session.commit()
+    r = client.post(f"/api/topics/{topic.id}/curriculum")
+    assert r.status_code == 400
+    assert "accepted" in r.json()["detail"]
+    app.dependency_overrides.clear()
+
+
+def test_import_after_generate_replaces_track_without_crashing(session):
+    # Regression: import must delete the old track's Concepts (and estimates) too, or
+    # the cascade NULLs concept.track_id and raises IntegrityError. This is the normal
+    # generate -> export -> edit -> re-import flow.
+    client = _client(session)
+    tid = _seed_topic(session)
+    assert client.post(f"/api/topics/{tid}/curriculum").status_code == 200
+    md = client.get(f"/api/topics/{tid}/curriculum.md").text
+
+    r = client.post(f"/api/topics/{tid}/curriculum/import", json={"markdown": md})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["phases"][0]["title"] == "P1"
+    # exactly one track remains for the topic
+    r2 = client.get(f"/api/topics/{tid}/curriculum")
+    assert r2.status_code == 200
+    app.dependency_overrides.clear()

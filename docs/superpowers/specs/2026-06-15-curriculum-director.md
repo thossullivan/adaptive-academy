@@ -89,9 +89,12 @@ payoff. Fan-out is the natural next step if phases grow deep — revisit then.
 "Spaced revisits of load-bearing prerequisites across phases" is the load-bearing
 evidence rule (§§1,5,6). Rather than trust the LLM to honor it, a pure deterministic
 pass `insert_spaced_revisits(phases, load_bearing)` runs **after** parsing the LLM
-output and **guarantees** every load-bearing concept is revisited in a later phase
-(injecting a lightweight `write`-type "revisit & self-explain" item where the LLM
-didn't). This parallels Plan 1's **code-enforced attempt-gate** and Plan 2's
+output and **guarantees** every load-bearing concept spans **≥2 distinct phases**
+whenever the Track has ≥2 phases (injecting lightweight `write`-type "revisit &
+self-explain" items into a *different* phase where the LLM didn't — a concept the LLM
+left in only the last phase is revisited in an earlier one; an unreferenced concept is
+touched in the first and last phases). With a single phase, spacing is impossible, so
+it guarantees only one touch. This parallels Plan 1's **code-enforced attempt-gate** and Plan 2's
 **deterministic dedup/rank** — the pedagogy that matters is enforced in code and unit
 tested, not left to model goodwill. The pass emits a `curriculum:spaced` event so the
 enforcement is observable.
