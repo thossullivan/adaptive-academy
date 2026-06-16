@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from adaptive_academy.api import routes_conversations, routes_topics
+from adaptive_academy.api import routes_conversations, routes_items, routes_topics
 from adaptive_academy.db import create_db_and_tables
 
 
@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
 
     app.include_router(routes_topics.router)
     app.include_router(routes_conversations.router)
+    app.include_router(routes_items.router)
     return app
 
 
