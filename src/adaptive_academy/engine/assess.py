@@ -217,6 +217,10 @@ def _resolve_anchor(session: Session, concept: Concept,
                     anchor_id: int | None) -> ReferenceAnchor:
     if anchor_id is not None:
         anchor = session.get(ReferenceAnchor, anchor_id)
+        # Don't let a caller grade one concept against another concept's anchor.
+        # A topic-wide anchor (concept_id is None) is allowed for any concept.
+        if anchor is not None and anchor.concept_id not in (None, concept.id):
+            raise AnchorError("anchor belongs to a different concept")
     else:
         anchor = session.exec(
             select(ReferenceAnchor).where(ReferenceAnchor.concept_id == concept.id)

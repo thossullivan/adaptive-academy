@@ -57,6 +57,31 @@ def test_generate_is_idempotent(session):
     assert len(session.exec(select(ReferenceAnchor)).all()) == 1
 
 
+def test_generate_preserves_source_order_under_concurrency(session):
+    # Lock the fan-out invariant: with max_workers > 1, results are collected in
+    # SOURCE (rank) order, not completion order — and no Session is touched in a worker.
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    session.add(TopicFoundation(topic_id=topic.id, overview="o",
+                key_concepts=["c"], prerequisite_map={}))
+    track = Track(topic_id=topic.id, title="tr")
+    session.add(track)
+    session.commit()
+    srcs = []
+    for i in range(5):
+        s = SourceDoc(topic_id=topic.id, title=f"s{i}", url=f"u{i}",
+                      status="accepted", rank=i)
+        session.add(s)
+        srcs.append(s)
+    session.commit()
+    client = ScriptedAnchorClient({
+        s.id: [RawAnchor(question=f"q{i}")] for i, s in enumerate(srcs)})
+    res = generate_anchors(session, topic, anchor_client=client, max_workers=5)
+    # Persisted/returned anchors follow source rank order q0..q4.
+    assert [a.question for a in res.anchors] == [f"q{i}" for i in range(5)]
+
+
 def test_generate_raises_without_accepted_sources(session):
     topic = Topic(title="T")
     session.add(topic)
