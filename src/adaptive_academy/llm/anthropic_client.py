@@ -1,0 +1,38 @@
+import os
+from typing import Any
+
+from anthropic import Anthropic
+
+from adaptive_academy.llm.registry import get_model
+from adaptive_academy.llm.types import LLMResponse, ToolCall
+
+
+class AnthropicLLMClient:
+    """Sync, non-streaming Anthropic client implementing the LLMClient protocol."""
+
+    def __init__(self, role: str = "reasoning", max_tokens: int = 1024):
+        self._client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=3)
+        self._model = get_model(role)
+        self._max_tokens = max_tokens
+
+    def complete(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+    ) -> LLMResponse:
+        resp = self._client.messages.create(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            system=system,
+            messages=messages,
+            tools=tools,
+        )
+        text_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        for block in resp.content:
+            if block.type == "text":
+                text_parts.append(block.text)
+            elif block.type == "tool_use":
+                tool_calls.append(ToolCall(id=block.id, name=block.name, input=block.input))
+        return LLMResponse(text="".join(text_parts), tool_calls=tool_calls)
