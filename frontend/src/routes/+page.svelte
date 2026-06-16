@@ -43,6 +43,7 @@
 
 <main class="mx-auto max-w-2xl p-6">
   <header class="mb-4">
+    <a href="/topics/new" class="text-sm underline text-gray-600">+ New topic</a>
     <h1 class="text-2xl font-semibold">{topic?.title ?? 'Adaptive Academy'}</h1>
     <p class="text-sm text-gray-500">
       Concept: {topic?.concepts[0]?.name ?? '—'}
