@@ -51,7 +51,10 @@ def parse_sources_json(text: str) -> list[RawSource]:
 class AnthropicResearcherClient:
     """Real fan-out subagent: one Anthropic Messages call with the web_search tool."""
 
-    def __init__(self, role: str = "reasoning", max_tokens: int = 2048, max_searches: int = 5):
+    def __init__(self, role: str = "reasoning", max_tokens: int = 8192, max_searches: int = 5):
+        # 8192, not 2048: a web_search turn spends output tokens on the search then the
+        # source JSON; at 2048 it hit max_tokens and truncated mid-JSON, so every angle
+        # silently parsed to 0 sources. Billing is per output token, so the headroom is free.
         self._client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=2)
         self._model = get_model(role)
         self._max_tokens = max_tokens
