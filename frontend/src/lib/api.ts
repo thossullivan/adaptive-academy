@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -27,6 +27,8 @@ export const api = {
     }).then(j<Topic>),
   runResearch: (topicId: number) =>
     fetch(`/api/topics/${topicId}/research`, { method: 'POST' }).then(j<ResearchResult>),
+  getFoundation: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/foundation`).then(j<Foundation>),
   listSources: (topicId: number, status?: string) =>
     fetch(`/api/topics/${topicId}/sources${status ? `?status=${status}` : ''}`).then(j<SourceDoc[]>),
   reviewSources: (topicId: number, accepted_ids: number[], pruned_ids: number[]) =>
