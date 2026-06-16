@@ -86,4 +86,18 @@ describe('assessor api client', () => {
     expect(JSON.parse(opts.body)).toEqual({ result: 'good' });
     expect(out.reps).toBe(1);
   });
+
+  it('remediate posts to the concept remediate endpoint and returns items', async () => {
+    const remediation = {
+      items: [{ id: 9, text: 'x', type: 'read', status: 'todo', position: 0, is_remediation: true }],
+      events: []
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => remediation }) as any;
+    const out = await api.remediate(4, 7);
+    const [url, opts] = (global.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/concepts/4/remediate');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ from_assessment_id: 7 });
+    expect(out.items[0].is_remediation).toBe(true);
+  });
 });
