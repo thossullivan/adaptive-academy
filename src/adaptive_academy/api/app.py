@@ -1,5 +1,9 @@
-from fastapi import FastAPI
+import json
+
+import anthropic
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from adaptive_academy.api import routes_conversations, routes_items, routes_topics
 from adaptive_academy.api.routes_anchors import (
@@ -28,6 +32,28 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     def _startup() -> None:
         create_db_and_tables()
+
+    @app.exception_handler(anthropic.APIError)
+    def _llm_error(request: Request, exc: anthropic.APIError) -> JSONResponse:
+        """Turn upstream LLM failures into a legible 502 instead of a bare 500.
+
+        Covers every LLM-backed route at once (tutor/assess/remediate/research/anchors).
+        """
+        if isinstance(exc, anthropic.AuthenticationError):
+            detail = "LLM authentication failed — check ANTHROPIC_API_KEY in .env"
+        elif isinstance(exc, anthropic.RateLimitError):
+            detail = "LLM rate limit hit — wait a moment and retry"
+        else:
+            detail = f"LLM request failed upstream ({type(exc).__name__})"
+        return JSONResponse(status_code=502, content={"detail": detail})
+
+    @app.exception_handler(json.JSONDecodeError)
+    def _bad_llm_json(request: Request, exc: json.JSONDecodeError) -> JSONResponse:
+        """An LLM returned unparseable/truncated JSON — surface it as a retryable 502
+        rather than a bare 500. (Request-body JSON is validated by FastAPI before
+        reaching handlers, so a JSONDecodeError here is from parsing model output.)"""
+        return JSONResponse(status_code=502,
+                            content={"detail": "LLM returned malformed JSON — please retry"})
 
     @app.get("/api/health")
     def health() -> dict:
