@@ -47,7 +47,10 @@ anchored path. So we fan out anchor *generation*; the learner takes the quiz one
   `probe = anchor.question`, `reference = anchor.reference_answer`,
   `criteria = must_include = anchor.key_points` (key_points feed the deterministic
   anti-sycophancy rules layer), `rubric_id = None`, and persist `Assessment.anchor_id`. No
-  rubric is generated for source_quiz.
+  rubric is generated for source_quiz. (Anchors carry no `weak_signs`, so the deterministic
+  *misconception* check is rubric-only; the omission/anti-sycophancy check still fires via
+  `key_points`. An explicit `anchor_id` that belongs to a *different* concept is rejected —
+  topic-wide anchors with `concept_id = None` are allowed for any concept.)
 - **§2.7 Navigation (v1 slice of C).** `ConceptOut` gains `has_anchor: bool` (computed). The
   assess UI re-enables the **Source quiz** probe *only* for concepts that have an anchor,
   pre-filling the anchor's question. No heatmap; no track-wide sweep.

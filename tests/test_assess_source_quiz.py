@@ -62,3 +62,18 @@ def test_source_quiz_without_anchor_raises(session):
         assert False, "expected AnchorError"
     except AnchorError:
         pass
+
+
+def test_source_quiz_rejects_another_concepts_anchor(session):
+    # An explicit anchor_id belonging to a DIFFERENT concept must not be graded
+    # against this concept (cross-concept reuse via the public param).
+    topic, concept, anchor = _seed(session)
+    other = Concept(track_id=concept.track_id, name="layernorm")
+    session.add(other)
+    session.commit()
+    llm = ScriptedLLMClient([])  # must raise before any LLM call
+    try:
+        assess_concept(session, other, "source_quiz", "x", llm=llm, anchor_id=anchor.id)
+        assert False, "expected AnchorError"
+    except AnchorError:
+        pass
