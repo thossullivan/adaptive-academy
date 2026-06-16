@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,6 +20,12 @@ ops_router = APIRouter(prefix="/api/retention", tags=["retention"])
 
 _VALID_STATUS = {"active", "suspended"}
 _VALID_RESULT = {"again", "hard", "good", "easy"}
+
+
+def _naive_utc(dt: datetime) -> datetime:
+    """Normalize to tz-naive UTC. SQLite round-trips datetimes tz-stripped, so a
+    DB-loaded due_at may be naive while _now() is aware — compare both as naive."""
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
 
 
 def _card_out(c: SRSCard) -> SRSCardOut:
@@ -52,7 +59,7 @@ def propose(concept_id: int, body: ProposeRetentionIn,
 
 
 @topic_router.get("/{topic_id}/retention", response_model=RetentionOut)
-def list_retention(topic_id: int, status: Optional[str] = None,
+def list_retention(topic_id: int, status: Optional[str] = None, due: bool = False,
                    session: Session = Depends(get_session)) -> RetentionOut:
     concept_ids = [c.id for c in session.exec(
         select(Concept).join(Track).where(Track.topic_id == topic_id)).all()]
@@ -63,9 +70,16 @@ def list_retention(topic_id: int, status: Optional[str] = None,
     if status is not None:
         cq = cq.where(SRSCard.status == status)
         pq = pq.where(RecallPrompt.status == status)
+    cards = session.exec(cq).all()
+    prompts = session.exec(pq).all()
+    if due:
+        # The "due now" queue: active items whose due date has arrived.
+        cutoff = _naive_utc(datetime.now(timezone.utc))
+        cards = [c for c in cards if c.status == "active" and _naive_utc(c.due_at) <= cutoff]
+        prompts = [p for p in prompts if p.status == "active" and _naive_utc(p.due_at) <= cutoff]
     return RetentionOut(
-        cards=[_card_out(c) for c in session.exec(cq).all()],
-        prompts=[_prompt_out(p) for p in session.exec(pq).all()])
+        cards=[_card_out(c) for c in cards],
+        prompts=[_prompt_out(p) for p in prompts])
 
 
 @ops_router.post("/cards/{card_id}/review", response_model=SRSCardOut)
