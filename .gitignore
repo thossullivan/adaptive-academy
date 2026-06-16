@@ -15,4 +15,13 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# SvelteKit / Vite
+.svelte-kit/
+frontend/build/
+
+# SQLite (local DB + WAL/SHM)
+*.db
+*.db-wal
+*.db-shm
+
 .env
