@@ -32,6 +32,7 @@
   async function run() {
     if (conceptId == null) return;
     busy = true;
+    remediatedCount = null;
     try {
       result = await api.assess(conceptId, {
         kind, response,

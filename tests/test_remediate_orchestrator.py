@@ -82,6 +82,28 @@ def test_remediate_revisit_lands_in_later_phase(session):
     assert revisits[0].phase_id == p1.id
 
 
+def test_remediate_raises_when_track_has_no_phases(session):
+    # A concept-bearing track with zero phases (reachable via markdown import or an
+    # LLM that returned no phases) must 400 cleanly, not 500 on an empty-list index.
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    track = Track(topic_id=topic.id, title="tr")
+    session.add(track)
+    session.commit()
+    concept = Concept(track_id=track.id, name="softmax")
+    session.add(concept)
+    session.commit()
+    session.add(Assessment(concept_id=concept.id, kind="self_explanation", prompt="p",
+                           score=0.3, gaps=["gap A"]))
+    session.commit()
+    try:
+        remediate_concept(session, concept, llm=_llm([{"type": "build", "text": "x"}]))
+        assert False, "expected RemediationError"
+    except RemediationError:
+        pass
+
+
 def test_remediate_raises_without_assessment(session):
     topic = Topic(title="T")
     session.add(topic)
