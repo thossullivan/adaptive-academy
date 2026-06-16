@@ -1,58 +1,34 @@
 [project]
 name = "adaptive-academy"
 version = "0.1.0"
-description = "AI-powered personalized learning platform with development automation"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "python-dotenv>=1.0.0",
-    "baml-py==0.205.0",
-    "baml-cli>=0.1.0",
-    "developer-crew-ai[baml]",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sqlmodel>=0.0.22",
+    "alembic>=1.13",
+    "anthropic>=0.40",
+    "pydantic-settings>=2.5",
+    "python-dotenv>=1.0",
 ]
 
 [dependency-groups]
-dev = [
-    "black>=25.1.0",
-    "mypy>=1.17.1",
-    "pre-commit>=4.3.0",
-    "pytest>=8.4.1",
-    "pytest-asyncio>=0.24.0",
-    "httpx>=0.25.0",          # For TestClient
-    "ruff>=0.12.9",
-]
-
-# Developer Crew specific dependencies (now provided by the library)
-developer-crew = [
-    "developer-crew-ai[baml] @ file:///Users/tomsullivan/Projects/developer-crew-ai",
-]
+dev = ["pytest>=8.3", "httpx>=0.27", "ruff>=0.7"]
 
 [project.scripts]
-backend = "backend.main:app"
+aa = "adaptive_academy.cli:main"
 
-[tool.black]
-line-length = 88
-target-version = ['py312']
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.mypy]
-python_version = "3.12"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-
-[tool.ruff]
-line-length = 88
-target-version = "py312"
+[tool.hatch.build.targets.wheel]
+packages = ["src/adaptive_academy"]
 
 [tool.pytest.ini_options]
+pythonpath = ["src"]
 testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-asyncio_mode = "auto"
-markers = ["asyncio: marks tests as async"]
 
-[tool.uv.sources]
-developer-crew-ai = { path = "../developer-crew-ai", editable = true }
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]

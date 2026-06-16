@@ -1,1 +1,0 @@
-"""Shared code and utilities for Adaptive Academy."""
