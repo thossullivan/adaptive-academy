@@ -31,7 +31,7 @@ def _sample() -> TrackView:
 def test_track_to_markdown_golden_format():
     md = track_to_markdown(_sample())
     assert "# Build LLMs from scratch" in md
-    assert "## Phase 1 — Build a GPT by hand (Weeks 2-5) · _optional_" in md
+    assert "## Phase 1 — Build a GPT by hand · ⏳ Weeks 2-5 · _optional_" in md
     assert "- [x] (watch) Karpathy: Let's build GPT" in md
     assert "- [-] (build) Train a char-level GPT" in md
     assert "- **🎯 Ship:** (repo) nanoGPT-equivalent repo" in md
@@ -57,3 +57,45 @@ def test_round_trip_empty_and_multi_phase():
         sidebars=[],
     )
     assert markdown_to_track(track_to_markdown(tv)) == tv
+
+
+def test_round_trip_phase_title_ending_in_parens():
+    # A phase title that itself ends in "(...)" must not be mistaken for est_hours.
+    tv = TrackView(
+        title="T",
+        phases=[
+            PhaseView(title="Transformers (decoder-only)", items=[
+                ItemView(text="read RoPE (Su et al., 2021)", type="read")]),
+            PhaseView(title="Scaling (laws)", est_hours="Weeks 9-11",
+                      items=[ItemView(text="x", type="build")]),
+        ],
+    )
+    restored = markdown_to_track(track_to_markdown(tv))
+    assert restored == tv
+    assert restored.phases[0].title == "Transformers (decoder-only)"
+    assert restored.phases[0].est_hours == ""
+    assert restored.phases[1].est_hours == "Weeks 9-11"
+
+
+def test_round_trip_sidebar_body_with_structural_lines_and_blanks():
+    # A sidebar body containing "## " and "- [ ]" lines and internal blank lines must
+    # survive the round-trip (it must not leak a phantom phase or get truncated).
+    body = "Refresh:\n\n## attention\n- [ ] softmax(QKᵀ/√d)V\n\nmore notes"
+    tv = TrackView(
+        title="T",
+        phases=[PhaseView(title="P1", items=[ItemView(text="a", type="read")])],
+        sidebars=[
+            SidebarView(kind="math_refresh", title="Math", body=body),
+            SidebarView(kind="reading_list", title="Papers", body="GPT-2\nGPT-3"),
+        ],
+    )
+    restored = markdown_to_track(track_to_markdown(tv))
+    assert restored == tv
+    assert restored.sidebars[0].body == body
+    assert len(restored.phases) == 1  # no phantom phase from the "## attention" line
+
+
+def test_round_trip_overview_with_internal_blank_lines():
+    tv = TrackView(title="T", overview="para one\n\npara two",
+                   phases=[PhaseView(title="P1")])
+    assert markdown_to_track(track_to_markdown(tv)).overview == "para one\n\npara two"

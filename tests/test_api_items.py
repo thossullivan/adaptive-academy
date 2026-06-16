@@ -25,4 +25,8 @@ def test_patch_item_status(session):
     r = client.patch(f"/api/items/{item.id}", json={"status": "done"})
     assert r.status_code == 200 and r.json()["status"] == "done"
     assert client.patch("/api/items/9999", json={"status": "done"}).status_code == 404
+    # invalid status is rejected (and the item is left unchanged)
+    assert client.patch(f"/api/items/{item.id}", json={"status": "bogus"}).status_code == 422
+    session.refresh(item)
+    assert item.status == "done"
     app.dependency_overrides.clear()

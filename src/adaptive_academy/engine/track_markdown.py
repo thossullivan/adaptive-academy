@@ -52,9 +52,11 @@ def track_to_markdown(track: TrackView) -> str:
         lines += [track.overview, ""]
 
     for i, p in enumerate(track.phases):
+        # est_hours uses a "· ⏳ " marker (not bare parens) so a phase title may itself
+        # end in "(...)" without the parser mistaking it for est_hours.
         header = f"## Phase {i + 1} — {p.title}"
         if p.est_hours:
-            header += f" ({p.est_hours})"
+            header += f" · ⏳ {p.est_hours}"
         for fl in p.flags:
             header += f" · _{fl}_"
         lines.append(header)
@@ -80,7 +82,7 @@ def track_to_markdown(track: TrackView) -> str:
 
 _PHASE_RE = re.compile(r"^Phase \d+ — (?P<rest>.*)$")
 _FLAG_RE = re.compile(r" · _(\w+)_")
-_EST_RE = re.compile(r" \(([^)]*)\)$")
+_EST_RE = re.compile(r" · ⏳ (.*)$")
 _ITEM_RE = re.compile(r"^- \[(?P<box>.)\] \((?P<type>\w+)\) (?P<text>.*)$")
 _SHIP_RE = re.compile(r"^- \*\*🎯 Ship:\*\* \((?P<kind>\w+)\) (?P<text>.*)$")
 _ACCEPT_PREFIX = "  - acceptance: "
@@ -114,10 +116,9 @@ def markdown_to_track(md: str) -> TrackView:
     if i < n:
         title = lines[i][2:].strip()
         i += 1
-    # Overview: everything up to the first "## ".
+    # Overview: everything up to the first "## " (keep internal blanks; strip the ends).
     while i < n and not lines[i].startswith("## "):
-        if lines[i].strip():
-            overview_lines.append(lines[i])
+        overview_lines.append(lines[i])
         i += 1
 
     cur_phase: PhaseView | None = None
@@ -142,16 +143,18 @@ def markdown_to_track(md: str) -> TrackView:
                 cur_sidebar.kind = m.group("kind")
                 i += 1
             continue
+        # Inside a sidebar body, only the next "## Sidebar:" (handled above) ends it —
+        # so a body may contain "## " or "- [ ]" lines without leaking a phantom phase.
+        # (Sidebars are always serialized after all phases, so no phase follows one.)
+        if cur_sidebar is not None:
+            sidebar_body.append(line)
+            i += 1
+            continue
         if line.startswith("## "):
-            flush_sidebar()
             m = _PHASE_RE.match(line[3:])
             ptitle, est, flags = _parse_phase_header(m.group("rest")) if m else (line[3:].strip(), "", [])
             cur_phase = PhaseView(title=ptitle, est_hours=est, flags=flags)
             phases.append(cur_phase)
-            i += 1
-            continue
-        if cur_sidebar is not None:
-            sidebar_body.append(line)
             i += 1
             continue
         if cur_phase is not None:

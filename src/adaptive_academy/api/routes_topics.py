@@ -41,6 +41,7 @@ from adaptive_academy.models import (
     Concept,
     Deliverable,
     Item,
+    KnowledgeEstimate,
     Phase,
     Sidebar,
     SourceDoc,
@@ -346,6 +347,15 @@ def import_curriculum(
             session.delete(p)
         for s in session.exec(select(Sidebar).where(Sidebar.track_id == t.id)).all():
             session.delete(s)
+        # Concepts (and their estimates) belong to the track too — delete them before the
+        # track, or the default cascade NULLs concept.track_id and violates NOT NULL.
+        for c in session.exec(select(Concept).where(Concept.track_id == t.id)).all():
+            est = session.exec(
+                select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == c.id)
+            ).first()
+            if est:
+                session.delete(est)
+            session.delete(c)
         session.delete(t)
     session.commit()
 
