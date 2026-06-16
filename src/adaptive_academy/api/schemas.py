@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -7,10 +9,18 @@ class ConceptOut(BaseModel):
     is_load_bearing: bool
 
 
+class IntentOut(BaseModel):
+    goal: str
+    prior_knowledge: str
+    time_budget: str
+
+
 class TopicOut(BaseModel):
     id: int
     title: str
     concepts: list[ConceptOut]
+    intent: Optional[IntentOut] = None
+    has_foundation: bool = False
 
 
 class StartConversationIn(BaseModel):
@@ -47,3 +57,39 @@ class SendMessageOut(BaseModel):
     assistance_level: str
     challenge_level: str
     events: list[EventOut]
+
+
+class CreateTopicIn(BaseModel):
+    title: str
+    goal: str
+    prior_knowledge: str = ""
+    time_budget: str = ""
+
+
+class SourceDocOut(BaseModel):
+    id: int
+    title: str
+    url: str
+    tier: int
+    summary: str
+    why: str
+    rank: int
+    angle: str
+    status: str
+
+
+class FoundationOut(BaseModel):
+    overview: str
+    key_concepts: list[str]
+    prerequisite_map: dict
+
+
+class ResearchOut(BaseModel):
+    foundation: FoundationOut
+    sources: list[SourceDocOut]
+    events: list[EventOut]
+
+
+class ReviewSourcesIn(BaseModel):
+    accepted_ids: list[int] = []
+    pruned_ids: list[int] = []
