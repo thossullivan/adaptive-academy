@@ -1,15 +1,31 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
-from adaptive_academy.api.deps import get_session
+from adaptive_academy.api.deps import get_llm, get_researcher, get_session
 from adaptive_academy.api.schemas import (
     ConceptOut,
     CreateTopicIn,
+    EventOut,
     FoundationOut,
     IntentOut,
+    ResearchOut,
+    ReviewSourcesIn,
+    SourceDocOut,
     TopicOut,
 )
-from adaptive_academy.models import Concept, Topic, TopicFoundation, TopicIntent, Track
+from adaptive_academy.engine.research import research_topic
+from adaptive_academy.llm.researcher_types import ResearcherClient
+from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.models import (
+    Concept,
+    SourceDoc,
+    Topic,
+    TopicFoundation,
+    TopicIntent,
+    Track,
+)
 
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 
@@ -96,3 +112,71 @@ def get_foundation(
         key_concepts=fnd.key_concepts,
         prerequisite_map=fnd.prerequisite_map,
     )
+
+
+def _source_out(s: SourceDoc) -> SourceDocOut:
+    return SourceDocOut(
+        id=s.id, title=s.title, url=s.url, tier=s.tier, summary=s.summary,
+        why=s.why, rank=s.rank, angle=s.angle, status=s.status,
+    )
+
+
+@router.post("/{topic_id}/research", response_model=ResearchOut)
+def run_research(
+    topic_id: int,
+    session: Session = Depends(get_session),
+    researcher: ResearcherClient = Depends(get_researcher),
+    llm: LLMClient = Depends(get_llm),
+) -> ResearchOut:
+    topic = session.get(Topic, topic_id)
+    if topic is None:
+        raise HTTPException(status_code=404, detail="topic not found")
+    intent = session.exec(select(TopicIntent).where(TopicIntent.topic_id == topic_id)).first()
+    if intent is None:
+        raise HTTPException(status_code=400, detail="topic has no intent")
+
+    result = research_topic(session, topic, intent, researcher=researcher, llm=llm)
+    return ResearchOut(
+        foundation=FoundationOut(
+            overview=result.foundation.overview,
+            key_concepts=result.foundation.key_concepts,
+            prerequisite_map=result.foundation.prerequisite_map,
+        ),
+        sources=[_source_out(s) for s in sorted(result.sources, key=lambda x: x.rank)],
+        events=[EventOut(kind=e.kind, detail=e.detail) for e in result.events],
+    )
+
+
+@router.get("/{topic_id}/sources", response_model=list[SourceDocOut])
+def list_sources(
+    topic_id: int,
+    status: Optional[str] = None,
+    session: Session = Depends(get_session),
+) -> list[SourceDocOut]:
+    query = select(SourceDoc).where(SourceDoc.topic_id == topic_id)
+    if status is not None:
+        query = query.where(SourceDoc.status == status)
+    rows = session.exec(query).all()
+    rows.sort(key=lambda s: s.rank)
+    return [_source_out(s) for s in rows]
+
+
+@router.post("/{topic_id}/sources/review", response_model=list[SourceDocOut])
+def review_sources(
+    topic_id: int,
+    body: ReviewSourcesIn,
+    session: Session = Depends(get_session),
+) -> list[SourceDocOut]:
+    rows = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
+    by_id = {s.id: s for s in rows}
+    for sid in body.accepted_ids:
+        if sid in by_id:
+            by_id[sid].status = "accepted"
+    for sid in body.pruned_ids:
+        if sid in by_id:
+            by_id[sid].status = "pruned"
+    session.commit()
+    for s in rows:
+        session.refresh(s)
+    rows.sort(key=lambda s: s.rank)
+    return [_source_out(s) for s in rows]
