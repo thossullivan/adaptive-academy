@@ -176,3 +176,79 @@ class Sidebar(SQLModel, table=True):
     body: str = ""
     position: int = 0
     track: Optional[Track] = Relationship(back_populates="sidebars")
+
+
+class Rubric(SQLModel, table=True):
+    """Anchor the Assessor grades a concept's explanation against (§2.4)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    concept_id: int = Field(foreign_key="concept.id", unique=True)
+    criteria: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    must_include: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    strong_signs: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    weak_signs: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    source_refs: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    reviewed_by_user: bool = False
+    created_at: datetime = Field(default_factory=_now)
+
+
+class ReferenceAnchor(SQLModel, table=True):
+    """Ground truth for a source-derived quiz question (§2.4)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    source_doc_id: int = Field(foreign_key="sourcedoc.id")
+    concept_id: Optional[int] = Field(default=None, foreign_key="concept.id")
+    question: str
+    reference_answer: str = ""
+    key_points: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+
+
+class Assessment(SQLModel, table=True):
+    """A graded probe outcome, always recorded against an anchor (§2.4)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    concept_id: int = Field(foreign_key="concept.id")
+    item_id: Optional[int] = Field(default=None, foreign_key="item.id")
+    kind: str  # self_explanation | calibration | artifact_review | source_quiz | recall
+    prompt: str
+    response: str = ""
+    verdict: str = ""
+    score: float = 0.0  # 0..1, anchored
+    gaps: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    confidence_predicted: Optional[float] = None
+    confidence_actual: Optional[float] = None
+    rubric_id: Optional[int] = Field(default=None, foreign_key="rubric.id")
+    anchor_id: Optional[int] = Field(default=None, foreign_key="referenceanchor.id")
+    baseline_assessment_id: Optional[int] = Field(default=None, foreign_key="assessment.id")
+    delta: Optional[float] = None
+    created_at: datetime = Field(default_factory=_now)
+
+
+class SRSCard(SQLModel, table=True):
+    """Curated spaced-repetition card (SM-2), user-reviewed before rotation (§2.2)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    concept_id: int = Field(foreign_key="concept.id")
+    front: str
+    back: str
+    source_ref: str = ""
+    status: str = "proposed"  # proposed | active | suspended
+    ease: float = 2.5
+    interval: int = 0
+    reps: int = 0
+    due_at: datetime = Field(default_factory=_now)
+    last_result: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class RecallPrompt(SQLModel, table=True):
+    """Generative free-recall / Feynman prompt (§2.2)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    concept_id: int = Field(foreign_key="concept.id")
+    prompt: str
+    status: str = "proposed"  # proposed | active | suspended
+    due_at: datetime = Field(default_factory=_now)
+    last_result: str = ""
+    created_at: datetime = Field(default_factory=_now)

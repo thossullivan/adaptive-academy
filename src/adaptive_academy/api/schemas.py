@@ -7,6 +7,7 @@ class ConceptOut(BaseModel):
     id: int
     name: str
     is_load_bearing: bool
+    last_assessment_score: Optional[float] = None
 
 
 class IntentOut(BaseModel):
@@ -150,3 +151,70 @@ class ImportMarkdownIn(BaseModel):
 class ItemPatchIn(BaseModel):
     status: Optional[str] = None
     text: Optional[str] = None
+
+
+class AssessIn(BaseModel):
+    kind: str
+    response: str = ""
+    confidence_predicted: Optional[float] = None
+    baseline_id: Optional[int] = None
+    item_id: Optional[int] = None
+
+
+class AssessmentOut(BaseModel):
+    id: int
+    kind: str
+    prompt: str
+    response: str
+    verdict: str
+    score: float
+    gaps: list[str]
+    confidence_predicted: Optional[float] = None
+    confidence_actual: Optional[float] = None
+    delta: Optional[float] = None
+    estimate_level: Optional[str] = None
+
+
+class RubricOut(BaseModel):
+    id: int
+    concept_id: int
+    criteria: list[str]
+    must_include: list[str]
+    strong_signs: list[str]
+    weak_signs: list[str]
+    reviewed_by_user: bool
+
+
+class SRSCardOut(BaseModel):
+    id: int
+    concept_id: int
+    front: str
+    back: str
+    status: str
+    interval: int
+    reps: int
+    last_result: str
+
+
+class RecallPromptOut(BaseModel):
+    id: int
+    concept_id: int
+    prompt: str
+    status: str
+
+
+class RetentionOut(BaseModel):
+    cards: list[SRSCardOut]
+    prompts: list[RecallPromptOut]
+
+
+class ProposeRetentionIn(BaseModel):
+    from_assessment_id: Optional[int] = None
+
+
+class CardReviewIn(BaseModel):
+    status: str  # active | suspended
+
+
+class CardGradeIn(BaseModel):
+    result: str  # again | hard | good | easy
