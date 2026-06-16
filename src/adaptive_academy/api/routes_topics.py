@@ -248,7 +248,8 @@ def _curriculum_out(session: Session, track: Track, events=None) -> CurriculumOu
             id=p.id, title=p.title, position=p.position, est_hours=p.est_hours,
             flags=p.flags,
             items=[ItemOut(id=i.id, text=i.text, type=i.type, status=i.status,
-                           position=i.position) for i in items],
+                           position=i.position,
+                           is_remediation=i.added_by == "remediation") for i in items],
             deliverable=DeliverableOut(id=deliverable.id, kind=deliverable.kind,
                                        text=deliverable.text,
                                        acceptance_criteria=deliverable.acceptance_criteria)

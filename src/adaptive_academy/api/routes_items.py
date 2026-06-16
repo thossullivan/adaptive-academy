@@ -25,4 +25,5 @@ def patch_item(item_id: int, body: ItemPatchIn, session: Session = Depends(get_s
     session.commit()
     session.refresh(item)
     return ItemOut(id=item.id, text=item.text, type=item.type, status=item.status,
-                   position=item.position)
+                   position=item.position,
+                   is_remediation=item.added_by == "remediation")

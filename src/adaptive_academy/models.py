@@ -151,6 +151,8 @@ class Item(SQLModel, table=True):
     links: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     source_doc_id: Optional[int] = Field(default=None, foreign_key="sourcedoc.id")
     concept_refs: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    added_by: str = "curriculum"  # "curriculum" | "remediation"
+    remediation_key: str = ""  # idempotency signature for remediation items
     phase: Optional[Phase] = Relationship(back_populates="items")
 
 

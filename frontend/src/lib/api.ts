@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -80,5 +80,10 @@ export const api = {
     fetch(`/api/retention/cards/${cardId}/grade`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ result })
-    }).then(j<SRSCard>)
+    }).then(j<SRSCard>),
+  remediate: (conceptId: number, from_assessment_id?: number) =>
+    fetch(`/api/concepts/${conceptId}/remediate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ from_assessment_id })
+    }).then(j<Remediation>),
 };
