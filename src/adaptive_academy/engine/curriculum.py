@@ -1,5 +1,8 @@
 # src/adaptive_academy/engine/curriculum.py
 import json
+from dataclasses import dataclass
+
+from sqlmodel import Session
 
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
@@ -8,7 +11,21 @@ from adaptive_academy.engine.track_markdown import (
     SidebarView,
     TrackView,
 )
-from adaptive_academy.models import SourceDoc, TopicFoundation, TopicIntent
+from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.models import (
+    AgentEvent,
+    Concept,
+    Deliverable,
+    Item,
+    KnowledgeEstimate,
+    Phase,
+    Sidebar,
+    SourceDoc,
+    Topic,
+    TopicFoundation,
+    TopicIntent,
+    Track,
+)
 
 
 def load_bearing_concepts(prerequisite_map: dict) -> set[str]:
@@ -135,3 +152,79 @@ def build_curriculum_prompt(
     for s in sources:
         lines.append(f"- [{s.tier}] {s.title} ({s.url}) — {s.summary}".rstrip(" —"))
     return _CURRICULUM_SYSTEM, "\n".join(lines)
+
+
+@dataclass
+class CurriculumResult:
+    track: Track
+    events: list[AgentEvent]
+
+
+def generate_curriculum(
+    session: Session,
+    topic: Topic,
+    intent: TopicIntent,
+    foundation: TopicFoundation,
+    sources: list[SourceDoc],
+    *,
+    llm: LLMClient,
+) -> CurriculumResult:
+    """Single LLM call -> TrackView; enforce spacing; persist Track/Phase/Item/
+    Deliverable/Sidebar/Concept(+estimate); trace; return."""
+    events: list[AgentEvent] = []
+
+    def emit(kind: str, detail: str = "") -> None:
+        ev = AgentEvent(topic_id=topic.id, kind=kind, detail=detail)
+        session.add(ev)
+        events.append(ev)
+
+    emit("curriculum:plan", f"{len(foundation.key_concepts)} concepts, {len(sources)} sources")
+    system, user = build_curriculum_prompt(topic.title, intent, foundation, sources)
+    resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
+    draft = parse_curriculum_json(resp.text, title=topic.title)
+
+    lb = load_bearing_concepts(foundation.prerequisite_map)
+    before = sum(len(p.items) for p in draft.phases)
+    insert_spaced_revisits(draft.phases, lb)
+    revisits = sum(len(p.items) for p in draft.phases) - before
+    emit("curriculum:generated", f"{len(draft.phases)} phases")
+    if revisits:
+        emit("curriculum:spaced", f"{revisits} revisit item(s) injected")
+
+    track = Track(topic_id=topic.id, title=topic.title, overview=draft.overview)
+    session.add(track)
+    session.commit()
+    session.refresh(track)
+
+    for pi, pv in enumerate(draft.phases):
+        phase = Phase(track_id=track.id, title=pv.title, position=pi,
+                      est_hours=pv.est_hours, flags=pv.flags)
+        session.add(phase)
+        session.commit()
+        session.refresh(phase)
+        for ii, iv in enumerate(pv.items):
+            session.add(Item(phase_id=phase.id, text=iv.text, type=iv.type,
+                             position=ii, concept_refs=iv.concept_refs))
+        if pv.deliverable:
+            session.add(Deliverable(phase_id=phase.id, kind=pv.deliverable.kind,
+                                    text=pv.deliverable.text,
+                                    acceptance_criteria=pv.deliverable.acceptance_criteria))
+    for si, sv in enumerate(draft.sidebars):
+        session.add(Sidebar(track_id=track.id, kind=sv.kind, title=sv.title,
+                            body=sv.body, position=si))
+
+    lb_count = 0
+    for name in foundation.key_concepts:
+        is_lb = name in lb
+        lb_count += int(is_lb)
+        concept = Concept(track_id=track.id, name=name, is_load_bearing=is_lb)
+        session.add(concept)
+        session.commit()
+        session.refresh(concept)
+        session.add(KnowledgeEstimate(concept_id=concept.id, level="high", confidence=0.5))
+    emit("curriculum:concepts", f"{len(foundation.key_concepts)} concepts, {lb_count} load-bearing")
+
+    emit("curriculum:done", f"track {track.id}")
+    session.commit()
+    session.refresh(track)
+    return CurriculumResult(track=track, events=events)
