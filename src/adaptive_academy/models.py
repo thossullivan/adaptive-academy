@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
+from sqlalchemy import Column, JSON
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -63,10 +64,54 @@ class Message(SQLModel, table=True):
 
 
 class AgentEvent(SQLModel, table=True):
-    """Observability trace: one row per engine/agent step."""
+    """Observability trace: one row per engine/agent step.
+
+    Exactly one of conversation_id / topic_id is set (app-level invariant).
+    """
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    conversation_id: int = Field(foreign_key="conversation.id")
-    kind: str  # e.g. "levels", "llm_call", "tool:log_attempt", "tool:reveal_solution:blocked"
+    conversation_id: Optional[int] = Field(default=None, foreign_key="conversation.id")
+    topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
+    kind: str
     detail: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class TopicIntent(SQLModel, table=True):
+    """Structured onboarding brainstorm captured when a Topic is created."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    topic_id: int = Field(foreign_key="topic.id", unique=True)
+    goal: str
+    prior_knowledge: str = ""
+    time_budget: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class SourceDoc(SQLModel, table=True):
+    """A foundational source surfaced by the Researcher (tiered reading list)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    topic_id: int = Field(foreign_key="topic.id")
+    title: str
+    url: str
+    tier: int = 3  # 1 (authoritative) | 2 (synthesis) | 3 (supporting)
+    summary: str = ""
+    why: str = ""
+    relevance: float = 0.0  # subagent-reported, 0..1
+    rank: int = 0  # 0-based position after rank_sources
+    angle: str = ""  # which brief surfaced it
+    status: str = "proposed"  # proposed | accepted | pruned
+    added_by: str = "researcher"
+    created_at: datetime = Field(default_factory=_now)
+
+
+class TopicFoundation(SQLModel, table=True):
+    """Synthesized overview + concept map for a Topic (decoupled from Track/Concept)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    topic_id: int = Field(foreign_key="topic.id", unique=True)
+    overview: str = ""
+    key_concepts: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    prerequisite_map: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_now)
