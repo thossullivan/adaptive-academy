@@ -1,7 +1,7 @@
 # tests/test_track_markdown.py
 from adaptive_academy.engine.track_markdown import (
     DeliverableView, ItemView, PhaseView, SidebarView, TrackView,
-    track_to_markdown,
+    markdown_to_track, track_to_markdown,
 )
 
 
@@ -38,3 +38,22 @@ def test_track_to_markdown_golden_format():
     assert "  - acceptance: trains end to end" in md
     assert "## Sidebar: Math foundations" in md
     assert "_kind: math_refresh_" in md
+
+
+def test_markdown_round_trip_equality():
+    original = _sample()
+    restored = markdown_to_track(track_to_markdown(original))
+    assert restored == original
+
+
+def test_round_trip_empty_and_multi_phase():
+    tv = TrackView(
+        title="T", overview="",
+        phases=[
+            PhaseView(title="P1", items=[ItemView(text="a", type="read")]),
+            PhaseView(title="P2", est_hours="1h", flags=["stretch", "parallel_track"],
+                      items=[], deliverable=DeliverableView(text="d", kind="blog")),
+        ],
+        sidebars=[],
+    )
+    assert markdown_to_track(track_to_markdown(tv)) == tv
