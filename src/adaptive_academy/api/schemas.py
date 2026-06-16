@@ -21,6 +21,7 @@ class TopicOut(BaseModel):
     concepts: list[ConceptOut]
     intent: Optional[IntentOut] = None
     has_foundation: bool = False
+    has_track: bool = False
 
 
 class StartConversationIn(BaseModel):
@@ -93,3 +94,59 @@ class ResearchOut(BaseModel):
 class ReviewSourcesIn(BaseModel):
     accepted_ids: list[int] = []
     pruned_ids: list[int] = []
+
+
+class ItemOut(BaseModel):
+    id: int
+    text: str
+    type: str
+    status: str
+    position: int
+
+
+class DeliverableOut(BaseModel):
+    id: int
+    kind: str
+    text: str
+    acceptance_criteria: list[str]
+
+
+class SidebarOut(BaseModel):
+    id: int
+    kind: str
+    title: str
+    body: str
+    position: int
+
+
+class PhaseOut(BaseModel):
+    id: int
+    title: str
+    position: int
+    est_hours: str
+    flags: list[str]
+    items: list[ItemOut]
+    deliverable: Optional[DeliverableOut] = None
+
+
+class TrackOut(BaseModel):
+    id: int
+    title: str
+    overview: str
+
+
+class CurriculumOut(BaseModel):
+    track: TrackOut
+    phases: list[PhaseOut]
+    sidebars: list[SidebarOut]
+    concepts: list[ConceptOut]
+    events: list[EventOut] = []
+
+
+class ImportMarkdownIn(BaseModel):
+    markdown: str
+
+
+class ItemPatchIn(BaseModel):
+    status: Optional[str] = None
+    text: Optional[str] = None

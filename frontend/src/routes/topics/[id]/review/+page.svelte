@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import type { SourceDoc, Foundation, EventOut } from '$lib/types';
@@ -11,6 +12,7 @@
   let keep = $state<Record<number, boolean>>({});
   let busy = $state(false);
   let saved = $state(false);
+  let generating = $state(false);
 
   onMount(async () => {
     try {
@@ -30,6 +32,16 @@
       saved = true;
     } finally {
       busy = false;
+    }
+  }
+
+  async function generate() {
+    generating = true;
+    try {
+      await api.generateCurriculum(topicId);
+      await goto(`/topics/${topicId}/track`);
+    } finally {
+      generating = false;
     }
   }
 </script>
@@ -71,6 +83,13 @@
   <button class="bg-black text-white rounded px-4 py-2 disabled:opacity-50 self-start" onclick={save} disabled={busy || !sources.length}>
     {busy ? 'Saving…' : 'Save reading list'}
   </button>
+
+  {#if saved}
+    <button class="bg-black text-white rounded px-4 py-2 disabled:opacity-50 self-start"
+            onclick={generate} disabled={generating}>
+      {generating ? 'Generating…' : 'Generate curriculum →'}
+    </button>
+  {/if}
 
   {#if events.length}
     <details class="text-sm text-gray-600">
