@@ -2,11 +2,12 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { SourceDoc, Foundation } from '$lib/types';
+  import type { SourceDoc, Foundation, EventOut } from '$lib/types';
 
   const topicId = Number($page.params.id);
   let foundation = $state<Foundation | null>(null);
   let sources = $state<SourceDoc[]>([]);
+  let events = $state<EventOut[]>([]);
   let keep = $state<Record<number, boolean>>({});
   let busy = $state(false);
   let saved = $state(false);
@@ -17,6 +18,7 @@
     } catch { foundation = null; }
     sources = await api.listSources(topicId, 'proposed');
     for (const s of sources) keep[s.id] = true;
+    events = await api.listEvents(topicId);
   });
 
   async function save() {
@@ -69,4 +71,13 @@
   <button class="bg-black text-white rounded px-4 py-2 disabled:opacity-50 self-start" onclick={save} disabled={busy || !sources.length}>
     {busy ? 'Saving…' : 'Save reading list'}
   </button>
+
+  {#if events.length}
+    <details class="text-sm text-gray-600">
+      <summary class="cursor-pointer">What the agents did ({events.length})</summary>
+      <ul class="mt-2 flex flex-col gap-1">
+        {#each events as e}<li><span class="font-mono text-xs">{e.kind}</span> — {e.detail}</li>{/each}
+      </ul>
+    </details>
+  {/if}
 </main>

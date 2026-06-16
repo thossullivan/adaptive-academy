@@ -40,6 +40,12 @@ def test_research_review_roundtrip(session: Session):
     assert len(body["sources"]) == 2
     assert any(e["kind"] == "research:subagent" for e in body["events"])
 
+    events = client.get(f"/api/topics/{tid}/events").json()
+    assert len(events) > 0
+    kinds = {e["kind"] for e in events}
+    assert "research:subagent" in kinds
+    assert "research:done" in kinds
+
     proposed = client.get(f"/api/topics/{tid}/sources?status=proposed").json()
     assert len(proposed) == 2
     keep_id = proposed[0]["id"]
