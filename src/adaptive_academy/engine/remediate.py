@@ -1,5 +1,6 @@
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _VALID_TYPES = {"read", "build", "write", "watch"}
 _WS = re.compile(r"\s+")
@@ -50,3 +51,58 @@ def choose_target_phase(phase_item_statuses: list[list[str]]) -> int:
         if not statuses or any(s != "done" for s in statuses):
             return i
     return len(phase_item_statuses) - 1
+
+
+@dataclass
+class RemediationDraft:
+    items: list[dict] = field(default_factory=list)
+    revisit: dict | None = None
+
+
+def _strip_fences(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```", 2)[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[len("json"):]
+    return cleaned.strip()
+
+
+def parse_remediation_json(text: str) -> RemediationDraft:
+    d = json.loads(_strip_fences(text))
+    revisit = d.get("revisit") or None
+    return RemediationDraft(
+        items=list(d.get("items", []) or []),
+        revisit=revisit if isinstance(revisit, dict) else None,
+    )
+
+
+_REMEDIATE_SYSTEM = (
+    "You are a CurriculumDirector in ADAPT MODE for an ADVANCED, self-directed adult "
+    "learner who just revealed specific GAPS on one concept. Propose a SHORT, targeted "
+    "remediation. Evidence-driven rules (follow them):\n"
+    "- Default to LOW-ASSISTANCE, PROJECT/PROBLEM-FIRST items (expertise-reversal effect: "
+    "high guidance harms experts). Each item must directly attack a NAMED gap.\n"
+    "- Key the remediation to the learner's PRIOR-KNOWLEDGE level, not raw difficulty.\n"
+    "- Deliberate-practice drills are SUPPORTING, never the spine.\n"
+    "- Propose ONE item per listed gap, plus optionally ONE spaced 'revisit' for later.\n"
+    'Respond with ONLY a JSON object: {"items": [{"type": "read"|"build"|"write", '
+    '"text": str}], "revisit": {"text": str} | null}. No prose outside the JSON.'
+)
+
+
+def build_remediate_prompt(
+    concept_name: str, gaps: list[str], level: str, *,
+    foundation_overview: str = "", sources_summary: str = "",
+) -> tuple[str, str]:
+    lines = [
+        f"CONCEPT: {concept_name}",
+        f"LEARNER PRIOR-KNOWLEDGE LEVEL: {level}",
+        "ASSESSED GAPS (one targeted item each):",
+    ]
+    lines += [f"- {g}" for g in gaps]
+    if foundation_overview:
+        lines += ["", f"FOUNDATION OVERVIEW: {foundation_overview}"]
+    if sources_summary:
+        lines += [f"SOURCES: {sources_summary}"]
+    return _REMEDIATE_SYSTEM, "\n".join(lines)
