@@ -159,3 +159,124 @@ def ensure_rubric(session: Session, concept: Concept, *, llm: LLMClient) -> Rubr
     session.commit()
     session.refresh(rubric)
     return rubric
+
+
+_GRADE_SYSTEM = (
+    "You are a SKEPTICAL grader for an advanced learner's explanation. Grade the "
+    "RESPONSE strictly AGAINST the provided rubric/anchor — never from fluency, length, "
+    "or confidence. Reward only demonstrated understanding of the listed criteria; "
+    "penalize vagueness and missing required elements. Respond with ONLY a JSON object: "
+    '{"score": number 0..1, "verdict": str (one sentence), "gaps": [str, specific '
+    'missing/incorrect points], "confidence_actual": number 0..1 (same as score)}. '
+    "No prose outside the JSON."
+)
+
+_PROBE_TEXT = {
+    "self_explanation": "Explain *why* {concept} works, in your own words.",
+    "calibration": "Explain *why* {concept} works (we will compare to your confidence).",
+    "artifact_review": "Review your shipped artifact for {concept}: what does it "
+                       "demonstrate you understand, and where are the gaps?",
+    "source_quiz": "{question}",
+}
+
+
+@dataclass
+class AssessmentResult:
+    assessment: Assessment
+    estimate: KnowledgeEstimate
+    events: list[AgentEvent]
+
+
+def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
+                       reference: str, response: str) -> tuple[str, str]:
+    lines = [f"CONCEPT: {concept_name}", f"PROBE KIND: {kind}", "", "RUBRIC / ANCHOR:"]
+    for c in criteria:
+        lines.append(f"- {c}")
+    if reference:
+        lines.append(f"REFERENCE ANSWER: {reference}")
+    lines += ["", "LEARNER RESPONSE:", response or "(empty)"]
+    return _GRADE_SYSTEM, "\n".join(lines)
+
+
+def _deliverable_criteria(session: Session, item_id: int | None) -> list[str]:
+    if item_id is None:
+        return []
+    item = session.get(Item, item_id)
+    if item is None:
+        return []
+    d = session.exec(select(Deliverable).where(Deliverable.phase_id == item.phase_id)).first()
+    return d.acceptance_criteria if d else []
+
+
+def assess_concept(
+    session: Session,
+    concept: Concept,
+    kind: str,
+    response: str,
+    *,
+    llm: LLMClient,
+    confidence_predicted: float | None = None,
+    baseline_id: int | None = None,
+    item_id: int | None = None,
+) -> AssessmentResult:
+    """Run an anchored probe, persist an Assessment, and update the KnowledgeEstimate."""
+    events: list[AgentEvent] = []
+    topic_id = _topic_id_for(session, concept)
+
+    def emit(k: str, detail: str = "") -> None:
+        ev = AgentEvent(topic_id=topic_id, kind=k, detail=detail)
+        session.add(ev)
+        events.append(ev)
+
+    # Resolve the anchor (rubric vs. acceptance criteria) and the probe text.
+    rubric_id: int | None = None
+    must_include: list[str] = []
+    weak_signs: list[str] = []
+    reference = ""
+    if kind == "artifact_review":
+        criteria = _deliverable_criteria(session, item_id)
+        probe = _PROBE_TEXT[kind].format(concept=concept.name)
+    else:
+        rubric = ensure_rubric(session, concept, llm=llm)
+        rubric_id = rubric.id
+        criteria, must_include, weak_signs = rubric.criteria, rubric.must_include, rubric.weak_signs
+        probe = _PROBE_TEXT.get(kind, _PROBE_TEXT["self_explanation"]).format(
+            concept=concept.name, question=concept.name)
+    emit("assess:probe", kind)
+
+    system, user = build_grade_prompt(concept.name, kind, criteria, reference, response)
+    grade = parse_grade_json(
+        llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[]).text)
+
+    rules_gaps = apply_rules_checks(response, must_include, weak_signs)
+    if rules_gaps:
+        emit("assess:rules", f"{len(rules_gaps)} hard gap(s)")
+    final_score = penalize_score(grade.score, rules_gaps)
+    gaps = list(grade.gaps) + rules_gaps
+    emit("assess:graded", f"score={final_score}")
+
+    baseline = session.get(Assessment, baseline_id) if baseline_id else None
+    delta = compute_delta(final_score, baseline.score if baseline else None)
+    confidence_actual = final_score if kind == "calibration" else grade.confidence_actual
+
+    assessment = Assessment(
+        concept_id=concept.id, item_id=item_id, kind=kind, prompt=probe, response=response,
+        verdict=grade.verdict, score=final_score, gaps=gaps,
+        confidence_predicted=confidence_predicted, confidence_actual=confidence_actual,
+        rubric_id=rubric_id, baseline_assessment_id=baseline_id, delta=delta)
+    session.add(assessment)
+
+    level, conf = level_from_score(final_score)
+    estimate = session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
+    if estimate is None:
+        estimate = KnowledgeEstimate(concept_id=concept.id)
+        session.add(estimate)
+    estimate.level, estimate.confidence = level, conf
+    emit("assess:estimate", f"level={level}")
+
+    emit("assess:done", f"concept {concept.id}")
+    session.commit()
+    session.refresh(assessment)
+    session.refresh(estimate)
+    return AssessmentResult(assessment=assessment, estimate=estimate, events=events)
