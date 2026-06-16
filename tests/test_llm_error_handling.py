@@ -29,6 +29,15 @@ class _OverloadBoomLLM:
             body=None)
 
 
+class _BillingBoomLLM:
+    def complete(self, system, messages, tools):
+        raise anthropic.BadRequestError(
+            "Your credit balance is too low to access the Anthropic API.",
+            response=httpx.Response(
+                400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")),
+            body=None)
+
+
 def _seed_concept(session):
     topic = Topic(title="T")
     session.add(topic)
@@ -61,6 +70,18 @@ def test_llm_upstream_error_returns_clean_502(session):
                              json={"kind": "self_explanation", "response": "..."})
     assert r.status_code == 502
     assert "detail" in r.json()
+    app.dependency_overrides.clear()
+
+
+def test_upstream_error_surfaces_actionable_message(session):
+    # A vague "(BadRequestError)" hid "credit balance too low" during a live run.
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_llm] = lambda: _BillingBoomLLM()
+    cid = _seed_concept(session)
+    r = TestClient(app).post(f"/api/concepts/{cid}/assess",
+                             json={"kind": "self_explanation", "response": "..."})
+    assert r.status_code == 502
+    assert "credit balance is too low" in r.json()["detail"]
     app.dependency_overrides.clear()
 
 
