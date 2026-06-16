@@ -1,9 +1,13 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
+from sqlmodel import Session
+
+from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.models import AgentEvent, SourceDoc, Topic, TopicFoundation, TopicIntent
 
 # (angle_key, query_template) — {topic} is filled in. Order is the fan-out order.
 ANGLES: list[tuple[str, str]] = [
@@ -131,3 +135,90 @@ def synthesize_foundation(
         tools=[],
     )
     return _parse_foundation_json(resp.text)
+
+
+@dataclass
+class ResearchResult:
+    foundation: TopicFoundation
+    sources: list[SourceDoc]
+    events: list[AgentEvent]
+
+
+def research_topic(
+    session: Session,
+    topic: Topic,
+    intent: TopicIntent,
+    *,
+    researcher: ResearcherClient,
+    llm: LLMClient,
+    max_subagents: int = 5,
+    cap: int = 12,
+    max_workers: int = 5,
+) -> ResearchResult:
+    """Fan out over briefs, dedupe+rank, synthesize a foundation, persist, and trace."""
+    events: list[AgentEvent] = []
+
+    def emit(kind: str, detail: str = "") -> None:
+        ev = AgentEvent(topic_id=topic.id, kind=kind, detail=detail)
+        session.add(ev)
+        events.append(ev)
+
+    briefs = build_briefs(topic.title, intent.goal, max_subagents)
+    emit("research:plan", f"{len(briefs)} briefs")
+
+    # Fan out concurrently; collect per-brief results in brief order for deterministic tracing.
+    per_brief: list[list[RawSource]] = [[] for _ in briefs]
+    if briefs:
+        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(briefs)))) as ex:
+            futures = {ex.submit(researcher.search, b): i for i, b in enumerate(briefs)}
+            for fut in as_completed(futures):
+                per_brief[futures[fut]] = fut.result()
+
+    raw: list[RawSource] = []
+    for i, brief in enumerate(briefs):
+        found = per_brief[i]
+        for s in found:
+            s.angle = brief.angle
+        emit("research:subagent", f"{brief.angle}: {len(found)} sources")
+        raw.extend(found)
+
+    deduped = dedupe_by_url(raw)
+    ranked = rank_sources(deduped)
+    kept, dropped = ranked[:cap], ranked[cap:]
+    if dropped:
+        emit("research:capped", f"dropped {len(dropped)} of {len(ranked)}")
+
+    foundation_data = synthesize_foundation(topic.title, intent.goal, kept, llm)
+    emit("research:synth", f"{len(foundation_data.key_concepts)} key concepts")
+
+    source_rows: list[SourceDoc] = []
+    for idx, s in enumerate(kept):
+        row = SourceDoc(
+            topic_id=topic.id,
+            title=s.title,
+            url=s.url,
+            tier=s.tier,
+            summary=s.summary,
+            why=s.why,
+            relevance=s.relevance,
+            rank=idx,
+            angle=s.angle,
+            status="proposed",
+        )
+        session.add(row)
+        source_rows.append(row)
+
+    foundation = TopicFoundation(
+        topic_id=topic.id,
+        overview=foundation_data.overview,
+        key_concepts=foundation_data.key_concepts,
+        prerequisite_map=foundation_data.prerequisite_map,
+    )
+    session.add(foundation)
+    emit("research:done", f"{len(source_rows)} sources proposed")
+    session.commit()
+
+    for row in source_rows:
+        session.refresh(row)
+    session.refresh(foundation)
+    return ResearchResult(foundation=foundation, sources=source_rows, events=events)
