@@ -103,6 +103,7 @@ class ItemOut(BaseModel):
     type: str
     status: str
     position: int
+    is_remediation: bool = False
 
 
 class DeliverableOut(BaseModel):
@@ -218,3 +219,12 @@ class CardReviewIn(BaseModel):
 
 class CardGradeIn(BaseModel):
     result: str  # again | hard | good | easy
+
+
+class RemediateIn(BaseModel):
+    from_assessment_id: Optional[int] = None
+
+
+class RemediationOut(BaseModel):
+    items: list[ItemOut]
+    events: list[EventOut]
