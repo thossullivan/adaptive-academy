@@ -1,6 +1,22 @@
 import json
 from dataclasses import dataclass, field
 
+from sqlmodel import Session, select
+
+from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.models import (
+    AgentEvent,
+    Assessment,
+    Concept,
+    Deliverable,
+    Item,
+    KnowledgeEstimate,
+    Rubric,
+    SourceDoc,
+    TopicFoundation,
+    Track,
+)
+
 _OMISSION_PENALTY = 0.15
 
 
@@ -91,3 +107,55 @@ def parse_grade_json(text: str) -> GradeDraft:
         gaps=list(d.get("gaps", []) or []),
         confidence_actual=_as_float(d.get("confidence_actual"), None),
     )
+
+
+_RUBRIC_SYSTEM = (
+    "You build a grading rubric for one concept an advanced learner must explain. "
+    "Given the concept, the topic foundation, and sources, produce a rubric to grade a "
+    "learner's *explanation* against — NOT a model answer. Respond with ONLY a JSON object: "
+    '{"criteria": [str, prose points a correct explanation must address], '
+    '"must_include": [str, short LITERAL terms/expressions a correct explanation must '
+    'contain, e.g. "softmax", "QK^T", "scale by sqrt(d)"], "strong_signs": [str], '
+    '"weak_signs": [str, common misconceptions/red flags], "source_refs": [str]}. '
+    "Keep must_include to 3-6 precise, checkable terms. No prose outside the JSON."
+)
+
+
+def _topic_id_for(session: Session, concept: Concept) -> int:
+    return session.get(Track, concept.track_id).topic_id
+
+
+def build_rubric_prompt(concept_name: str, foundation: TopicFoundation | None,
+                        sources: list[SourceDoc]) -> tuple[str, str]:
+    lines = [f"CONCEPT: {concept_name}"]
+    if foundation:
+        lines.append(f"FOUNDATION OVERVIEW: {foundation.overview}")
+        lines.append(f"KEY CONCEPTS: {', '.join(foundation.key_concepts)}")
+    if sources:
+        lines.append("SOURCES:")
+        for s in sources:
+            lines.append(f"- [{s.tier}] {s.title} — {s.summary}".rstrip(" —"))
+    return _RUBRIC_SYSTEM, "\n".join(lines)
+
+
+def ensure_rubric(session: Session, concept: Concept, *, llm: LLMClient) -> Rubric:
+    """Get the concept's rubric, generating + caching it on first use (§2.1)."""
+    existing = session.exec(select(Rubric).where(Rubric.concept_id == concept.id)).first()
+    if existing is not None:
+        return existing
+    topic_id = _topic_id_for(session, concept)
+    foundation = session.exec(
+        select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)).first()
+    sources = session.exec(
+        select(SourceDoc).where(SourceDoc.topic_id == topic_id,
+                                SourceDoc.status == "accepted")).all()
+    system, user = build_rubric_prompt(concept.name, foundation, sources)
+    resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
+    draft = parse_rubric_json(resp.text)
+    rubric = Rubric(concept_id=concept.id, criteria=draft.criteria,
+                    must_include=draft.must_include, strong_signs=draft.strong_signs,
+                    weak_signs=draft.weak_signs, source_refs=draft.source_refs)
+    session.add(rubric)
+    session.commit()
+    session.refresh(rubric)
+    return rubric
