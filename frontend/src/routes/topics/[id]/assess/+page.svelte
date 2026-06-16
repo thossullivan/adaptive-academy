@@ -12,10 +12,27 @@
   let confidence = $state(70);
   let result = $state<Assessment | null>(null);
   let busy = $state(false);
+  let anchorQuestion = $state<string | null>(null);
 
   onMount(async () => {
     try { cur = await api.getCurriculum(topicId); } catch { cur = null; }
     if (cur?.concepts.length) conceptId = cur.concepts[0].id;
+  });
+
+  let selectedConcept = $derived(cur?.concepts.find((c) => c.id === conceptId) ?? null);
+
+  async function loadAnchor() {
+    anchorQuestion = null;
+    if (conceptId == null || kind !== 'source_quiz' || !selectedConcept?.has_anchor) return;
+    try {
+      const anchors = await api.listConceptAnchors(conceptId);
+      anchorQuestion = anchors.length ? anchors[0].question : null;
+    } catch { anchorQuestion = null; }
+  }
+
+  $effect(() => {
+    conceptId; kind;
+    loadAnchor();
   });
 
   let remediating = $state(false);
@@ -55,12 +72,16 @@
         <option value="self_explanation">Self-explanation</option>
         <option value="calibration">Calibration</option>
         <option value="artifact_review">Artifact review</option>
+        {#if selectedConcept?.has_anchor}<option value="source_quiz">Source quiz</option>{/if}
       </select>
     </label>
     {#if kind === 'calibration'}
       <label class="flex flex-col gap-1 text-sm">Your confidence: {confidence}%
         <input type="range" min="0" max="100" bind:value={confidence} />
       </label>
+    {/if}
+    {#if kind === 'source_quiz' && anchorQuestion}
+      <p class="text-sm font-medium">{anchorQuestion}</p>
     {/if}
     <textarea class="border rounded p-2 min-h-32" bind:value={response}
               placeholder="Explain in your own words…"></textarea>
