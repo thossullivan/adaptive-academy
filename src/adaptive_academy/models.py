@@ -20,8 +20,17 @@ class Track(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     topic_id: int = Field(foreign_key="topic.id")
     title: str
+    overview: str = ""
     topic: Optional[Topic] = Relationship(back_populates="tracks")
     concepts: list["Concept"] = Relationship(back_populates="track")
+    phases: list["Phase"] = Relationship(
+        back_populates="track",
+        sa_relationship_kwargs={"order_by": "Phase.position"},
+    )
+    sidebars: list["Sidebar"] = Relationship(
+        back_populates="track",
+        sa_relationship_kwargs={"order_by": "Sidebar.position"},
+    )
 
 
 class Concept(SQLModel, table=True):
@@ -115,3 +124,55 @@ class TopicFoundation(SQLModel, table=True):
     key_concepts: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     prerequisite_map: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_now)
+
+
+class Phase(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    track_id: int = Field(foreign_key="track.id")
+    title: str
+    position: int = 0
+    est_hours: str = ""
+    flags: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    track: Optional[Track] = Relationship(back_populates="phases")
+    items: list["Item"] = Relationship(
+        back_populates="phase",
+        sa_relationship_kwargs={"order_by": "Item.position"},
+    )
+    deliverable: Optional["Deliverable"] = Relationship(back_populates="phase")
+
+
+class Item(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    phase_id: int = Field(foreign_key="phase.id")
+    text: str
+    type: str = "read"  # read | watch | build | write
+    status: str = "todo"  # todo | doing | done
+    position: int = 0
+    links: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    source_doc_id: Optional[int] = Field(default=None, foreign_key="sourcedoc.id")
+    concept_refs: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    phase: Optional[Phase] = Relationship(back_populates="items")
+
+
+class Deliverable(SQLModel, table=True):
+    """The per-phase '🎯 Ship' teaching artifact."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    phase_id: int = Field(foreign_key="phase.id", unique=True)
+    kind: str = "blog"  # blog | repo | model | talk | ablation
+    text: str
+    acceptance_criteria: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    artifact_url: str = ""
+    review_verdict: str = ""
+    phase: Optional[Phase] = Relationship(back_populates="deliverable")
+
+
+class Sidebar(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    track_id: int = Field(foreign_key="track.id")
+    phase_id: Optional[int] = Field(default=None, foreign_key="phase.id")
+    kind: str  # math_refresh | reading_list | reference
+    title: str
+    body: str = ""
+    position: int = 0
+    track: Optional[Track] = Relationship(back_populates="sidebars")

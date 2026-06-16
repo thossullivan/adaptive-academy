@@ -18,3 +18,14 @@ export interface SourceDoc {
 export interface Foundation { overview: string; key_concepts: string[]; prerequisite_map: Record<string, string[]>; }
 export interface ResearchResult { foundation: Foundation; sources: SourceDoc[]; events: EventOut[]; }
 export interface CreateTopicBody { title: string; goal: string; prior_knowledge?: string; time_budget?: string; }
+export interface Item { id: number; text: string; type: string; status: string; position: number; }
+export interface Deliverable { id: number; kind: string; text: string; acceptance_criteria: string[]; }
+export interface Sidebar { id: number; kind: string; title: string; body: string; position: number; }
+export interface Phase {
+  id: number; title: string; position: number; est_hours: string; flags: string[];
+  items: Item[]; deliverable: Deliverable | null;
+}
+export interface TrackInfo { id: number; title: string; overview: string; }
+export interface Curriculum {
+  track: TrackInfo; phases: Phase[]; sidebars: Sidebar[]; concepts: Concept[]; events: EventOut[];
+}

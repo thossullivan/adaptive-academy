@@ -1,26 +1,49 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
 
 from adaptive_academy.api.deps import get_llm, get_researcher, get_session
 from adaptive_academy.api.schemas import (
     ConceptOut,
     CreateTopicIn,
+    CurriculumOut,
+    DeliverableOut,
     EventOut,
     FoundationOut,
+    ImportMarkdownIn,
     IntentOut,
+    ItemOut,
+    PhaseOut,
     ResearchOut,
     ReviewSourcesIn,
+    SidebarOut,
     SourceDocOut,
     TopicOut,
+    TrackOut,
 )
+from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.research import research_topic
+from adaptive_academy.engine.track_markdown import (
+    DeliverableView,
+    ItemView,
+    PhaseView,
+    SidebarView,
+    TrackView,
+    markdown_to_track,
+    track_to_markdown,
+)
 from adaptive_academy.llm.researcher_types import ResearcherClient
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
     Concept,
+    Deliverable,
+    Item,
+    KnowledgeEstimate,
+    Phase,
+    Sidebar,
     SourceDoc,
     Topic,
     TopicFoundation,
@@ -48,6 +71,9 @@ def _topic_out(session: Session, topic: Topic) -> TopicOut:
         ).first()
         is not None
     )
+    has_track = (
+        session.exec(select(Track).where(Track.topic_id == topic.id)).first() is not None
+    )
     return TopicOut(
         id=topic.id,
         title=topic.title,
@@ -63,6 +89,7 @@ def _topic_out(session: Session, topic: Topic) -> TopicOut:
         if intent
         else None,
         has_foundation=has_foundation,
+        has_track=has_track,
     )
 
 
@@ -194,3 +221,164 @@ def review_sources(
         session.refresh(s)
     rows.sort(key=lambda s: s.rank)
     return [_source_out(s) for s in rows]
+
+
+def _curriculum_out(session: Session, track: Track, events=None) -> CurriculumOut:
+    phases = session.exec(
+        select(Phase).where(Phase.track_id == track.id).order_by(Phase.position)
+    ).all()
+    phase_outs = []
+    for p in phases:
+        items = session.exec(
+            select(Item).where(Item.phase_id == p.id).order_by(Item.position)
+        ).all()
+        deliverable = session.exec(
+            select(Deliverable).where(Deliverable.phase_id == p.id)
+        ).first()
+        phase_outs.append(PhaseOut(
+            id=p.id, title=p.title, position=p.position, est_hours=p.est_hours,
+            flags=p.flags,
+            items=[ItemOut(id=i.id, text=i.text, type=i.type, status=i.status,
+                           position=i.position) for i in items],
+            deliverable=DeliverableOut(id=deliverable.id, kind=deliverable.kind,
+                                       text=deliverable.text,
+                                       acceptance_criteria=deliverable.acceptance_criteria)
+            if deliverable else None,
+        ))
+    sidebars = session.exec(
+        select(Sidebar).where(Sidebar.track_id == track.id).order_by(Sidebar.position)
+    ).all()
+    concepts = session.exec(select(Concept).where(Concept.track_id == track.id)).all()
+    return CurriculumOut(
+        track=TrackOut(id=track.id, title=track.title, overview=track.overview),
+        phases=phase_outs,
+        sidebars=[SidebarOut(id=s.id, kind=s.kind, title=s.title, body=s.body,
+                             position=s.position) for s in sidebars],
+        concepts=[ConceptOut(id=c.id, name=c.name, is_load_bearing=c.is_load_bearing)
+                  for c in concepts],
+        events=[EventOut(kind=e.kind, detail=e.detail) for e in (events or [])],
+    )
+
+
+def _track_view(session: Session, track: Track) -> TrackView:
+    phases = session.exec(
+        select(Phase).where(Phase.track_id == track.id).order_by(Phase.position)
+    ).all()
+    pvs = []
+    for p in phases:
+        items = session.exec(
+            select(Item).where(Item.phase_id == p.id).order_by(Item.position)
+        ).all()
+        d = session.exec(select(Deliverable).where(Deliverable.phase_id == p.id)).first()
+        pvs.append(PhaseView(
+            title=p.title, est_hours=p.est_hours, flags=p.flags,
+            items=[ItemView(text=i.text, type=i.type, status=i.status) for i in items],
+            deliverable=DeliverableView(text=d.text, kind=d.kind,
+                                        acceptance_criteria=d.acceptance_criteria)
+            if d else None,
+        ))
+    sidebars = session.exec(
+        select(Sidebar).where(Sidebar.track_id == track.id).order_by(Sidebar.position)
+    ).all()
+    return TrackView(
+        title=track.title, overview=track.overview, phases=pvs,
+        sidebars=[SidebarView(kind=s.kind, title=s.title, body=s.body) for s in sidebars])
+
+
+@router.post("/{topic_id}/curriculum", response_model=CurriculumOut)
+def generate_curriculum_route(
+    topic_id: int,
+    session: Session = Depends(get_session),
+    llm: LLMClient = Depends(get_llm),
+) -> CurriculumOut:
+    topic = session.get(Topic, topic_id)
+    if topic is None:
+        raise HTTPException(404, "topic not found")
+    intent = session.exec(select(TopicIntent).where(TopicIntent.topic_id == topic_id)).first()
+    if intent is None:
+        raise HTTPException(400, "topic has no intent")
+    foundation = session.exec(
+        select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)).first()
+    if foundation is None:
+        raise HTTPException(400, "topic has no foundation; run research first")
+    accepted = session.exec(
+        select(SourceDoc).where(SourceDoc.topic_id == topic_id,
+                                SourceDoc.status == "accepted")).all()
+    if not accepted:
+        raise HTTPException(400, "no accepted sources; review the reading list first")
+    accepted.sort(key=lambda s: s.rank)
+    result = generate_curriculum(session, topic, intent, foundation, accepted, llm=llm)
+    return _curriculum_out(session, result.track, result.events)
+
+
+@router.get("/{topic_id}/curriculum", response_model=CurriculumOut)
+def get_curriculum(topic_id: int, session: Session = Depends(get_session)) -> CurriculumOut:
+    track = session.exec(select(Track).where(Track.topic_id == topic_id)).first()
+    if track is None:
+        raise HTTPException(404, "no curriculum yet")
+    return _curriculum_out(session, track)
+
+
+@router.get("/{topic_id}/curriculum.md", response_class=PlainTextResponse)
+def export_curriculum(topic_id: int, session: Session = Depends(get_session)) -> str:
+    track = session.exec(select(Track).where(Track.topic_id == topic_id)).first()
+    if track is None:
+        raise HTTPException(404, "no curriculum yet")
+    return track_to_markdown(_track_view(session, track))
+
+
+@router.post("/{topic_id}/curriculum/import", response_model=CurriculumOut)
+def import_curriculum(
+    topic_id: int, body: ImportMarkdownIn, session: Session = Depends(get_session),
+) -> CurriculumOut:
+    topic = session.get(Topic, topic_id)
+    if topic is None:
+        raise HTTPException(404, "topic not found")
+    view = markdown_to_track(body.markdown)
+    # Replace any existing track for this topic.
+    old = session.exec(select(Track).where(Track.topic_id == topic_id)).all()
+    for t in old:
+        for p in session.exec(select(Phase).where(Phase.track_id == t.id)).all():
+            for it in session.exec(select(Item).where(Item.phase_id == p.id)).all():
+                session.delete(it)
+            d = session.exec(select(Deliverable).where(Deliverable.phase_id == p.id)).first()
+            if d:
+                session.delete(d)
+            session.delete(p)
+        for s in session.exec(select(Sidebar).where(Sidebar.track_id == t.id)).all():
+            session.delete(s)
+        # Concepts (and their estimates) belong to the track too — delete them before the
+        # track, or the default cascade NULLs concept.track_id and violates NOT NULL.
+        for c in session.exec(select(Concept).where(Concept.track_id == t.id)).all():
+            est = session.exec(
+                select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == c.id)
+            ).first()
+            if est:
+                session.delete(est)
+            session.delete(c)
+        session.delete(t)
+    session.commit()
+
+    track = Track(topic_id=topic_id, title=view.title, overview=view.overview)
+    session.add(track)
+    session.commit()
+    session.refresh(track)
+    for pi, pv in enumerate(view.phases):
+        phase = Phase(track_id=track.id, title=pv.title, position=pi,
+                      est_hours=pv.est_hours, flags=pv.flags)
+        session.add(phase)
+        session.commit()
+        session.refresh(phase)
+        for ii, iv in enumerate(pv.items):
+            session.add(Item(phase_id=phase.id, text=iv.text, type=iv.type,
+                             status=iv.status, position=ii))
+        if pv.deliverable:
+            session.add(Deliverable(phase_id=phase.id, kind=pv.deliverable.kind,
+                                    text=pv.deliverable.text,
+                                    acceptance_criteria=pv.deliverable.acceptance_criteria))
+    for si, sv in enumerate(view.sidebars):
+        session.add(Sidebar(track_id=track.id, kind=sv.kind, title=sv.title,
+                            body=sv.body, position=si))
+    session.commit()
+    session.refresh(track)
+    return _curriculum_out(session, track)
