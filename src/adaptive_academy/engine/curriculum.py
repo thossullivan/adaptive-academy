@@ -1,5 +1,13 @@
 # src/adaptive_academy/engine/curriculum.py
-from adaptive_academy.engine.track_markdown import ItemView, PhaseView
+import json
+
+from adaptive_academy.engine.track_markdown import (
+    DeliverableView,
+    ItemView,
+    PhaseView,
+    SidebarView,
+    TrackView,
+)
 
 
 def load_bearing_concepts(prerequisite_map: dict) -> set[str]:
@@ -48,3 +56,39 @@ def insert_spaced_revisits(phases: list[PhaseView], load_bearing: set[str]) -> l
         else:  # 0 references
             phases[-1].items.append(_revisit_item(concept))
     return phases
+
+
+def _strip_fences(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```", 2)[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[len("json"):]
+    return cleaned.strip()
+
+
+def parse_curriculum_json(text: str, title: str) -> TrackView:
+    data = json.loads(_strip_fences(text))
+    phases: list[PhaseView] = []
+    for p in data.get("phases", []) or []:
+        items = [
+            ItemView(text=str(it.get("text", "")), type=str(it.get("type", "read")),
+                     concept_refs=list(it.get("concept_refs", []) or []))
+            for it in (p.get("items", []) or [])
+        ]
+        d = p.get("deliverable") or None
+        deliverable = None
+        if d:
+            deliverable = DeliverableView(
+                text=str(d.get("text", "")), kind=str(d.get("kind", "blog")),
+                acceptance_criteria=list(d.get("acceptance_criteria", []) or []))
+        phases.append(PhaseView(
+            title=str(p.get("title", "")), est_hours=str(p.get("est_hours", "")),
+            flags=list(p.get("flags", []) or []), items=items, deliverable=deliverable))
+    sidebars = [
+        SidebarView(kind=str(s.get("kind", "reference")), title=str(s.get("title", "")),
+                    body=str(s.get("body", "")))
+        for s in (data.get("sidebars", []) or [])
+    ]
+    return TrackView(title=title, overview=str(data.get("overview", "")),
+                     phases=phases, sidebars=sidebars)
