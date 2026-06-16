@@ -2,6 +2,21 @@ import json
 import re
 from dataclasses import dataclass, field
 
+from sqlmodel import Session, select
+
+from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.models import (
+    AgentEvent,
+    Assessment,
+    Concept,
+    Item,
+    KnowledgeEstimate,
+    Phase,
+    SourceDoc,
+    TopicFoundation,
+    Track,
+)
+
 _VALID_TYPES = {"read", "build", "write", "watch"}
 _WS = re.compile(r"\s+")
 
@@ -106,3 +121,115 @@ def build_remediate_prompt(
     if sources_summary:
         lines += [f"SOURCES: {sources_summary}"]
     return _REMEDIATE_SYSTEM, "\n".join(lines)
+
+
+class RemediationError(Exception):
+    """No assessment to remediate from (route maps to HTTP 400)."""
+
+
+@dataclass
+class RemediationResult:
+    items: list[Item]
+    events: list[AgentEvent]
+
+
+def _latest_assessment(session: Session, concept_id: int,
+                       assessment_id: int | None) -> Assessment | None:
+    if assessment_id is not None:
+        return session.get(Assessment, assessment_id)
+    return session.exec(
+        select(Assessment).where(Assessment.concept_id == concept_id)
+        .order_by(Assessment.id.desc())).first()
+
+
+def _covered_keys(session: Session, track_id: int, concept_name: str) -> set[str]:
+    """remediation_keys of still-OPEN remediation items referencing this concept."""
+    rows = session.exec(
+        select(Item).join(Phase).where(Phase.track_id == track_id)).all()
+    return {
+        it.remediation_key for it in rows
+        if it.added_by == "remediation" and it.status != "done"
+        and concept_name in (it.concept_refs or [])
+    }
+
+
+def remediate_concept(session: Session, concept: Concept, *,
+                      llm: LLMClient, assessment_id: int | None = None) -> RemediationResult:
+    track = session.get(Track, concept.track_id)
+    topic_id = track.topic_id
+    events: list[AgentEvent] = []
+
+    def emit(kind: str, detail: str = "") -> None:
+        ev = AgentEvent(topic_id=topic_id, kind=kind, detail=detail)
+        session.add(ev)
+        events.append(ev)
+
+    assessment = _latest_assessment(session, concept.id, assessment_id)
+    if assessment is None:
+        raise RemediationError("no assessment to remediate from")
+
+    covered = _covered_keys(session, track.id, concept.name)
+    open_gaps = [g for g in (assessment.gaps or []) if gap_key(g) not in covered]
+    emit("remediate:probe", f"{len(open_gaps)} open gap(s)")
+    if not open_gaps:
+        emit("remediate:done", "nothing to remediate")
+        session.commit()
+        return RemediationResult(items=[], events=events)
+
+    estimate = session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
+    level = estimate.level if estimate else "high"
+    foundation = session.exec(
+        select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)).first()
+    sources = session.exec(
+        select(SourceDoc).where(SourceDoc.topic_id == topic_id,
+                                SourceDoc.status == "accepted")).all()
+    sources_summary = "; ".join(s.title for s in sources)
+
+    system, user = build_remediate_prompt(
+        concept.name, open_gaps, level,
+        foundation_overview=(foundation.overview if foundation else ""),
+        sources_summary=sources_summary)
+    draft = parse_remediation_json(
+        llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[]).text)
+
+    planned = plan_remediation_items(draft.items, concept.name, open_gaps, covered)
+    emit("remediate:generated", f"{len(planned)} item(s)")
+
+    phases = session.exec(
+        select(Phase).where(Phase.track_id == track.id).order_by(Phase.position)).all()
+    statuses = [
+        [it.status for it in session.exec(
+            select(Item).where(Item.phase_id == p.id)).all()]
+        for p in phases
+    ]
+    target_idx = choose_target_phase(statuses)
+    target = phases[target_idx]
+    base_pos = len(statuses[target_idx])
+
+    created: list[Item] = []
+    for offset, pi in enumerate(planned):
+        item = Item(phase_id=target.id, text=pi.text, type=pi.type,
+                    position=base_pos + offset, concept_refs=pi.concept_refs,
+                    added_by="remediation", remediation_key=pi.remediation_key)
+        session.add(item)
+        created.append(item)
+    emit("remediate:placed", f"phase {target.position}")
+
+    revisit_key = f"revisit:{gap_key(concept.name)}"
+    if draft.revisit and revisit_key not in covered:
+        later = phases[target_idx + 1] if target_idx + 1 < len(phases) else target
+        rtext = str(draft.revisit.get("text") or "").strip() or \
+            f"Revisit & self-explain: {concept.name}"
+        rpos = len(session.exec(select(Item).where(Item.phase_id == later.id)).all())
+        ritem = Item(phase_id=later.id, text=rtext, type="write", position=rpos,
+                     concept_refs=[concept.name], added_by="remediation",
+                     remediation_key=revisit_key)
+        session.add(ritem)
+        created.append(ritem)
+
+    emit("remediate:done", f"concept {concept.id}")
+    session.commit()
+    for it in created:
+        session.refresh(it)
+    return RemediationResult(items=created, events=events)
