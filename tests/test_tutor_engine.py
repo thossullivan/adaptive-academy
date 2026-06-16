@@ -1,4 +1,4 @@
-from adaptive_academy.engine.tutor import run_tutor_turn
+from adaptive_academy.engine.tutor import _FALLBACK, _MAX_STEPS, run_tutor_turn
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse, ToolCall
 from adaptive_academy.models import (
@@ -71,3 +71,17 @@ def test_plain_reply_persists_messages(session):
     assert result.reply == "What do you already know about it?"
     # First call should include the computed levels in the system prompt (expert -> low/high)
     assert "Assistance level = low" in llm.calls[0]["system"]
+
+
+def test_max_steps_exhaustion_falls_back(session):
+    convo = _seed(session)
+    # Model calls a tool on every step and never returns text -> loop exhausts.
+    llm = ScriptedLLMClient([
+        LLMResponse(tool_calls=[ToolCall(id=f"t{i}", name="log_attempt",
+                                         input={"summary": "x"})])
+        for i in range(_MAX_STEPS)
+    ])
+    result = run_tutor_turn(session, convo, "...", llm)
+
+    assert result.reply == _FALLBACK
+    assert any(e.kind == "max_steps_exhausted" for e in result.events)
