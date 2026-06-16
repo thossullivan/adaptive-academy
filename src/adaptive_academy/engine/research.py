@@ -59,3 +59,20 @@ def dedupe_by_url(sources: list[RawSource]) -> list[RawSource]:
         if key not in best or _richness(s) > _richness(best[key]):
             best[key] = s
     return [best[k] for k in sorted(best)]
+
+
+_TIER_SCORE = {1: 1.0, 2: 0.6, 3: 0.3}
+_W_TIER = 0.6
+_W_REL = 0.4
+
+
+def score_source(s: RawSource) -> float:
+    """Deterministic relevance/authority score in [0, 1]."""
+    tier = _TIER_SCORE.get(s.tier, 0.3)
+    rel = max(0.0, min(1.0, s.relevance))
+    return _W_TIER * tier + _W_REL * rel
+
+
+def rank_sources(sources: list[RawSource]) -> list[RawSource]:
+    """Return a new list ordered by score desc, tie-broken by url ascending (total order)."""
+    return sorted(sources, key=lambda s: (-score_source(s), s.url))
