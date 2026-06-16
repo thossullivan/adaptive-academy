@@ -56,3 +56,34 @@ describe('curriculum api client', () => {
     expect(out.status).toBe('done');
   });
 });
+
+describe('assessor api client', () => {
+  it('assess posts the probe and returns the assessment', async () => {
+    const assessment = {
+      id: 7, kind: 'self_explanation', prompt: 'p', response: 'r', verdict: 'weak',
+      score: 0.3, gaps: ['vague'], confidence_predicted: null, confidence_actual: null,
+      delta: null, estimate_level: 'low'
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => assessment }) as any;
+    const out = await api.assess(1, { kind: 'self_explanation', response: 'r' });
+    const [url, opts] = (global.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/concepts/1/assess');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ kind: 'self_explanation', response: 'r' });
+    expect(out.estimate_level).toBe('low');
+  });
+
+  it('gradeCard posts the result and returns the card', async () => {
+    const card = {
+      id: 2, concept_id: 1, front: 'f', back: 'b', status: 'active',
+      interval: 1, reps: 1, last_result: 'good'
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => card }) as any;
+    const out = await api.gradeCard(2, 'good');
+    const [url, opts] = (global.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/retention/cards/2/grade');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ result: 'good' });
+    expect(out.reps).toBe(1);
+  });
+});

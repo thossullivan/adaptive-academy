@@ -29,3 +29,22 @@ export interface TrackInfo { id: number; title: string; overview: string; }
 export interface Curriculum {
   track: TrackInfo; phases: Phase[]; sidebars: Sidebar[]; concepts: Concept[]; events: EventOut[];
 }
+export interface Assessment {
+  id: number; kind: string; prompt: string; response: string; verdict: string;
+  score: number; gaps: string[]; confidence_predicted: number | null;
+  confidence_actual: number | null; delta: number | null; estimate_level: string | null;
+}
+export interface Rubric {
+  id: number; concept_id: number; criteria: string[]; must_include: string[];
+  strong_signs: string[]; weak_signs: string[]; reviewed_by_user: boolean;
+}
+export interface SRSCard {
+  id: number; concept_id: number; front: string; back: string; status: string;
+  interval: number; reps: number; last_result: string;
+}
+export interface RecallPromptItem { id: number; concept_id: number; prompt: string; status: string; }
+export interface Retention { cards: SRSCard[]; prompts: RecallPromptItem[]; }
+export interface AssessBody {
+  kind: string; response?: string; confidence_predicted?: number | null;
+  baseline_id?: number | null; item_id?: number | null;
+}
