@@ -176,6 +176,11 @@ def remediate_concept(session: Session, concept: Concept, *,
         session.commit()
         return RemediationResult(items=[], events=events)
 
+    phases = session.exec(
+        select(Phase).where(Phase.track_id == track.id).order_by(Phase.position)).all()
+    if not phases:
+        raise RemediationError("track has no phases to remediate into")
+
     estimate = session.exec(
         select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
     level = estimate.level if estimate else "high"
@@ -196,8 +201,6 @@ def remediate_concept(session: Session, concept: Concept, *,
     planned = plan_remediation_items(draft.items, concept.name, open_gaps, covered)
     emit("remediate:generated", f"{len(planned)} item(s)")
 
-    phases = session.exec(
-        select(Phase).where(Phase.track_id == track.id).order_by(Phase.position)).all()
     statuses = [
         [it.status for it in session.exec(
             select(Item).where(Item.phase_id == p.id)).all()]
