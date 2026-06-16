@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -37,5 +37,17 @@ export const api = {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ accepted_ids, pruned_ids })
-    }).then(j<SourceDoc[]>)
+    }).then(j<SourceDoc[]>),
+  generateCurriculum: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/curriculum`, { method: 'POST' }).then(j<Curriculum>),
+  getCurriculum: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/curriculum`).then(j<Curriculum>),
+  exportCurriculumMd: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/curriculum.md`).then((r) => r.text()),
+  updateItem: (itemId: number, patch: { status?: string; text?: string }) =>
+    fetch(`/api/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch)
+    }).then(j<Item>)
 };
