@@ -51,11 +51,12 @@
         </h2>
         <ul class="flex flex-col gap-1">
           {#each p.items as it (it.id)}
-            <li class="flex gap-2 items-center text-sm">
+            <li class="flex gap-2 items-center text-sm {it.is_remediation ? 'bg-amber-50 rounded px-1' : ''}">
               <button class="font-mono text-xs border rounded px-1"
                       onclick={() => toggle(it.id, it.status)}>{it.status}</button>
               <span class="text-xs text-gray-500">({it.type})</span>
               <span>{it.text}</span>
+              {#if it.is_remediation}<span class="text-xs bg-amber-200 rounded px-1">remediation</span>{/if}
             </li>
           {/each}
         </ul>
