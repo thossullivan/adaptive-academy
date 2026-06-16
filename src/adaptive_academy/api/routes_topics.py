@@ -19,6 +19,7 @@ from adaptive_academy.engine.research import research_topic
 from adaptive_academy.llm.researcher_types import ResearcherClient
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
+    AgentEvent,
     Concept,
     SourceDoc,
     Topic,
@@ -145,6 +146,19 @@ def run_research(
         sources=[_source_out(s) for s in sorted(result.sources, key=lambda x: x.rank)],
         events=[EventOut(kind=e.kind, detail=e.detail) for e in result.events],
     )
+
+
+@router.get("/{topic_id}/events", response_model=list[EventOut])
+def list_events(
+    topic_id: int,
+    session: Session = Depends(get_session),
+) -> list[EventOut]:
+    rows = session.exec(
+        select(AgentEvent)
+        .where(AgentEvent.topic_id == topic_id)
+        .order_by(AgentEvent.id)
+    ).all()
+    return [EventOut(kind=e.kind, detail=e.detail) for e in rows]
 
 
 @router.get("/{topic_id}/sources", response_model=list[SourceDocOut])

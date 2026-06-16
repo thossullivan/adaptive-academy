@@ -1,4 +1,3 @@
-import pytest
 
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
 from adaptive_academy.llm.scripted_researcher import ScriptedResearcherClient
