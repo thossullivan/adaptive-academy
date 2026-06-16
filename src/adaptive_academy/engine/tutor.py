@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlmodel import Session
@@ -9,6 +10,7 @@ from adaptive_academy.llm.types import LLMClient, LLMResponse, ToolCall
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
 
 _MAX_STEPS = 6
+_FALLBACK = "Let's slow down — tell me what you've tried so far, and we'll work from there."
 
 
 @dataclass
@@ -48,8 +50,8 @@ def run_tutor_turn(
     messages = _history(convo)
     reply_text = ""
 
-    for _ in range(_MAX_STEPS):
-        emit("llm_call")
+    for step in range(_MAX_STEPS):
+        emit("llm_call", f"step={step + 1}")
         resp: LLMResponse = llm.complete(system=system, messages=messages, tools=TOOLS)
 
         if not resp.tool_calls:
@@ -59,14 +61,24 @@ def run_tutor_turn(
         # Echo the assistant tool-use turn into the running transcript.
         messages.append({"role": "assistant", "content": _assistant_tool_blocks(resp)})
         tool_results = []
+        revealed_text: str | None = None
         for call in resp.tool_calls:
             ok, payload = _execute_tool(session, convo, call, emit)
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": call.id, "content": payload}
             )
             if call.name == "reveal_solution" and ok:
-                reply_text = call.input.get("text", "")
+                revealed_text = call.input.get("text", "")
         messages.append({"role": "user", "content": tool_results})
+
+        # An allowed reveal is terminal: the tool is the authoritative source of the answer.
+        if revealed_text is not None:
+            reply_text = revealed_text
+            break
+
+    if reply_text == "":
+        emit("max_steps_exhausted")
+        reply_text = _FALLBACK
 
     # Persist the tutor reply.
     session.add(Message(conversation_id=convo.id, role="tutor", content=reply_text))
@@ -85,7 +97,12 @@ def _assistant_tool_blocks(resp: LLMResponse) -> list[dict]:
     return blocks
 
 
-def _execute_tool(session, convo: Conversation, call: ToolCall, emit) -> tuple[bool, str]:
+def _execute_tool(
+    session: Session,
+    convo: Conversation,
+    call: ToolCall,
+    emit: Callable[..., None],
+) -> tuple[bool, str]:
     tier = TIERS.get(call.name, "auto")
 
     if call.name == "log_attempt":
