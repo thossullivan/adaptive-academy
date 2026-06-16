@@ -34,7 +34,11 @@
   {#if cur}
     <div class="flex items-center justify-between">
       <h1 class="text-xl font-semibold">{cur.track.title}</h1>
-      <button class="text-sm underline" onclick={exportMd}>Export markdown</button>
+      <div class="flex items-center gap-3">
+        <a class="text-sm underline" href="/topics/{topicId}/assess">Assess →</a>
+        <a class="text-sm underline" href="/topics/{topicId}/retention">Retention →</a>
+        <button class="text-sm underline" onclick={exportMd}>Export markdown</button>
+      </div>
     </div>
     {#if cur.track.overview}<p class="text-sm text-gray-600">{cur.track.overview}</p>{/if}
 

@@ -38,6 +38,7 @@ from adaptive_academy.llm.researcher_types import ResearcherClient
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
+    Assessment,
     Concept,
     Deliverable,
     Item,
@@ -78,7 +79,15 @@ def _topic_out(session: Session, topic: Topic) -> TopicOut:
         id=topic.id,
         title=topic.title,
         concepts=[
-            ConceptOut(id=c.id, name=c.name, is_load_bearing=c.is_load_bearing)
+            ConceptOut(
+                id=c.id, name=c.name, is_load_bearing=c.is_load_bearing,
+                last_assessment_score=(
+                    session.exec(
+                        select(Assessment.score).where(Assessment.concept_id == c.id)
+                        .order_by(Assessment.id.desc())
+                    ).first()
+                ),
+            )
             for c in concepts
         ],
         intent=IntentOut(
