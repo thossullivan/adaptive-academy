@@ -89,6 +89,23 @@ _ACCEPT_PREFIX = "  - acceptance: "
 _SIDEBAR_PREFIX = "## Sidebar: "
 _KIND_RE = re.compile(r"^_kind: (?P<kind>\w+)_$")
 
+# Import leniency: accept untyped checkbox items ("- [ ] text") and infer a type.
+_ITEM_UNTYPED_RE = re.compile(r"^- \[(?P<box>.)\] (?P<text>.*)$")
+_TYPE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("watch", ("3blue1brown", "video", "lecture", "youtube")),
+    ("build", ("build", "train ", "implement", "coding", "curate", "replicat")),
+    ("write", ("blog", "writeup", "write up", "write-up")),
+]
+
+
+def _infer_type(text: str) -> str:
+    """Infer an item type from its text — import leniency for untyped checkbox items."""
+    low = text.lower()
+    for typ, kws in _TYPE_KEYWORDS:
+        if any(k in low for k in kws):
+            return typ
+    return "read"
+
 
 def _parse_phase_header(rest: str) -> tuple[str, str, list[str]]:
     flags = _FLAG_RE.findall(rest)
@@ -101,74 +118,88 @@ def _parse_phase_header(rest: str) -> tuple[str, str, list[str]]:
     return rest.strip(), est, flags
 
 
-def markdown_to_track(md: str) -> TrackView:
-    """Parse markdown produced by track_to_markdown back into a TrackView."""
-    lines = md.splitlines()
-    title = ""
-    overview_lines: list[str] = []
-    phases: list[PhaseView] = []
-    sidebars: list[SidebarView] = []
+def _block_is_phase(body: list[str]) -> bool:
+    """A "## " section is a phase if it holds at least one checkbox item or a Ship line."""
+    return any(_ITEM_UNTYPED_RE.match(ln) or _SHIP_RE.match(ln) for ln in body)
 
-    i, n = 0, len(lines)
+
+def _parse_phase_block(heading: str, body: list[str]) -> PhaseView:
+    """Build a PhaseView from a "## " heading + its body lines. Items may be canonical
+    typed (`(type) text`) or untyped (type inferred)."""
+    m = _PHASE_RE.match(heading)
+    ptitle, est, flags = _parse_phase_header(m.group("rest")) if m else (heading.strip(), "", [])
+    phase = PhaseView(title=ptitle, est_hours=est, flags=flags)
+    for line in body:
+        if mt := _ITEM_RE.match(line):
+            phase.items.append(ItemView(text=mt.group("text"), type=mt.group("type"),
+                                        status=_BOX_TO_STATUS.get(mt.group("box"), "todo")))
+        elif mu := _ITEM_UNTYPED_RE.match(line):
+            phase.items.append(ItemView(text=mu.group("text"), type=_infer_type(mu.group("text")),
+                                        status=_BOX_TO_STATUS.get(mu.group("box"), "todo")))
+        elif ms := _SHIP_RE.match(line):
+            phase.deliverable = DeliverableView(text=ms.group("text"), kind=ms.group("kind"))
+        elif line.startswith(_ACCEPT_PREFIX) and phase.deliverable is not None:
+            phase.deliverable.acceptance_criteria.append(line[len(_ACCEPT_PREFIX):])
+    return phase
+
+
+def markdown_to_track(md: str) -> TrackView:
+    """Parse markdown into a TrackView.
+
+    Accepts the canonical export AND lenient real-world trackers: untyped checkbox items
+    (type inferred) and prose "## " sections (kept as reference sidebars). A
+    "## Sidebar:" block keeps the legacy behaviour — its body may contain "## "/"- [ ]"
+    lines and runs until the next "## Sidebar:". See
+    docs/superpowers/specs/2026-06-16-import-robustness.md.
+    """
+    lines = md.splitlines()
+    n = len(lines)
+    i = 0
     # Title.
+    title = ""
     while i < n and not lines[i].startswith("# "):
         i += 1
     if i < n:
         title = lines[i][2:].strip()
         i += 1
     # Overview: everything up to the first "## " (keep internal blanks; strip the ends).
+    overview_lines: list[str] = []
     while i < n and not lines[i].startswith("## "):
         overview_lines.append(lines[i])
         i += 1
 
-    cur_phase: PhaseView | None = None
-    cur_sidebar: SidebarView | None = None
-    sidebar_body: list[str] = []
-
-    def flush_sidebar() -> None:
-        nonlocal cur_sidebar, sidebar_body
-        if cur_sidebar is not None:
-            cur_sidebar.body = "\n".join(sidebar_body).strip()
-            sidebars.append(cur_sidebar)
-        cur_sidebar, sidebar_body = None, []
-
+    phases: list[PhaseView] = []
+    sidebars: list[SidebarView] = []
     while i < n:
         line = lines[i]
         if line.startswith(_SIDEBAR_PREFIX):
-            flush_sidebar()
-            cur_phase = None
-            cur_sidebar = SidebarView(kind="", title=line[len(_SIDEBAR_PREFIX):].strip())
+            # Canonical sidebar: body runs until the NEXT "## Sidebar:" (may contain "## ").
+            sb_title = line[len(_SIDEBAR_PREFIX):].strip()
             i += 1
-            if i < n and (m := _KIND_RE.match(lines[i].strip())):
-                cur_sidebar.kind = m.group("kind")
+            kind = ""
+            if i < n and (km := _KIND_RE.match(lines[i].strip())):
+                kind = km.group("kind")
                 i += 1
-            continue
-        # Inside a sidebar body, only the next "## Sidebar:" (handled above) ends it —
-        # so a body may contain "## " or "- [ ]" lines without leaking a phantom phase.
-        # (Sidebars are always serialized after all phases, so no phase follows one.)
-        if cur_sidebar is not None:
-            sidebar_body.append(line)
+            body: list[str] = []
+            while i < n and not lines[i].startswith(_SIDEBAR_PREFIX):
+                body.append(lines[i])
+                i += 1
+            sidebars.append(SidebarView(kind=kind, title=sb_title, body="\n".join(body).strip()))
+        elif line.startswith("## "):
+            # A section: collect its body up to the next "## ", then classify.
+            heading = line[3:]
             i += 1
-            continue
-        if line.startswith("## "):
-            m = _PHASE_RE.match(line[3:])
-            ptitle, est, flags = _parse_phase_header(m.group("rest")) if m else (line[3:].strip(), "", [])
-            cur_phase = PhaseView(title=ptitle, est_hours=est, flags=flags)
-            phases.append(cur_phase)
+            body = []
+            while i < n and not lines[i].startswith("## "):
+                body.append(lines[i])
+                i += 1
+            if _PHASE_RE.match(heading) or _block_is_phase(body):
+                phases.append(_parse_phase_block(heading, body))
+            else:
+                sidebars.append(SidebarView(kind="reference", title=heading.strip(),
+                                            body="\n".join(body).strip()))
+        else:
             i += 1
-            continue
-        if cur_phase is not None:
-            if m := _ITEM_RE.match(line):
-                cur_phase.items.append(ItemView(
-                    text=m.group("text"), type=m.group("type"),
-                    status=_BOX_TO_STATUS.get(m.group("box"), "todo")))
-            elif m := _SHIP_RE.match(line):
-                cur_phase.deliverable = DeliverableView(
-                    text=m.group("text"), kind=m.group("kind"))
-            elif line.startswith(_ACCEPT_PREFIX) and cur_phase.deliverable is not None:
-                cur_phase.deliverable.acceptance_criteria.append(line[len(_ACCEPT_PREFIX):])
-        i += 1
 
-    flush_sidebar()
     return TrackView(title=title, overview="\n".join(overview_lines).strip(),
                      phases=phases, sidebars=sidebars)
