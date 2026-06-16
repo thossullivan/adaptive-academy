@@ -99,3 +99,14 @@ def test_round_trip_overview_with_internal_blank_lines():
     tv = TrackView(title="T", overview="para one\n\npara two",
                    phases=[PhaseView(title="P1")])
     assert markdown_to_track(track_to_markdown(tv)).overview == "para one\n\npara two"
+
+
+def test_round_trip_preserves_items_regardless_of_origin():
+    from adaptive_academy.engine.track_markdown import (
+        ItemView, PhaseView, TrackView, markdown_to_track, track_to_markdown,
+    )
+    tv = TrackView(title="T", phases=[PhaseView(
+        title="P0", items=[ItemView(text="Remediate: gap A", type="build", status="todo")])])
+    back = markdown_to_track(track_to_markdown(tv))
+    assert back.phases[0].items[0].text == "Remediate: gap A"
+    assert back.phases[0].items[0].type == "build"
