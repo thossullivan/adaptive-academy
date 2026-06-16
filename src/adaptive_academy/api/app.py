@@ -2,6 +2,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from adaptive_academy.api import routes_conversations, routes_items, routes_topics
+from adaptive_academy.api.routes_anchors import (
+    concept_router as anchor_concept_router,
+    topic_router as anchor_topic_router,
+)
 from adaptive_academy.api.routes_assess import router as assess_router
 from adaptive_academy.api.routes_remediate import router as remediate_router
 from adaptive_academy.api.routes_retention import (
@@ -37,6 +41,8 @@ def create_app() -> FastAPI:
     app.include_router(retention_card_router)
     app.include_router(retention_topic_router)
     app.include_router(retention_ops_router)
+    app.include_router(anchor_topic_router)
+    app.include_router(anchor_concept_router)
     return app
 
 

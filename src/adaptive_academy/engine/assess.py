@@ -11,6 +11,7 @@ from adaptive_academy.models import (
     Deliverable,
     Item,
     KnowledgeEstimate,
+    ReferenceAnchor,
     Rubric,
     SourceDoc,
     TopicFoundation,
@@ -18,6 +19,10 @@ from adaptive_academy.models import (
 )
 
 _OMISSION_PENALTY = 0.15
+
+
+class AnchorError(Exception):
+    """No ReferenceAnchor available for a source_quiz probe (route maps to HTTP 400)."""
 
 
 def level_from_score(score: float) -> tuple[str, float]:
@@ -208,6 +213,23 @@ def _deliverable_criteria(session: Session, item_id: int | None) -> list[str]:
     return d.acceptance_criteria if d else []
 
 
+def _resolve_anchor(session: Session, concept: Concept,
+                    anchor_id: int | None) -> ReferenceAnchor:
+    if anchor_id is not None:
+        anchor = session.get(ReferenceAnchor, anchor_id)
+        # Don't let a caller grade one concept against another concept's anchor.
+        # A topic-wide anchor (concept_id is None) is allowed for any concept.
+        if anchor is not None and anchor.concept_id not in (None, concept.id):
+            raise AnchorError("anchor belongs to a different concept")
+    else:
+        anchor = session.exec(
+            select(ReferenceAnchor).where(ReferenceAnchor.concept_id == concept.id)
+            .order_by(ReferenceAnchor.id)).first()
+    if anchor is None:
+        raise AnchorError("no anchor for this concept; generate anchors first")
+    return anchor
+
+
 def assess_concept(
     session: Session,
     concept: Concept,
@@ -218,6 +240,7 @@ def assess_concept(
     confidence_predicted: float | None = None,
     baseline_id: int | None = None,
     item_id: int | None = None,
+    anchor_id: int | None = None,
 ) -> AssessmentResult:
     """Run an anchored probe, persist an Assessment, and update the KnowledgeEstimate."""
     events: list[AgentEvent] = []
@@ -230,12 +253,20 @@ def assess_concept(
 
     # Resolve the anchor (rubric vs. acceptance criteria) and the probe text.
     rubric_id: int | None = None
+    anchor_ref_id: int | None = None
     must_include: list[str] = []
     weak_signs: list[str] = []
     reference = ""
     if kind == "artifact_review":
         criteria = _deliverable_criteria(session, item_id)
         probe = _PROBE_TEXT[kind].format(concept=concept.name)
+    elif kind == "source_quiz":
+        anchor = _resolve_anchor(session, concept, anchor_id)
+        anchor_ref_id = anchor.id
+        criteria = anchor.key_points
+        must_include = anchor.key_points
+        reference = anchor.reference_answer
+        probe = anchor.question
     else:
         rubric = ensure_rubric(session, concept, llm=llm)
         rubric_id = rubric.id
@@ -263,7 +294,8 @@ def assess_concept(
         concept_id=concept.id, item_id=item_id, kind=kind, prompt=probe, response=response,
         verdict=grade.verdict, score=final_score, gaps=gaps,
         confidence_predicted=confidence_predicted, confidence_actual=confidence_actual,
-        rubric_id=rubric_id, baseline_assessment_id=baseline_id, delta=delta)
+        rubric_id=rubric_id, anchor_id=anchor_ref_id,
+        baseline_assessment_id=baseline_id, delta=delta)
     session.add(assessment)
 
     level, conf = level_from_score(final_score)

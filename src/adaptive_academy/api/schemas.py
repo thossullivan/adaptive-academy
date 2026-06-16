@@ -8,6 +8,7 @@ class ConceptOut(BaseModel):
     name: str
     is_load_bearing: bool
     last_assessment_score: Optional[float] = None
+    has_anchor: bool = False
 
 
 class IntentOut(BaseModel):
@@ -160,6 +161,7 @@ class AssessIn(BaseModel):
     confidence_predicted: Optional[float] = None
     baseline_id: Optional[int] = None
     item_id: Optional[int] = None
+    anchor_id: Optional[int] = None
 
 
 class AssessmentOut(BaseModel):
@@ -227,4 +229,18 @@ class RemediateIn(BaseModel):
 
 class RemediationOut(BaseModel):
     items: list[ItemOut]
+    events: list[EventOut]
+
+
+class AnchorOut(BaseModel):
+    id: int
+    source_doc_id: int
+    concept_id: Optional[int] = None
+    question: str
+    reference_answer: str
+    key_points: list[str]
+
+
+class AnchorGenOut(BaseModel):
+    anchors: list[AnchorOut]
     events: list[EventOut]
