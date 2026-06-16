@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -49,5 +49,31 @@ export const api = {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch)
-    }).then(j<Item>)
+    }).then(j<Item>),
+  assess: (conceptId: number, body: AssessBody) =>
+    fetch(`/api/concepts/${conceptId}/assess`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(j<Assessment>),
+  listAssessments: (conceptId: number) =>
+    fetch(`/api/concepts/${conceptId}/assessments`).then(j<Assessment[]>),
+  getRubric: (conceptId: number) =>
+    fetch(`/api/concepts/${conceptId}/rubric`).then(j<Rubric>),
+  proposeRetention: (conceptId: number, from_assessment_id?: number) =>
+    fetch(`/api/concepts/${conceptId}/retention/propose`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ from_assessment_id })
+    }).then(j<Retention>),
+  listRetention: (topicId: number, status?: string) =>
+    fetch(`/api/topics/${topicId}/retention${status ? `?status=${status}` : ''}`).then(j<Retention>),
+  reviewCard: (cardId: number, status: string) =>
+    fetch(`/api/retention/cards/${cardId}/review`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status })
+    }).then(j<SRSCard>),
+  gradeCard: (cardId: number, result: string) =>
+    fetch(`/api/retention/cards/${cardId}/grade`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ result })
+    }).then(j<SRSCard>)
 };
