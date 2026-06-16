@@ -1,4 +1,4 @@
-export interface Concept { id: number; name: string; is_load_bearing: boolean; }
+export interface Concept { id: number; name: string; is_load_bearing: boolean; has_anchor?: boolean; }
 export interface Topic { id: number; title: string; concepts: Concept[]; }
 export interface EventOut { kind: string; detail: string; }
 export interface MessageOut { role: 'user' | 'tutor'; content: string; }
@@ -47,5 +47,7 @@ export interface RecallPromptItem { id: number; concept_id: number; prompt: stri
 export interface Retention { cards: SRSCard[]; prompts: RecallPromptItem[]; }
 export interface AssessBody {
   kind: string; response?: string; confidence_predicted?: number | null;
-  baseline_id?: number | null; item_id?: number | null;
+  baseline_id?: number | null; item_id?: number | null; anchor_id?: number | null;
 }
+export interface Anchor { id: number; source_doc_id: number; concept_id: number | null; question: string; reference_answer: string; key_points: string[]; }
+export interface AnchorGen { anchors: Anchor[]; events: EventOut[]; }

@@ -101,3 +101,26 @@ describe('assessor api client', () => {
     expect(out.items[0].is_remediation).toBe(true);
   });
 });
+
+describe('anchor api client', () => {
+  it('generateAnchors posts to the topic anchors endpoint and returns anchors', async () => {
+    const gen = {
+      anchors: [{ id: 1, source_doc_id: 2, concept_id: 3, question: 'q', reference_answer: 'a', key_points: [] }],
+      events: []
+    };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => gen }) as any;
+    const out = await api.generateAnchors(7);
+    const [url, opts] = (global.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/topics/7/anchors');
+    expect(opts.method).toBe('POST');
+    expect(out.anchors[0].question).toBe('q');
+  });
+
+  it('listConceptAnchors gets the concept anchors endpoint and returns anchors', async () => {
+    const anchors = [{ id: 1, source_doc_id: 2, concept_id: 4, question: 'q', reference_answer: 'a', key_points: ['k'] }];
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => anchors }) as any;
+    const out = await api.listConceptAnchors(4);
+    expect((global.fetch as any).mock.calls[0][0]).toBe('/api/concepts/4/anchors');
+    expect(out[0].key_points).toEqual(['k']);
+  });
+});
