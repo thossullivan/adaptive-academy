@@ -1,6 +1,9 @@
+import json
+from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
+from adaptive_academy.llm.types import LLMClient
 
 # (angle_key, query_template) — {topic} is filled in. Order is the fan-out order.
 ANGLES: list[tuple[str, str]] = [
@@ -76,3 +79,55 @@ def score_source(s: RawSource) -> float:
 def rank_sources(sources: list[RawSource]) -> list[RawSource]:
     """Return a new list ordered by score desc, tie-broken by url ascending (total order)."""
     return sorted(sources, key=lambda s: (-score_source(s), s.url))
+
+
+_FOUNDATION_SYSTEM = (
+    "You are a research synthesizer for a self-directed advanced adult learner. "
+    "Given a topic, the learner's intent, and a ranked reading list, produce a concise "
+    "foundation. Respond with ONLY a JSON object with keys: "
+    '"overview" (string, 2-4 sentences), "key_concepts" (array of short strings, the '
+    'load-bearing ideas), "prerequisite_map" (object mapping each key concept to an array '
+    "of prerequisite concept names). No prose outside the JSON."
+)
+
+
+@dataclass
+class Foundation:
+    overview: str
+    key_concepts: list[str]
+    prerequisite_map: dict
+
+
+def _build_foundation_user_msg(topic: str, intent: str, sources: list[RawSource]) -> str:
+    lines = [f"TOPIC: {topic}", f"LEARNER INTENT: {intent}", "", "READING LIST:"]
+    for s in sources:
+        lines.append(f"- [{s.tier}] {s.title} ({s.url}) — {s.summary}".rstrip(" —"))
+    return "\n".join(lines)
+
+
+def _parse_foundation_json(text: str) -> Foundation:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```", 2)[1]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[len("json"):]
+        cleaned = cleaned.strip()
+    data = json.loads(cleaned)
+    return Foundation(
+        overview=str(data.get("overview", "")),
+        key_concepts=list(data.get("key_concepts", [])),
+        prerequisite_map=dict(data.get("prerequisite_map", {})),
+    )
+
+
+def synthesize_foundation(
+    topic: str, intent: str, sources: list[RawSource], llm: LLMClient
+) -> Foundation:
+    """Single structured LLM call → Foundation (overview + concepts + prereq map)."""
+    user_msg = _build_foundation_user_msg(topic, intent, sources)
+    resp = llm.complete(
+        system=_FOUNDATION_SYSTEM,
+        messages=[{"role": "user", "content": user_msg}],
+        tools=[],
+    )
+    return _parse_foundation_json(resp.text)
