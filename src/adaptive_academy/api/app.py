@@ -44,7 +44,10 @@ def create_app() -> FastAPI:
         elif isinstance(exc, anthropic.RateLimitError):
             detail = "LLM rate limit hit — wait a moment and retry"
         else:
-            detail = f"LLM request failed upstream ({type(exc).__name__})"
+            # Surface the upstream message — it's actionable (e.g. "credit balance is
+            # too low") and a vague "(BadRequestError)" hides the real cause.
+            upstream = getattr(exc, "message", "") or str(exc)
+            detail = f"LLM request failed upstream ({type(exc).__name__}): {upstream}"[:300]
         return JSONResponse(status_code=502, content={"detail": detail})
 
     @app.exception_handler(json.JSONDecodeError)
