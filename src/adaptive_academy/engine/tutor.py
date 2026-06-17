@@ -5,7 +5,7 @@ from sqlmodel import Session
 
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.prompts import build_tutor_system_prompt
-from adaptive_academy.engine.tools import TIERS, TOOLS
+from adaptive_academy.engine.tools import TIERS, TOOLS, reveal_gate
 from adaptive_academy.llm.types import LLMClient, LLMResponse, ToolCall
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
 
@@ -113,14 +113,10 @@ def _execute_tool(
         return True, "ok: attempt recorded"
 
     if call.name == "reveal_solution":
-        if tier == "gated" and not convo.attempt_logged:
-            emit("tool:reveal_solution:blocked")
-            return False, (
-                "BLOCKED: the learner has not logged an attempt yet. Do NOT reveal the "
-                "solution. Give a single hint or Socratic question instead."
-            )
-        emit("tool:reveal_solution:allowed")
-        return True, "ok: solution permitted"
+        # Non-gated tiers are always permitted; gated reveal goes through the attempt-gate.
+        allowed, msg = reveal_gate(convo.attempt_logged) if tier == "gated" else (True, "ok")
+        emit(f"tool:reveal_solution:{'allowed' if allowed else 'blocked'}")
+        return allowed, msg
 
     emit(f"tool:{call.name}:unknown")
     return False, f"unknown tool {call.name}"

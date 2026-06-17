@@ -30,3 +30,17 @@ REVEAL_SOLUTION = {
 
 TOOLS = [LOG_ATTEMPT, REVEAL_SOLUTION]
 TIERS = {"log_attempt": "auto", "reveal_solution": "gated"}
+
+_BLOCKED_MSG = (
+    "BLOCKED: the learner has not logged an attempt yet. Do NOT reveal the solution. "
+    "Give a single hint or Socratic question instead."
+)
+
+
+def reveal_gate(attempt_logged: bool) -> tuple[bool, str]:
+    """The attempt-gate (single source of truth): reveal_solution is permitted only after
+    the learner has logged an attempt. Used by both the raw-API tutor loop and the Agent
+    SDK tutor's tool handler."""
+    if not attempt_logged:
+        return False, _BLOCKED_MSG
+    return True, "ok: solution permitted"
