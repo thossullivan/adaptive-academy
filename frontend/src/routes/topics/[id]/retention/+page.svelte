@@ -2,14 +2,31 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { Retention } from '$lib/types';
+  import type { Retention, DecayItem, DecayGrade } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge } from '$lib/ui';
+  import { Card, Button, Badge, Textarea } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let data = $state<Retention | null>(null);
   let due = $state<Retention | null>(null);
   let loading = $state(true);
+
+  // Decay checks — delayed, unassisted retrieval (§8.6).
+  let decay = $state<DecayItem[]>([]);
+  let responses = $state<Record<number, string>>({});
+  let decayResults = $state<Record<number, DecayGrade>>({});
+  let gradingDecay = $state<number | null>(null);
+
+  async function gradeDecayItem(promptId: number) {
+    const resp = responses[promptId];
+    if (!resp?.trim()) return;
+    gradingDecay = promptId;
+    try {
+      decayResults[promptId] = await api.gradeDecay(promptId, resp);
+    } finally {
+      gradingDecay = null;
+    }
+  }
 
   const gradeTone: Record<string, string> = {
     again: 'var(--danger)',
@@ -21,6 +38,7 @@
   async function load() {
     data = await api.listRetention(topicId);
     due = await api.listRetention(topicId, { due: true });
+    decay = (await api.listDecay(topicId).catch(() => ({ items: [] }))).items;
     loading = false;
   }
   onMount(load);
@@ -40,6 +58,42 @@
     <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">loading cards…</span></div>
   {:else}
     <div class="flex flex-col gap-4">
+      {#if decay.length}
+        <Card accent pad class="rise">
+          <div class="mb-1 flex items-center gap-2">
+            <span class="text-accent">↺</span>
+            <span class="eyebrow !text-accent">Decay checks · {decay.length}</span>
+          </div>
+          <p class="mb-3 text-sm text-muted">Delayed, unassisted recall — does it still hold without the tutor? Answer from memory.</p>
+          <div class="flex flex-col gap-3">
+            {#each decay as d (d.prompt_id)}
+              <div class="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3.5">
+                <div class="flex items-center gap-2">
+                  <Badge tone="neutral" mono>{d.concept_name}</Badge>
+                  {#if d.last_result}<span class="eyebrow !text-[0.55rem]">last: {d.last_result}</span>{/if}
+                </div>
+                <p class="mt-2 text-sm text-fg-dim">{d.prompt}</p>
+                {#if decayResults[d.prompt_id]}
+                  {@const r = decayResults[d.prompt_id]}
+                  <div class="mt-3 rounded-[var(--radius-sm)] border border-border p-3 text-sm">
+                    <div class="flex items-center gap-2">
+                      <Badge tone={r.held ? 'success' : 'danger'} dot>{r.held ? 'held' : 'decayed'}</Badge>
+                      <span class="nums text-muted">recall {Math.round(r.recall_score * 100)}%{#if r.baseline_score != null} · was {Math.round(r.baseline_score * 100)}%{/if}{#if r.decay_delta != null} · Δ {r.decay_delta > 0 ? '+' : ''}{r.decay_delta.toFixed(2)}{/if}</span>
+                    </div>
+                    <p class="mt-2 text-fg-dim">{r.verdict}</p>
+                  </div>
+                {:else}
+                  <Textarea class="mt-2" bind:value={responses[d.prompt_id]} rows={4} placeholder="From memory — no looking…" />
+                  <Button size="sm" class="mt-2" onclick={() => gradeDecayItem(d.prompt_id)} disabled={gradingDecay === d.prompt_id || !responses[d.prompt_id]?.trim()}>
+                    {gradingDecay === d.prompt_id ? 'Checking…' : 'Check recall'}
+                  </Button>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </Card>
+      {/if}
+
       {#if due && due.cards.length}
         <Card accent pad class="rise">
           <div class="mb-3 flex items-center gap-2">

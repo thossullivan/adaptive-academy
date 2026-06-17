@@ -9,7 +9,9 @@ from fastapi.responses import JSONResponse
 from adaptive_academy.api import (
     routes_conversations,
     routes_items,
+    routes_practice,
     routes_story,
+    routes_teach,
     routes_topics,
 )
 from adaptive_academy.api.routes_anchors import (
@@ -17,6 +19,10 @@ from adaptive_academy.api.routes_anchors import (
     topic_router as anchor_topic_router,
 )
 from adaptive_academy.api.routes_assess import router as assess_router
+from adaptive_academy.api.routes_decay import (
+    ops_router as decay_ops_router,
+    topic_router as decay_topic_router,
+)
 from adaptive_academy.api.routes_remediate import router as remediate_router
 from adaptive_academy.api.routes_retention import (
     card_router as retention_card_router,
@@ -96,6 +102,10 @@ def create_app() -> FastAPI:
     app.include_router(retention_ops_router)
     app.include_router(anchor_topic_router)
     app.include_router(anchor_concept_router)
+    app.include_router(decay_topic_router)
+    app.include_router(decay_ops_router)
+    app.include_router(routes_practice.router)
+    app.include_router(routes_teach.router)
     return app
 
 

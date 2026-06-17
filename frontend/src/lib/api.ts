@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -93,6 +93,24 @@ export const api = {
     fetch(`/api/concepts/${conceptId}/anchors`).then(j<Anchor[]>),
   makeStory: (topicId: number) =>
     fetch(`/api/topics/${topicId}/story`, { method: 'POST' }).then(j<Story>),
+  listDecay: (topicId: number) => fetch(`/api/topics/${topicId}/decay`).then(j<DecayDue>),
+  gradeDecay: (promptId: number, response: string) =>
+    fetch(`/api/decay/${promptId}/grade`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ response })
+    }).then(j<DecayGrade>),
+  generateChallenge: (conceptId: number) =>
+    fetch(`/api/concepts/${conceptId}/productive_failure/generate`, { method: 'POST' }).then(j<Challenge>),
+  consolidate: (conceptId: number, problem: string, attempt: string) =>
+    fetch(`/api/concepts/${conceptId}/productive_failure/consolidate`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ problem, attempt })
+    }).then(j<Consolidation>),
+  gradeTeaching: (conceptId: number, explanation: string) =>
+    fetch(`/api/concepts/${conceptId}/teach`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ explanation })
+    }).then(j<TeachResult>),
 };
 
 /** Derive a per-concept knowledge level from its assessment history (latest estimate). */
@@ -102,8 +120,9 @@ export async function conceptLevels(conceptIds: number[]): Promise<Record<number
   );
   const out: Record<number, string> = {};
   conceptIds.forEach((id, i) => {
-    const last = lists[i][lists[i].length - 1];
-    out[id] = last?.estimate_level ?? 'unknown';
+    // listAssessments returns newest-first, so the latest estimate is index 0.
+    const latest = lists[i][0];
+    out[id] = latest?.estimate_level ?? 'unknown';
   });
   return out;
 }
