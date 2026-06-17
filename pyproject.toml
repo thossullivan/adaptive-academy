@@ -10,6 +10,7 @@ dependencies = [
     "anthropic>=0.40",
     "pydantic-settings>=2.5",
     "python-dotenv>=1.0",
+    "claude-agent-sdk>=0.2.103",
 ]
 
 [dependency-groups]
