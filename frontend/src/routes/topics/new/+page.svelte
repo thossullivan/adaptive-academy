@@ -1,6 +1,9 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
+  import { topics } from '$lib/topics.svelte';
+  import Page from '$lib/shell/Page.svelte';
+  import { Card, Button, Field, Input, Textarea } from '$lib/ui';
 
   let title = $state('');
   let goal = $state('');
@@ -9,45 +12,69 @@
   let busy = $state(false);
   let status = $state('');
 
+  const steps = ['Creating topic', 'Researching foundation', 'Ready to review'];
+  let stepIdx = $state(-1);
+
   async function start() {
     if (!title.trim() || !goal.trim() || busy) return;
     busy = true;
+    stepIdx = 0;
     status = 'Creating topic…';
     try {
       const topic = await api.createTopic({ title, goal, prior_knowledge, time_budget });
-      status = 'Researching foundational sources… (this can take a moment)';
+      await topics.refresh();
+      topics.select(topic.id);
+      stepIdx = 1;
+      status = 'Researching foundational sources — this can take a moment…';
       await api.runResearch(topic.id);
+      stepIdx = 2;
       await goto(`/topics/${topic.id}/review`);
     } catch (e) {
       status = 'Something went wrong: ' + (e as Error).message;
       busy = false;
+      stepIdx = -1;
     }
   }
 </script>
 
-<main class="mx-auto max-w-2xl p-6 flex flex-col gap-4">
-  <h1 class="text-xl font-semibold">New topic</h1>
-  <p class="text-sm text-gray-500">A quick brainstorm. The Researcher will gather foundational sources you can review.</p>
+<Page eyebrow="New topic" title="What do you want to learn?" lead="A quick brief. The Researcher will assemble a foundation you can curate before any curriculum is built." width="narrow">
+  <Card pad class="rise">
+    <div class="flex flex-col gap-4">
+      <Field label="Topic">
+        <Input bind:value={title} placeholder="e.g. Build LLMs from scratch" disabled={busy} />
+      </Field>
+      <Field label="Your goal" hint="What does 'done' look like — the artifact you'll have shipped?">
+        <Textarea bind:value={goal} placeholder="By the end I'll have…" disabled={busy} rows={3} />
+      </Field>
+      <Field label="Prior knowledge" hint="So the track starts at the right altitude.">
+        <Textarea bind:value={prior_knowledge} placeholder="What you already know…" disabled={busy} rows={3} />
+      </Field>
+      <Field label="Time budget">
+        <Input bind:value={time_budget} placeholder="e.g. ~10 hrs/week for 3 months" disabled={busy} />
+      </Field>
 
-  <label class="flex flex-col gap-1">
-    <span class="text-sm font-medium">What do you want to learn?</span>
-    <input class="border rounded px-3 py-2" bind:value={title} placeholder="e.g. Build LLMs from scratch" disabled={busy} />
-  </label>
-  <label class="flex flex-col gap-1">
-    <span class="text-sm font-medium">Your goal</span>
-    <textarea class="border rounded px-3 py-2" bind:value={goal} placeholder="What does 'done' look like?" disabled={busy}></textarea>
-  </label>
-  <label class="flex flex-col gap-1">
-    <span class="text-sm font-medium">Prior knowledge</span>
-    <textarea class="border rounded px-3 py-2" bind:value={prior_knowledge} placeholder="What do you already know?" disabled={busy}></textarea>
-  </label>
-  <label class="flex flex-col gap-1">
-    <span class="text-sm font-medium">Time budget</span>
-    <input class="border rounded px-3 py-2" bind:value={time_budget} placeholder="e.g. ~10 hrs/week" disabled={busy} />
-  </label>
+      <Button onclick={start} disabled={busy || !title.trim() || !goal.trim()} size="lg" class="self-start">
+        {busy ? 'Working…' : 'Research this topic →'}
+      </Button>
+    </div>
+  </Card>
 
-  <button class="bg-black text-white rounded px-4 py-2 disabled:opacity-50" onclick={start} disabled={busy || !title.trim() || !goal.trim()}>
-    {busy ? 'Working…' : 'Research this topic'}
-  </button>
-  {#if status}<p class="text-sm text-gray-600">{status}</p>{/if}
-</main>
+  {#if busy || stepIdx >= 0}
+    <div class="mt-4 flex flex-col gap-2 rise">
+      {#each steps as s, i}
+        <div class="flex items-center gap-3 text-sm">
+          <span
+            class="grid size-5 place-items-center rounded-full border text-[0.6rem]"
+            style:border-color={i <= stepIdx ? 'var(--accent)' : 'var(--border)'}
+            style:background={i < stepIdx ? 'var(--accent)' : 'transparent'}
+            style:color={i < stepIdx ? 'var(--accent-fg)' : 'var(--muted)'}
+          >
+            {#if i < stepIdx}✓{:else if i === stepIdx}<span class="size-1.5 animate-pulse rounded-full bg-accent"></span>{:else}{i + 1}{/if}
+          </span>
+          <span class={i <= stepIdx ? 'text-fg-dim' : 'text-faint'}>{s}</span>
+        </div>
+      {/each}
+      {#if status}<p class="mt-1 text-xs text-muted">{status}</p>{/if}
+    </div>
+  {/if}
+</Page>

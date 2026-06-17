@@ -7,6 +7,7 @@ async function j<T>(r: Response): Promise<T> {
 
 export const api = {
   listTopics: () => fetch('/api/topics').then(j<Topic[]>),
+  getTopic: (id: number) => fetch(`/api/topics/${id}`).then(j<Topic>),
   startConversation: (topic_id: number, concept_id: number) =>
     fetch('/api/conversations', {
       method: 'POST',

@@ -1,90 +1,209 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { topics } from '$lib/topics.svelte';
   import { api } from '$lib/api';
-  import type { Conversation, EventOut, MessageOut, Topic } from '$lib/types';
+  import type { Curriculum, Assessment, EventOut, Concept } from '$lib/types';
+  import { LEVEL_FILL } from '$lib/utils';
+  import Page from '$lib/shell/Page.svelte';
+  import EventFeed from '$lib/shell/EventFeed.svelte';
+  import { Card, Button, Badge, Stat, LevelBar, ProgressRing } from '$lib/ui';
+  import ScoreTrend from '$lib/charts/ScoreTrend.svelte';
+  import CalibrationPlot from '$lib/charts/CalibrationPlot.svelte';
 
-  let topic = $state<Topic | null>(null);
-  let conversation = $state<Conversation | null>(null);
-  let messages = $state<MessageOut[]>([]);
+  type ConceptRow = Concept & { level: string; n: number };
+
+  let loading = $state(true);
+  let hasCurriculum = $state(false);
+  let cur = $state<Curriculum | null>(null);
+  let rows = $state<ConceptRow[]>([]);
+  let trend = $state<{ i: number; score: number; label: string }[]>([]);
+  let calibration = $state<{ predicted: number; actual: number; label: string }[]>([]);
   let events = $state<EventOut[]>([]);
-  let levels = $state({ assistance: '—', challenge: '—', attempt: false });
-  let input = $state('');
-  let busy = $state(false);
+  let dueCount = $state(0);
+  let cardCount = $state(0);
 
-  onMount(async () => {
-    const topics = await api.listTopics();
-    topic = topics[0] ?? null;
-    if (topic && topic.concepts[0]) {
-      conversation = await api.startConversation(topic.id, topic.concepts[0].id);
-      levels = {
-        assistance: conversation.assistance_level,
-        challenge: conversation.challenge_level,
-        attempt: conversation.attempt_logged
-      };
+  let itemsDone = $state(0);
+  let itemsTotal = $state(0);
+  let phaseProg = $state<{ title: string; done: number; total: number }[]>([]);
+
+  const overallPct = $derived(itemsTotal ? Math.round((itemsDone / itemsTotal) * 100) : 0);
+  const solidCount = $derived(rows.filter((r) => r.level === 'high').length);
+  const meanScore = $derived(trend.length ? trend.reduce((a, b) => a + b.score, 0) / trend.length : null);
+  const lastDelta = $derived(
+    trend.length >= 2 ? trend[trend.length - 1].score - trend[trend.length - 2].score : null
+  );
+
+  async function load(topicId: number) {
+    loading = true;
+    hasCurriculum = false;
+    try {
+      cur = await api.getCurriculum(topicId);
+      hasCurriculum = true;
+    } catch {
+      cur = null;
+      loading = false;
+      return;
     }
+
+    // Progress from phases/items.
+    let done = 0,
+      total = 0;
+    phaseProg = cur.phases.map((p) => {
+      const d = p.items.filter((it) => it.status === 'done').length;
+      done += d;
+      total += p.items.length;
+      return { title: p.title, done: d, total: p.items.length };
+    });
+    itemsDone = done;
+    itemsTotal = total;
+
+    // Per-concept assessments → levels, trend, calibration.
+    const assessLists = await Promise.all(
+      cur.concepts.map((c) => api.listAssessments(c.id).catch(() => [] as Assessment[]))
+    );
+
+    rows = cur.concepts.map((c, idx) => {
+      const list = assessLists[idx];
+      const last = list[list.length - 1];
+      return { ...c, level: last?.estimate_level ?? 'unknown', n: list.length };
+    });
+
+    const flat: { id: number; a: Assessment; label: string }[] = [];
+    cur.concepts.forEach((c, idx) => {
+      assessLists[idx].forEach((a) => flat.push({ id: a.id, a, label: c.name }));
+    });
+    flat.sort((x, y) => x.id - y.id);
+    trend = flat.map((f, i) => ({ i, score: f.a.score, label: f.label }));
+    calibration = flat
+      .filter((f) => f.a.confidence_predicted != null && f.a.confidence_actual != null)
+      .map((f) => ({ predicted: f.a.confidence_predicted!, actual: f.a.confidence_actual!, label: f.label }));
+
+    // Retention + activity.
+    const [ret, due, evts] = await Promise.all([
+      api.listRetention(topicId).catch(() => ({ cards: [], prompts: [] })),
+      api.listRetention(topicId, { due: true }).catch(() => ({ cards: [], prompts: [] })),
+      api.listEvents(topicId).catch(() => [] as EventOut[])
+    ]);
+    cardCount = ret.cards.length;
+    dueCount = due.cards.length;
+    events = evts;
+
+    loading = false;
+  }
+
+  $effect(() => {
+    const id = topics.current?.id;
+    if (id != null) load(id);
+    else loading = false;
   });
 
-  async function send() {
-    if (!conversation || !input.trim() || busy) return;
-    const content = input;
-    input = '';
-    messages = [...messages, { role: 'user', content }];
-    busy = true;
-    try {
-      const r = await api.sendMessage(conversation.id, content);
-      messages = [...messages, { role: 'tutor', content: r.reply }];
-      events = r.events;
-      levels = { assistance: r.assistance_level, challenge: r.challenge_level, attempt: r.attempt_logged };
-    } finally {
-      busy = false;
-    }
-  }
+  const tid = $derived(topics.current?.id ?? null);
+  // Rank concepts: shakiest + load-bearing first — that's where attention belongs.
+  const rankedRows = $derived(
+    [...rows].sort((a, b) => (LEVEL_FILL[a.level] ?? 0) - (LEVEL_FILL[b.level] ?? 0) || Number(b.is_load_bearing) - Number(a.is_load_bearing))
+  );
 </script>
 
-<main class="mx-auto max-w-2xl p-6">
-  <header class="mb-4">
-    <a href="/topics/new" class="text-sm underline text-gray-600">+ New topic</a>
-    <h1 class="text-2xl font-semibold">{topic?.title ?? 'Adaptive Academy'}</h1>
-    <p class="text-sm text-gray-500">
-      Concept: {topic?.concepts[0]?.name ?? '—'}
-    </p>
-    <div class="mt-2 flex gap-2 text-xs">
-      <span class="rounded bg-blue-100 px-2 py-1">assistance: {levels.assistance}</span>
-      <span class="rounded bg-purple-100 px-2 py-1">challenge: {levels.challenge}</span>
-      <span class="rounded px-2 py-1 {levels.attempt ? 'bg-green-100' : 'bg-gray-100'}">
-        attempt: {levels.attempt ? 'logged' : 'not yet'}
-      </span>
-    </div>
-  </header>
-
-  <section class="mb-4 flex flex-col gap-3">
-    {#each messages as m}
-      <div class="rounded-lg px-3 py-2 {m.role === 'user' ? 'self-end bg-gray-100' : 'self-start bg-blue-50'}">
-        {m.content}
+{#if !topics.current}
+  <!-- First-run welcome -->
+  <div class="grid min-h-screen place-items-center px-6">
+    <div class="max-w-md text-center rise">
+      <div class="mx-auto mb-6 grid size-16 place-items-center rounded-full border border-border bg-surface">
+        <svg viewBox="0 0 32 32" class="size-9">
+          <circle cx="16" cy="16" r="13" fill="none" stroke="var(--border-strong)" stroke-width="1.5" />
+          <circle cx="16" cy="16" r="4.5" fill="var(--accent)" />
+        </svg>
       </div>
-    {/each}
-    {#if busy}<div class="self-start text-sm text-gray-400">tutor is thinking…</div>{/if}
-  </section>
+      <h1 class="text-3xl text-fg">Adaptive Academy</h1>
+      <p class="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-muted">
+        A private, agent-orchestrated workshop for learning hard things by building. Start with a topic and the
+        Researcher will assemble your foundation.
+      </p>
+      <div class="mt-7">
+        <Button href="/topics/new" size="lg">Begin a topic →</Button>
+      </div>
+    </div>
+  </div>
+{:else}
+  <Page eyebrow="Learning command center" title={topics.current.title} width="wide">
+    {#snippet actions()}
+      <Button variant="outline" href="/topics/{tid}/assess">Assess</Button>
+      <Button href="/topics/{tid}/tutor">Open tutor →</Button>
+    {/snippet}
 
-  <form class="flex gap-2" onsubmit={(e) => { e.preventDefault(); send(); }}>
-    <input
-      class="flex-1 rounded border px-3 py-2"
-      bind:value={input}
-      placeholder="Ask the tutor… (it won't just hand you the answer)"
-    />
-    <button class="rounded bg-blue-600 px-4 py-2 text-white disabled:opacity-50" disabled={busy}>
-      Send
-    </button>
-  </form>
+    {#if loading}
+      <div class="grid place-items-center py-24 text-muted">
+        <span class="eyebrow animate-pulse">gathering signals…</span>
+      </div>
+    {:else if !hasCurriculum}
+      <Card accent class="text-center" pad>
+        <div class="py-10">
+          <h2 class="text-xl text-fg">No curriculum yet</h2>
+          <p class="mx-auto mt-2 max-w-sm text-sm text-muted">
+            Review your reading list and generate a phased track to start measuring progress.
+          </p>
+          <div class="mt-6"><Button href="/topics/{tid}/review">Go to Sources →</Button></div>
+        </div>
+      </Card>
+    {:else}
+      <!-- Stat strip -->
+      <div class="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <Card class="rise" pad><Stat label="Track progress" value={overallPct} unit="%" hint="{itemsDone} of {itemsTotal} steps" /></Card>
+        <Card class="rise" pad style="animation-delay:60ms"><Stat label="Concepts solid" value={solidCount} unit="/ {rows.length}" hint="knowledge estimate high" /></Card>
+        <Card class="rise" pad style="animation-delay:120ms"><Stat label="Due for review" value={dueCount} hint="{cardCount} cards total" /></Card>
+        <Card class="rise" pad style="animation-delay:180ms"><Stat label="Mean score" value={meanScore == null ? '—' : Math.round(meanScore * 100)} unit={meanScore == null ? '' : '%'} delta={lastDelta == null ? null : Number(lastDelta.toFixed(2))} hint="across {trend.length} probes" /></Card>
+      </div>
 
-  {#if events.length}
-    <details class="mt-6 text-xs text-gray-500">
-      <summary>What the agents did ({events.length})</summary>
-      <ul class="mt-2 space-y-1">
-        {#each events as e}
-          <li><code>{e.kind}</code> {e.detail}</li>
-        {/each}
-      </ul>
-    </details>
-  {/if}
-</main>
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <!-- Knowledge map -->
+        <Card class="rise lg:col-span-2" eyebrow="Knowledge map" title="Where you stand">
+          {#snippet header()}
+            <span class="text-xs text-faint">◆ load-bearing · ⌗ has quiz</span>
+          {/snippet}
+          {#if rankedRows.length}
+            <div class="flex flex-col divide-y divide-border/60">
+              {#each rankedRows as r (r.id)}
+                <LevelBar name={r.name} level={r.level} loadBearing={r.is_load_bearing} hasAnchor={r.has_anchor} />
+              {/each}
+            </div>
+          {:else}
+            <p class="py-8 text-center text-sm text-faint">This track has no tracked concepts. Assess one to populate the map.</p>
+          {/if}
+        </Card>
+
+        <!-- Calibration -->
+        <Card class="rise" eyebrow="Metacognition" title="Calibration">
+          <CalibrationPlot data={calibration} />
+        </Card>
+
+        <!-- Score trajectory -->
+        <Card class="rise lg:col-span-2" eyebrow="Assessment history" title="Score trajectory">
+          <ScoreTrend data={trend} />
+        </Card>
+
+        <!-- Phase progress -->
+        <Card class="rise" eyebrow="Phases" title="Build progress">
+          <div class="flex flex-col items-center gap-4">
+            <ProgressRing value={itemsTotal ? itemsDone / itemsTotal : 0} size={92} stroke={8} label="{overallPct}%" sublabel="complete" />
+            <ul class="w-full flex-col gap-1.5">
+              {#each phaseProg as p, i}
+                <li class="flex items-center gap-2 py-0.5 text-xs">
+                  <span class="nums w-4 text-faint">{i + 1}</span>
+                  <span class="flex-1 truncate text-fg-dim">{p.title}</span>
+                  <span class="nums text-muted">{p.done}/{p.total}</span>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        </Card>
+
+        <!-- Activity -->
+        <Card class="rise lg:col-span-3" eyebrow="Observability" title="Recent agent activity">
+          {#snippet header()}
+            <Badge mono tone="neutral">{events.length} events</Badge>
+          {/snippet}
+          <EventFeed {events} limit={12} />
+        </Card>
+      </div>
+    {/if}
+  </Page>
+{/if}
