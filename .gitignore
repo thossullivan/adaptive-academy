@@ -25,3 +25,6 @@ frontend/build/
 *.db-shm
 
 .env
+
+# Visual-companion brainstorming scratch
+.superpowers/
