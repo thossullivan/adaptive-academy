@@ -11,6 +11,7 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine.assess import level_from_score
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
     ItemView,
@@ -219,16 +220,17 @@ def _track_markdown(session: Session, track: Track) -> str:
 
 
 def _concept_verdict_summary(session: Session, concept: Concept) -> tuple[str, str]:
-    """v1: verdict = the concept's knowledge level (untested if none); summary = latest assessment.
-    Full 5-signal triangulation lives in frontend competence.ts — porting it is a follow-up."""
-    est = session.exec(
-        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
-    verdict = est.level if est else "untested"
+    """v1: verdict = the concept's knowledge level, but anti-Goodhart — a concept with NO
+    assessments reads 'untested', never the default-'high' KnowledgeEstimate. summary = latest
+    assessment. Full 5-signal triangulation lives in frontend competence.ts (porting is a follow-up)."""
     latest = session.exec(
         select(Assessment).where(Assessment.concept_id == concept.id)
         .order_by(Assessment.id.desc())).first()
     if latest is None:
-        return verdict, "No assessments yet."
+        return "untested", "No assessments yet."
+    est = session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
+    verdict = est.level if est else level_from_score(latest.score)[0]
     bits = [f"Latest: **{latest.kind}** — score {latest.score:.2f}"]
     if latest.verdict:
         bits.append(latest.verdict)
