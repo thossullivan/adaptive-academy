@@ -12,7 +12,17 @@ def test_flatten_single_passthrough_and_multi_roleprefix():
     assert "USER: a" in out and "TUTOR: b" in out
 
 
+def test_complete_with_tools_no_key_raises_legible_error(monkeypatch):
+    # Pure-subscription user (no key) + a tool-use turn must raise a legible AgentSDKError
+    # (-> 502), not a bare KeyError 500 from AnthropicLLMClient construction.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(mod.AgentSDKError):
+        AgentSDKLLMClient(role="reasoning").complete(
+            "sys", [{"role": "user", "content": "x"}], tools=[{"name": "reveal"}])
+
+
 def test_complete_with_tools_bridges_to_api_key_client(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real")
     # Tool-use turns aren't ported yet — they must transparently use the API-key client
     # so the Tutor keeps working in agent_sdk mode.
     seen = {}

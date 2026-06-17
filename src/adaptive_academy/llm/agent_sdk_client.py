@@ -28,13 +28,11 @@ from claude_agent_sdk import (
 )
 
 from adaptive_academy.llm.registry import get_model
-from adaptive_academy.llm.types import LLMResponse
+from adaptive_academy.llm.types import AgentSDKError, LLMResponse
 
 _ENV_LOCK = threading.Lock()
 
-
-class AgentSDKError(RuntimeError):
-    """The Agent SDK returned an error result (e.g. auth/usage failure)."""
+__all__ = ["AgentSDKLLMClient", "AgentSDKError", "flatten_messages"]
 
 
 def flatten_messages(messages: list[dict]) -> str:
@@ -76,6 +74,12 @@ class AgentSDKLLMClient:
         if tools:
             # Tool-use turns (the Tutor's gated reveal_solution) aren't ported to the SDK
             # yet; bridge them to the API-key client so agent_sdk mode stays fully usable.
+            # A pure-subscription user with no key set gets a legible error, not a 500.
+            if "ANTHROPIC_API_KEY" not in os.environ:
+                raise AgentSDKError(
+                    "agent_sdk mode: tool-use turns (the Tutor's reveal_solution) are not "
+                    "ported to the Agent SDK yet and still require ANTHROPIC_API_KEY. Set a "
+                    "key, or use assess/curriculum/anchors which run on your subscription.")
             from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
             return AnthropicLLMClient(role=self._role).complete(system, messages, tools)
         prompt = flatten_messages(messages)
