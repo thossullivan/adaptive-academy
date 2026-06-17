@@ -85,6 +85,24 @@ def test_upstream_error_surfaces_actionable_message(session):
     app.dependency_overrides.clear()
 
 
+def test_agent_sdk_error_returns_clean_502(session):
+    # A subscription-backend failure must be a legible 502, not a bare 500.
+    from adaptive_academy.llm.types import AgentSDKError
+
+    class _AgentBoomLLM:
+        def complete(self, system, messages, tools):
+            raise AgentSDKError("subscription usage limit reached")
+
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_llm] = lambda: _AgentBoomLLM()
+    cid = _seed_concept(session)
+    r = TestClient(app).post(f"/api/concepts/{cid}/assess",
+                             json={"kind": "self_explanation", "response": "..."})
+    assert r.status_code == 502
+    assert "subscription usage limit reached" in r.json()["detail"]
+    app.dependency_overrides.clear()
+
+
 def test_malformed_or_truncated_llm_json_returns_clean_502(session):
     # The live failure mode: the model returns JSON our parser can't load
     # (e.g. truncated at max_tokens). Must be a legible 502, not a bare 500.

@@ -18,6 +18,7 @@ from adaptive_academy.api.routes_retention import (
     topic_router as retention_topic_router,
 )
 from adaptive_academy.db import create_db_and_tables
+from adaptive_academy.llm.types import AgentSDKError
 
 
 def create_app() -> FastAPI:
@@ -49,6 +50,12 @@ def create_app() -> FastAPI:
             upstream = getattr(exc, "message", "") or str(exc)
             detail = f"LLM request failed upstream ({type(exc).__name__}): {upstream}"[:300]
         return JSONResponse(status_code=502, content={"detail": detail})
+
+    @app.exception_handler(AgentSDKError)
+    def _agent_sdk_error(request: Request, exc: AgentSDKError) -> JSONResponse:
+        """Agent SDK (subscription-backend) failures → legible 502, like APIError."""
+        return JSONResponse(status_code=502,
+                            content={"detail": f"Agent SDK request failed: {exc}"[:300]})
 
     @app.exception_handler(json.JSONDecodeError)
     def _bad_llm_json(request: Request, exc: json.JSONDecodeError) -> JSONResponse:
