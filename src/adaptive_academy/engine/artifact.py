@@ -12,11 +12,13 @@ stored for reference; server-side URL fetching (SSRF surface) and sandboxed exec
 deferred — both become additional signals feeding the same deliverable verdict, not a rewrite.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
 from adaptive_academy.engine.assess import _NO_MECHANISM_CEIL, parse_grade_json
+from adaptive_academy.engine.fetch import fetch_artifact_text
 from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import AgentEvent, Assessment, Concept, Deliverable, Item, Phase, Track
@@ -29,6 +31,17 @@ class ArtifactReviewResult:
     verdict: str
     gaps: list[str] = field(default_factory=list)
     concepts: list[str] = field(default_factory=list)  # demonstrated concept names
+
+
+def _merge_artifact_text(fetched: str | None, content: str) -> str:
+    """Combine best-effort-fetched URL text with the learner's pasted notes for grading.
+    Both land inside the prompt's <<<ARTIFACT>>> block (so both get injection-immunity)."""
+    blocks: list[str] = []
+    if fetched:
+        blocks.append(f"[Fetched from artifact URL]\n{fetched}")
+    if content:
+        blocks.append(f"[Submitted notes]\n{content}" if fetched else content)
+    return "\n\n".join(blocks)
 
 
 def phase_concepts(session: Session, phase: Phase) -> list[Concept]:
@@ -52,17 +65,29 @@ def build_artifact_prompt(deliverable: Deliverable, content: str) -> tuple[str, 
 
 
 def review_artifact(
-    session: Session, deliverable: Deliverable, artifact_url: str, content: str, *, llm: LLMClient
+    session: Session,
+    deliverable: Deliverable,
+    artifact_url: str,
+    content: str,
+    *,
+    llm: LLMClient,
+    fetch: Callable[[str], str | None] = fetch_artifact_text,
 ) -> ArtifactReviewResult:
     """Grade the shipped artifact against the deliverable's criteria; persist the verdict +
-    a per-concept artifact_review (the 'shipped' signal). The mechanism cap applies."""
+    a per-concept artifact_review (the 'shipped' signal). The mechanism cap applies.
+
+    If an artifact_url is given, its text is best-effort fetched (SSRF-guarded) and graded
+    alongside the pasted content; a fetch failure degrades silently to paste-only."""
     if artifact_url:
         deliverable.artifact_url = artifact_url
+
+    fetched = fetch(artifact_url) if artifact_url else None
+    graded_content = _merge_artifact_text(fetched, content)
 
     phase = session.get(Phase, deliverable.phase_id)
     topic_id = session.get(Track, phase.track_id).topic_id if phase else None
 
-    system, user = build_artifact_prompt(deliverable, content)
+    system, user = build_artifact_prompt(deliverable, graded_content)
     trace_prompt(session, ASSESS_ARTIFACT, topic_id=topic_id)
     grade = parse_grade_json(
         llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[]).text)

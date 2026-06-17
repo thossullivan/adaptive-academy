@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { canShip } from '$lib/ship';
   import type { Curriculum, ShipResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Markdown, Input, Textarea } from '$lib/ui';
@@ -19,11 +20,12 @@
   let shipping = $state<number | null>(null);
 
   async function ship(d: { id: number }) {
-    const content = shipContent[d.id];
-    if (!content?.trim() || shipping === d.id) return;
+    const content = shipContent[d.id] ?? '';
+    const url = shipUrl[d.id] ?? '';
+    if (!canShip(url, content) || shipping === d.id) return;
     shipping = d.id;
     try {
-      const r = await api.shipDeliverable(d.id, shipUrl[d.id] ?? '', content);
+      const r = await api.shipDeliverable(d.id, url, content);
       shipResult[d.id] = r;
       // Persist the shipped state on the curriculum so the badge sticks.
       if (cur) {
@@ -171,10 +173,14 @@
                   <Button variant="outline" size="sm" onclick={() => (shipOpen[d.id] = true)}>⚒ Ship it for review</Button>
                 {:else}
                   <div class="flex flex-col gap-2">
-                    <Input bind:value={shipUrl[d.id]} placeholder="Artifact URL (repo / blog / notebook) — optional" />
-                    <Textarea bind:value={shipContent[d.id]} rows={6} placeholder="Paste the artifact — key code, the writeup, the ablation table. It's graded against the acceptance criteria above." />
+                    <Input bind:value={shipUrl[d.id]} placeholder="Artifact URL (repo / blog / notebook)" />
+                    <p class="text-xs text-fg-dim">
+                      Supported hosts (GitHub, GitLab, arXiv, HuggingFace, Kaggle, Medium, Substack…) are
+                      fetched automatically — paste below only to add context or if the URL isn't public.
+                    </p>
+                    <Textarea bind:value={shipContent[d.id]} rows={6} placeholder="Optionally paste the artifact — key code, the writeup, the ablation table. Graded against the acceptance criteria above." />
                     <div class="flex items-center gap-2">
-                      <Button size="sm" onclick={() => ship(d)} disabled={shipping === d.id || !shipContent[d.id]?.trim()}>
+                      <Button size="sm" onclick={() => ship(d)} disabled={shipping === d.id || !canShip(shipUrl[d.id] ?? '', shipContent[d.id] ?? '')}>
                         {shipping === d.id ? 'Reviewing…' : 'Ship & review'}
                       </Button>
                       <button class="eyebrow transition-colors hover:text-fg-dim" onclick={() => (shipOpen[d.id] = false)}>cancel</button>
