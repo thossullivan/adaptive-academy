@@ -40,3 +40,30 @@ class AnthropicLLMClient:
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(id=block.id, name=block.name, input=block.input))
         return LLMResponse(text="".join(text_parts), tool_calls=tool_calls)
+
+    def complete_json(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        *,
+        schema: dict[str, Any],
+        tool_name: str,
+    ) -> dict[str, Any]:
+        """Forced tool use → guaranteed schema-shaped JSON (no fences, preamble, or shape drift)."""
+        tool = {
+            "name": tool_name,
+            "description": "Emit the result as structured data matching the schema.",
+            "input_schema": schema,
+        }
+        resp = self._client.messages.create(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            system=system,
+            messages=messages,
+            tools=[tool],
+            tool_choice={"type": "tool", "name": tool_name},
+        )
+        for block in resp.content:
+            if block.type == "tool_use" and block.name == tool_name:
+                return block.input
+        raise ValueError("structured completion returned no tool use")
