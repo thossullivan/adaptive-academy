@@ -114,6 +114,13 @@ def test_parse_problem_and_consolidation_json():
     assert canonical == "use chain rule" and feedback == "good start" and score == 0.7
 
 
+def test_pf_generate_prompt_carries_prior_knowledge_level():
+    from adaptive_academy.engine.productive_failure import build_generate_prompt
+
+    _, user = build_generate_prompt("softmax", None, "low")
+    assert "LEARNER PRIOR-KNOWLEDGE LEVEL: low" in user
+
+
 def test_consolidate_persists_productive_failure_assessment(session):
     _, concept = _seed_concept(session)
     fake = FixedLLM(json.dumps({"canonical": "C", "feedback": "F", "score": 0.6}))
