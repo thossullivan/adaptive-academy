@@ -12,6 +12,7 @@ from adaptive_academy.engine.track_markdown import (
     TrackView,
 )
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.prompts import CURRICULUM
 from adaptive_academy.models import (
     AgentEvent,
     Concept,
@@ -118,27 +119,6 @@ def parse_curriculum_json(text: str, title: str) -> TrackView:
                      phases=phases, sidebars=sidebars)
 
 
-_CURRICULUM_SYSTEM = (
-    "You are a CurriculumDirector for an ADVANCED, self-directed adult learner. "
-    "Design an editable, phased learning Track from the foundation and reading list. "
-    "Evidence-driven rules (follow them):\n"
-    "- Default to LOW-ASSISTANCE, PROJECT/PROBLEM-FIRST items (expertise-reversal effect: "
-    "high guidance harms experts). Lead with building/shipping, not lectures.\n"
-    "- Give EXACTLY ONE shippable teaching artifact ('🎯 Ship') per phase "
-    "(learning-by-teaching): a blog/repo/model/talk/ablation with acceptance criteria.\n"
-    "- Revisit load-bearing prerequisites across LATER phases (spaced, not massed).\n"
-    "- Treat deliberate-practice drills as SUPPORTING, never the spine.\n"
-    "Respond with ONLY a JSON object: {\"overview\": str, \"phases\": [{\"title\": str, "
-    "\"est_hours\": str, \"flags\": [\"optional\"|\"stretch\"|\"parallel_track\"], "
-    "\"items\": [{\"type\": \"read\"|\"watch\"|\"build\"|\"write\", \"text\": str, "
-    "\"concept_refs\": [str]}], \"deliverable\": {\"kind\": "
-    "\"blog\"|\"repo\"|\"model\"|\"talk\"|\"ablation\", \"text\": str, "
-    "\"acceptance_criteria\": [str]}}], \"sidebars\": [{\"kind\": "
-    "\"math_refresh\"|\"reading_list\"|\"reference\", \"title\": str, \"body\": str}]}. "
-    "Use the foundation's key concepts as item concept_refs. No prose outside the JSON."
-)
-
-
 def build_curriculum_prompt(
     topic_title: str, intent: TopicIntent, foundation: TopicFoundation,
     sources: list[SourceDoc],
@@ -157,7 +137,7 @@ def build_curriculum_prompt(
     ]
     for s in sources:
         lines.append(f"- [{s.tier}] {s.title} ({s.url}) — {s.summary}".rstrip(" —"))
-    return _CURRICULUM_SYSTEM, "\n".join(lines)
+    return CURRICULUM, "\n".join(lines)
 
 
 @dataclass
@@ -185,6 +165,7 @@ def generate_curriculum(
         events.append(ev)
 
     emit("curriculum:plan", f"{len(foundation.key_concepts)} concepts, {len(sources)} sources")
+    emit("prompt", CURRICULUM.tag)
     system, user = build_curriculum_prompt(topic.title, intent, foundation, sources)
     resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
     draft = parse_curriculum_json(resp.text, title=topic.title)

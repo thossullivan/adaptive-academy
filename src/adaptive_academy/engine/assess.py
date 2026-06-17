@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from sqlmodel import Session, select
 
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.prompts import GRADE, PROBE_TEXT, RUBRIC
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
@@ -114,18 +115,6 @@ def parse_grade_json(text: str) -> GradeDraft:
     )
 
 
-_RUBRIC_SYSTEM = (
-    "You build a grading rubric for one concept an advanced learner must explain. "
-    "Given the concept, the topic foundation, and sources, produce a rubric to grade a "
-    "learner's *explanation* against — NOT a model answer. Respond with ONLY a JSON object: "
-    '{"criteria": [str, prose points a correct explanation must address], '
-    '"must_include": [str, short LITERAL terms/expressions a correct explanation must '
-    'contain, e.g. "softmax", "QK^T", "scale by sqrt(d)"], "strong_signs": [str], '
-    '"weak_signs": [str, common misconceptions/red flags], "source_refs": [str]}. '
-    "Keep must_include to 3-6 precise, checkable terms. No prose outside the JSON."
-)
-
-
 def _topic_id_for(session: Session, concept: Concept) -> int:
     return session.get(Track, concept.track_id).topic_id
 
@@ -140,7 +129,7 @@ def build_rubric_prompt(concept_name: str, foundation: TopicFoundation | None,
         lines.append("SOURCES:")
         for s in sources:
             lines.append(f"- [{s.tier}] {s.title} — {s.summary}".rstrip(" —"))
-    return _RUBRIC_SYSTEM, "\n".join(lines)
+    return RUBRIC, "\n".join(lines)
 
 
 def ensure_rubric(session: Session, concept: Concept, *, llm: LLMClient) -> Rubric:
@@ -166,25 +155,6 @@ def ensure_rubric(session: Session, concept: Concept, *, llm: LLMClient) -> Rubr
     return rubric
 
 
-_GRADE_SYSTEM = (
-    "You are a SKEPTICAL grader for an advanced learner's explanation. Grade the "
-    "RESPONSE strictly AGAINST the provided rubric/anchor — never from fluency, length, "
-    "or confidence. Reward only demonstrated understanding of the listed criteria; "
-    "penalize vagueness and missing required elements. Respond with ONLY a JSON object: "
-    '{"score": number 0..1, "verdict": str (one sentence), "gaps": [str, specific '
-    'missing/incorrect points], "confidence_actual": number 0..1 (same as score)}. '
-    "No prose outside the JSON."
-)
-
-_PROBE_TEXT = {
-    "self_explanation": "Explain *why* {concept} works, in your own words.",
-    "calibration": "Explain *why* {concept} works (we will compare to your confidence).",
-    "artifact_review": "Review your shipped artifact for {concept}: what does it "
-                       "demonstrate you understand, and where are the gaps?",
-    "source_quiz": "{question}",
-}
-
-
 @dataclass
 class AssessmentResult:
     assessment: Assessment
@@ -200,7 +170,7 @@ def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
     if reference:
         lines.append(f"REFERENCE ANSWER: {reference}")
     lines += ["", "LEARNER RESPONSE:", response or "(empty)"]
-    return _GRADE_SYSTEM, "\n".join(lines)
+    return GRADE, "\n".join(lines)
 
 
 def _deliverable_criteria(session: Session, item_id: int | None) -> list[str]:
@@ -259,7 +229,7 @@ def assess_concept(
     reference = ""
     if kind == "artifact_review":
         criteria = _deliverable_criteria(session, item_id)
-        probe = _PROBE_TEXT[kind].format(concept=concept.name)
+        probe = PROBE_TEXT[kind].format(concept=concept.name)
     elif kind == "source_quiz":
         anchor = _resolve_anchor(session, concept, anchor_id)
         anchor_ref_id = anchor.id
@@ -271,10 +241,11 @@ def assess_concept(
         rubric = ensure_rubric(session, concept, llm=llm)
         rubric_id = rubric.id
         criteria, must_include, weak_signs = rubric.criteria, rubric.must_include, rubric.weak_signs
-        probe = _PROBE_TEXT.get(kind, _PROBE_TEXT["self_explanation"]).format(
+        probe = PROBE_TEXT.get(kind, PROBE_TEXT["self_explanation"]).format(
             concept=concept.name, question=concept.name)
     emit("assess:probe", kind)
 
+    emit("prompt", GRADE.tag)
     system, user = build_grade_prompt(concept.name, kind, criteria, reference, response)
     grade = parse_grade_json(
         llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[]).text)

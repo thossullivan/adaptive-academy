@@ -11,8 +11,10 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
-from adaptive_academy.models import Assessment, Concept
+from adaptive_academy.prompts import TEACH
+from adaptive_academy.models import Assessment, Concept, Track
 
 
 def _strip_fences(text: str) -> str:
@@ -29,17 +31,6 @@ def _as_float(v, default: float) -> float:
         return float(v)
     except (TypeError, ValueError):
         return default
-
-
-_TEACH_SYSTEM = (
-    "You evaluate a learner's PUBLIC EXPLANATION of a concept (learning-by-teaching / the "
-    "protégé effect). Grade it as if a real, smart-but-uninformed audience must actually learn "
-    "from it: clarity, correctness, completeness, and whether the reader would genuinely "
-    "understand the mechanism (not just the vocabulary). Be honest — reward real teaching, flag "
-    "hand-waving and borrowed jargon. Respond with ONLY a JSON object: "
-    '{"score": number 0..1, "feedback": str (1-2 sentences, direct), "strengths": [str], '
-    '"gaps": [str, what a reader would still be confused about]}. No prose outside the JSON.'
-)
 
 
 @dataclass
@@ -64,7 +55,9 @@ def parse_teaching_json(text: str) -> tuple[float, str, list[str], list[str]]:
 def grade_teaching(session: Session, concept: Concept, explanation: str, *, llm: LLMClient) -> TeachResult:
     """Grade a public explanation under a teaching expectancy; persist as a teach assessment."""
     user = f"CONCEPT: {concept.name}\n\nLEARNER'S PUBLIC EXPLANATION:\n{explanation or '(empty)'}"
-    resp = llm.complete(system=_TEACH_SYSTEM, messages=[{"role": "user", "content": user}], tools=[])
+    track = session.get(Track, concept.track_id)
+    trace_prompt(session, TEACH, topic_id=track.topic_id if track else None)
+    resp = llm.complete(system=TEACH, messages=[{"role": "user", "content": user}], tools=[])
     score, feedback, strengths, gaps = parse_teaching_json(resp.text)
 
     assessment = Assessment(

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from sqlmodel import Session
 
 from adaptive_academy.engine.levels import compute_levels
-from adaptive_academy.engine.prompts import build_tutor_system_prompt
+from adaptive_academy.prompts import build_tutor_system_prompt
 from adaptive_academy.engine.tools import TIERS, TOOLS, reveal_gate
 from adaptive_academy.llm.types import LLMClient, LLMResponse, ToolCall
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message

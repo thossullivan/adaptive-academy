@@ -2,16 +2,7 @@ from adaptive_academy.engine.anchors import parse_anchors_json
 from adaptive_academy.llm.anchor_types import AnchorBrief, RawAnchor
 from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
 from adaptive_academy.llm.types import LLMClient
-
-_ANCHOR_SYSTEM = (
-    "You write grounded quiz anchors for an ADVANCED self-directed learner, from ONE "
-    "accepted source. Produce questions whose ANSWERS are checkable against the source's "
-    "substance — not trivia. For each, give a concise reference_answer and 3-6 short, "
-    "literal key_points (terms/expressions a correct answer must contain), and tag the most "
-    "relevant concept from the provided list. Respond with ONLY a JSON object: "
-    '{"anchors": [{"question": str, "reference_answer": str, "key_points": [str], '
-    '"concept": str}]}. 1-3 anchors. No prose outside the JSON.'
-)
+from adaptive_academy.prompts import ANCHOR
 
 
 def _build_user_msg(brief: AnchorBrief) -> str:
@@ -29,6 +20,6 @@ class AnthropicAnchorClient:
 
     def generate(self, brief: AnchorBrief) -> list[RawAnchor]:
         resp = self._llm.complete(
-            system=_ANCHOR_SYSTEM,
+            system=ANCHOR,
             messages=[{"role": "user", "content": _build_user_msg(brief)}], tools=[])
         return parse_anchors_json(resp.text)

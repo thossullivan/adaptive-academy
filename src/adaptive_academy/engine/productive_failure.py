@@ -12,7 +12,9 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.prompts import PF_CONSOLIDATE, PF_GENERATE
 from adaptive_academy.models import Assessment, Concept, TopicFoundation, Track
 
 
@@ -32,26 +34,6 @@ def _as_float(v, default: float) -> float:
         return default
 
 
-_GENERATE_SYSTEM = (
-    "You design a PRODUCTIVE FAILURE problem for an advanced learner. Produce ONE novel, "
-    "concrete problem that requires applying the concept but DO NOT reveal the method, the "
-    "approach, or the answer. It should be solvable with real effort (desirable difficulty) "
-    "and force the learner to GENERATE an approach from scratch. Respond with ONLY a JSON "
-    'object: {"problem": str}. No prose outside the JSON.'
-)
-
-_CONSOLIDATE_SYSTEM = (
-    "You evaluate a learner's GENERATIVE ATTEMPT at a problem they tackled BEFORE any "
-    "instruction (productive failure). Grade the QUALITY OF REASONING and the productive "
-    "structure of the attempt — NOT whether the final answer is correct; failing productively "
-    "is expected and valuable. Reward identifying the right sub-problems, sound intuitions, and "
-    "honest dead-ends. Then teach the canonical approach. Respond with ONLY a JSON object: "
-    '{"canonical": str (the worked approach), "feedback": str (what the reasoning got right '
-    "and where it broke, 2-3 sentences), \"score\": number 0..1 (quality of generative "
-    'effort)}. No prose outside the JSON.'
-)
-
-
 @dataclass
 class ConsolidateResult:
     assessment: Assessment
@@ -68,7 +50,7 @@ def build_generate_prompt(concept_name: str, foundation: TopicFoundation | None)
     lines = [f"CONCEPT: {concept_name}"]
     if foundation and foundation.overview:
         lines.append(f"CONTEXT: {foundation.overview}")
-    return _GENERATE_SYSTEM, "\n".join(lines)
+    return PF_GENERATE, "\n".join(lines)
 
 
 def parse_problem_json(text: str) -> str:
@@ -92,6 +74,7 @@ def generate_challenge(session: Session, concept: Concept, *, llm: LLMClient) ->
         select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)
     ).first()
     system, user = build_generate_prompt(concept.name, foundation)
+    trace_prompt(session, PF_GENERATE, topic_id=topic_id)
     resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
     return parse_problem_json(resp.text)
 
@@ -101,8 +84,9 @@ def consolidate(
 ) -> ConsolidateResult:
     """Grade the generative attempt and teach the canonical approach; persist the record."""
     user = f"CONCEPT: {concept.name}\n\nPROBLEM:\n{problem}\n\nLEARNER ATTEMPT:\n{attempt or '(none)'}"
+    trace_prompt(session, PF_CONSOLIDATE, topic_id=_topic_id_for(session, concept))
     resp = llm.complete(
-        system=_CONSOLIDATE_SYSTEM, messages=[{"role": "user", "content": user}], tools=[]
+        system=PF_CONSOLIDATE, messages=[{"role": "user", "content": user}], tools=[]
     )
     canonical, feedback, score = parse_consolidation_json(resp.text)
 

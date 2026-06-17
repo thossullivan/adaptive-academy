@@ -23,7 +23,7 @@ from claude_agent_sdk import (
 from sqlmodel import Session
 
 from adaptive_academy.engine.levels import compute_levels
-from adaptive_academy.engine.prompts import build_tutor_system_prompt
+from adaptive_academy.prompts import build_tutor_system_prompt
 from adaptive_academy.engine.tools import reveal_gate
 from adaptive_academy.engine.tutor import TurnResult, _FALLBACK
 from adaptive_academy.llm.registry import get_model
