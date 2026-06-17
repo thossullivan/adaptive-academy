@@ -3,6 +3,7 @@ import os
 
 from anthropic import Anthropic
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
 from adaptive_academy.prompts import RESEARCH_SEARCH
@@ -10,18 +11,8 @@ from adaptive_academy.prompts import RESEARCH_SEARCH
 
 def parse_sources_json(text: str) -> list[RawSource]:
     """Extract a RawSource list from model text. Returns [] on any parse failure."""
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-        cleaned = cleaned.strip()
-    # Trim to the outermost JSON array if surrounded by stray text.
-    start, end = cleaned.find("["), cleaned.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        cleaned = cleaned[start : end + 1]
     try:
-        data = json.loads(cleaned)
+        data = json.loads(extract_json(text))
     except (json.JSONDecodeError, ValueError):
         return []
     out: list[RawSource] = []

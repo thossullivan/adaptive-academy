@@ -6,8 +6,8 @@ from adaptive_academy.prompts import ANCHOR
 
 
 def _build_user_msg(brief: AnchorBrief) -> str:
-    lines = [f"SOURCE TITLE: {brief.title}", f"URL: {brief.url}",
-             f"SOURCE SUMMARY: {brief.summary}",
+    lines = ["<<<SOURCE>>>", f"TITLE: {brief.title}", f"URL: {brief.url}",
+             f"SUMMARY: {brief.summary}", "<<<END_SOURCE>>>",
              f"TOPIC KEY CONCEPTS: {', '.join(brief.key_concepts)}"]
     return "\n".join(lines)
 

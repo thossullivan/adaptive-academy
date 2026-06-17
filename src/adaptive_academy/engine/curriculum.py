@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
     ItemView,
@@ -83,17 +84,9 @@ def insert_spaced_revisits(phases: list[PhaseView], load_bearing: set[str]) -> l
     return phases
 
 
-def _strip_fences(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-    return cleaned.strip()
-
 
 def parse_curriculum_json(text: str, title: str) -> TrackView:
-    data = json.loads(_strip_fences(text))
+    data = json.loads(extract_json(text))
     phases: list[PhaseView] = []
     for p in data.get("phases", []) or []:
         items = [

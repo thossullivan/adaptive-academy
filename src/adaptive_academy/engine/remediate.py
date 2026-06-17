@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import REMEDIATE
 from adaptive_academy.models import (
@@ -75,17 +76,9 @@ class RemediationDraft:
     revisit: dict | None = None
 
 
-def _strip_fences(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-    return cleaned.strip()
-
 
 def parse_remediation_json(text: str) -> RemediationDraft:
-    d = json.loads(_strip_fences(text))
+    d = json.loads(extract_json(text))
     revisit = d.get("revisit") or None
     return RemediationDraft(
         items=list(d.get("items", []) or []),

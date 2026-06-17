@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from sqlmodel import Session
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import RETENTION
@@ -31,14 +32,6 @@ def sm2_schedule(ease: float, interval: int, reps: int, result: str) -> tuple[fl
     return new_ease, new_interval, new_reps
 
 
-def _strip_fences(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-    return cleaned.strip()
-
 
 def propose_retention(
     session: Session, concept: Concept, assessment: Assessment, *, llm: LLMClient,
@@ -50,7 +43,7 @@ def propose_retention(
     trace_prompt(session, RETENTION, topic_id=track.topic_id if track else None)
     resp = llm.complete(system=RETENTION,
                         messages=[{"role": "user", "content": user}], tools=[])
-    data = json.loads(_strip_fences(resp.text))
+    data = json.loads(extract_json(resp.text))
     cards: list[SRSCard] = []
     for c in (data.get("cards", []) or [])[:3]:
         card = SRSCard(concept_id=concept.id, front=str(c.get("front", "")),

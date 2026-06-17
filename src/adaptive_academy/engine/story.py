@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import STORY
 from adaptive_academy.models import (
@@ -186,17 +187,9 @@ def build_story_prompt(facts: StoryFacts) -> tuple[str, str]:
     return STORY, "\n".join(lines)
 
 
-def _strip_fences(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-    return cleaned.strip()
-
 
 def parse_story_json(text: str) -> tuple[str, list[str], list[str]]:
-    d = json.loads(_strip_fences(text))
+    d = json.loads(extract_json(text))
     headline = str(d.get("headline", "")).strip()
     narrative = [str(p).strip() for p in (d.get("narrative", []) or []) if str(p).strip()]
     highlights = [str(h).strip() for h in (d.get("highlights", []) or []) if str(h).strip()]

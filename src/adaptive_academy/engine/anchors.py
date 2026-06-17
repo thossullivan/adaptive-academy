@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.anchor_types import AnchorBrief, AnchorClient, RawAnchor
 from adaptive_academy.models import (
     AgentEvent,
@@ -47,17 +48,9 @@ def dedupe_anchors(pairs: list[tuple[int, RawAnchor]]) -> list[tuple[int, RawAnc
     return out
 
 
-def _strip_fences(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-    return cleaned.strip()
-
 
 def parse_anchors_json(text: str) -> list[RawAnchor]:
-    data = json.loads(_strip_fences(text))
+    data = json.loads(extract_json(text))
     out: list[RawAnchor] = []
     for a in (data.get("anchors", []) or []):
         out.append(RawAnchor(
