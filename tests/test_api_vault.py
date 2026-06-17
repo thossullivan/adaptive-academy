@@ -43,6 +43,24 @@ def test_vault_status_export_ingest_roundtrip(session, tmp_path):
     app.dependency_overrides.clear()
 
 
+def test_vault_export_all_topics(session, tmp_path):
+    app.dependency_overrides[get_session] = lambda: session
+    for name in ("Build LLMs", "Learn Rust"):
+        t = Topic(title=name)
+        session.add(t)
+        session.commit()
+        session.refresh(t)
+        session.add(Track(topic_id=t.id, title="tr", overview="ov"))
+    session.commit()
+
+    client = TestClient(app)
+    r = client.post("/api/vault/export-all", json={"vault_path": str(tmp_path)})
+    assert r.status_code == 200 and r.json()["topics"] == 2
+    assert (tmp_path / "Adaptive Academy" / "build-llms" / "build-llms.md").exists()
+    assert (tmp_path / "Adaptive Academy" / "learn-rust" / "learn-rust.md").exists()
+    app.dependency_overrides.clear()
+
+
 def test_vault_status_unconfigured():
     client = TestClient(app)
     st = client.get("/api/vault/status")

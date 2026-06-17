@@ -344,3 +344,8 @@ class VaultStatusOut(BaseModel):
     exists: bool = False
     is_dir: bool = False
     note_count: int = 0
+
+
+class VaultExportAllOut(BaseModel):
+    topics: int
+    written: list[str] = []

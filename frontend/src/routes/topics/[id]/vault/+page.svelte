@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { VaultStatus, VaultIngestResult, VaultExportResult } from '$lib/types';
+  import type { VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Input, Badge } from '$lib/ui';
 
@@ -13,8 +13,10 @@
   let status = $state<VaultStatus | null>(null);
   let checking = $state(false);
   let exporting = $state(false);
+  let exportingAll = $state(false);
   let ingesting = $state(false);
   let exportRes = $state<VaultExportResult | null>(null);
+  let exportAllRes = $state<VaultExportAllResult | null>(null);
   let ingestRes = $state<VaultIngestResult | null>(null);
   let error = $state('');
 
@@ -48,6 +50,19 @@
       error = String(e);
     } finally {
       exporting = false;
+    }
+  }
+
+  async function runExportAll() {
+    error = '';
+    exportingAll = true;
+    exportAllRes = null;
+    try {
+      exportAllRes = await api.vaultExportAll(path.trim());
+    } catch (e) {
+      error = String(e);
+    } finally {
+      exportingAll = false;
     }
   }
 
@@ -110,12 +125,23 @@
           into a dedicated <code>Adaptive Academy/</code> folder we own — your own notes are never
           touched. Re-run anytime to refresh.
         </p>
-        <Button size="sm" onclick={runExport} disabled={!ready || exporting}>
-          {exporting ? 'Writing…' : '↓ Export to vault'}
-        </Button>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button size="sm" onclick={runExport} disabled={!ready || exporting}>
+            {exporting ? 'Writing…' : '↓ Export this topic'}
+          </Button>
+          <Button variant="outline" size="sm" onclick={runExportAll} disabled={!ready || exportingAll}>
+            {exportingAll ? 'Writing all…' : 'Export all topics'}
+          </Button>
+        </div>
         {#if exportRes}
           <p class="mt-3 text-sm text-fg-dim">
-            Wrote <span class="nums">{exportRes.written.length}</span> note{exportRes.written.length === 1 ? '' : 's'}.
+            Wrote <span class="nums">{exportRes.written.length}</span> note{exportRes.written.length === 1 ? '' : 's'} for this topic.
+          </p>
+        {/if}
+        {#if exportAllRes}
+          <p class="mt-3 text-sm text-fg-dim">
+            Mirrored <span class="nums">{exportAllRes.topics}</span> topic{exportAllRes.topics === 1 ? '' : 's'}
+            (<span class="nums">{exportAllRes.written.length}</span> notes) into your vault.
           </p>
         {/if}
       </Card>

@@ -88,3 +88,7 @@ export interface VaultIngestResult {
 export interface VaultExportResult {
   written: string[];
 }
+export interface VaultExportAllResult {
+  topics: number;
+  written: string[];
+}

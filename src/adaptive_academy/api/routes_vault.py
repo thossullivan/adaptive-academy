@@ -10,6 +10,7 @@ from sqlmodel import Session
 
 from adaptive_academy.api.deps import get_session
 from adaptive_academy.api.schemas import (
+    VaultExportAllOut,
     VaultExportIn,
     VaultExportOut,
     VaultIngestIn,
@@ -17,6 +18,7 @@ from adaptive_academy.api.schemas import (
     VaultStatusOut,
 )
 from adaptive_academy.engine.vault import (
+    export_all_topics,
     export_vault,
     ingest_vault,
     safe_vault_dir,
@@ -54,6 +56,15 @@ def export(
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return VaultExportOut(written=res.written)
+
+
+@router.post("/vault/export-all", response_model=VaultExportAllOut)
+def export_all(body: VaultExportIn, session: Session = Depends(get_session)) -> VaultExportAllOut:
+    try:
+        res = export_all_topics(session, _resolve_path(body.vault_path))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return VaultExportAllOut(topics=res.topics, written=res.written)
 
 
 @router.get("/vault/status", response_model=VaultStatusOut)
