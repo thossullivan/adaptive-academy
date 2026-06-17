@@ -20,7 +20,12 @@ from adaptive_academy.models import (
     Track,
 )
 
-_OMISSION_PENALTY = 0.15
+# Deterministic band ceilings (a missing required element or a present misconception means the
+# explanation cannot be graded "solid"). Applied as a CEILING, not a subtraction, so the LLM's
+# band and the rules can never disagree into an arbitrary float.
+_OMISSION_CEIL = 0.70
+_MISCONCEPTION_CEIL = 0.50
+_NO_MECHANISM_CEIL = 0.50  # the illusion-of-competence cap
 
 
 class AnchorError(Exception):
@@ -57,9 +62,14 @@ def apply_rules_checks(response: str, must_include: list[str], weak_signs: list[
 
 
 def penalize_score(llm_score: float, rules_gaps: list[str]) -> float:
-    """Penalize the LLM score for each omitted required element (anti-sycophancy)."""
-    omissions = sum(1 for g in rules_gaps if g.startswith("omitted required element"))
-    return round(max(0.0, min(1.0, llm_score) - _OMISSION_PENALTY * omissions), 4)
+    """Apply deterministic anti-sycophancy CEILINGS (not subtractions): a missing required
+    element caps the grade at 'developing-with-gaps'; a present misconception caps it lower."""
+    s = max(0.0, min(1.0, llm_score))
+    if any(g.startswith("omitted required element") for g in rules_gaps):
+        s = min(s, _OMISSION_CEIL)
+    if any(g.startswith("contains likely misconception") for g in rules_gaps):
+        s = min(s, _MISCONCEPTION_CEIL)
+    return round(s, 4)
 
 
 @dataclass
@@ -77,6 +87,9 @@ class GradeDraft:
     verdict: str = ""
     gaps: list[str] = field(default_factory=list)
     confidence_actual: float | None = None
+    # The grader's self-report of whether a real causal mechanism was demonstrated. Defaults
+    # True so an older/absent value never wrongly caps; a false value triggers the 0.50 cap.
+    mechanism_present: bool = True
 
 
 
@@ -105,6 +118,7 @@ def parse_grade_json(text: str) -> GradeDraft:
         verdict=str(d.get("verdict", "")),
         gaps=list(d.get("gaps", []) or []),
         confidence_actual=_as_float(d.get("confidence_actual"), None),
+        mechanism_present=bool(d.get("mechanism_present", True)),
     )
 
 
@@ -246,7 +260,13 @@ def assess_concept(
     rules_gaps = apply_rules_checks(response, must_include, weak_signs)
     if rules_gaps:
         emit("assess:rules", f"{len(rules_gaps)} hard gap(s)")
-    final_score = penalize_score(grade.score, rules_gaps)
+    # Code-enforced illusion-of-competence cap: fluent prose with no demonstrated mechanism
+    # cannot score above 'developing', no matter what the LLM returned (defense in depth).
+    score = grade.score
+    if not grade.mechanism_present:
+        score = min(score, _NO_MECHANISM_CEIL)
+        emit("assess:mechanism", "capped: no mechanism demonstrated")
+    final_score = penalize_score(score, rules_gaps)
     gaps = list(grade.gaps) + rules_gaps
     emit("assess:graded", f"score={final_score}")
 
