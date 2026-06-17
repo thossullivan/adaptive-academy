@@ -40,6 +40,12 @@
               { label: 'Teach', icon: 'teach', href: `/topics/${tid}/teach`, match: (p) => p.endsWith('/teach') },
               { label: 'Story', icon: 'story', href: `/topics/${tid}/story`, match: (p) => p.endsWith('/story') }
             ]
+          },
+          {
+            label: 'Connections',
+            items: [
+              { label: 'Vault', icon: 'vault', href: `/topics/${tid}/vault`, match: (p) => p.endsWith('/vault') }
+            ]
           }
         ]
   );
