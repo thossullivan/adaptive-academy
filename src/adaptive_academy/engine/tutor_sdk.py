@@ -40,6 +40,31 @@ def format_history(convo: Conversation) -> str:
     return "\n".join(lines)
 
 
+def _text_result(text: str, *, is_error: bool = False) -> dict:
+    out = {"content": [{"type": "text", "text": text}]}
+    if is_error:
+        out["is_error"] = True
+    return out
+
+
+def log_attempt_result(convo: Conversation, emit, args: dict) -> dict:
+    """Tool body for log_attempt — records the learner's attempt. Extracted so the
+    attempt-gate can be unit-tested without the live SDK."""
+    convo.attempt_logged = True
+    emit("tool:log_attempt", str(args.get("summary", "")))
+    return _text_result("ok: attempt recorded")
+
+
+def reveal_solution_result(convo: Conversation, emit, args: dict) -> dict:
+    """Tool body for reveal_solution — the code-enforced attempt-gate. When blocked it
+    returns the BLOCKED message (is_error) and NEVER the solution text."""
+    allowed, msg = reveal_gate(convo.attempt_logged)
+    emit(f"tool:reveal_solution:{'allowed' if allowed else 'blocked'}")
+    if not allowed:
+        return _text_result(msg, is_error=True)
+    return _text_result(str(args.get("text", "")))
+
+
 def run_tutor_turn_sdk(
     session: Session,
     convo: Conversation,
@@ -66,18 +91,12 @@ def run_tutor_turn_sdk(
 
     @tool("log_attempt", "Record that the learner made a genuine attempt", {"summary": str})
     async def _log_attempt(args):  # noqa: ANN001
-        convo.attempt_logged = True
-        emit("tool:log_attempt", str(args.get("summary", "")))
-        return {"content": [{"type": "text", "text": "ok: attempt recorded"}]}
+        return log_attempt_result(convo, emit, args)
 
     @tool("reveal_solution", "Reveal the full worked solution (only after an attempt)",
           {"text": str})
     async def _reveal_solution(args):  # noqa: ANN001
-        allowed, msg = reveal_gate(convo.attempt_logged)
-        emit(f"tool:reveal_solution:{'allowed' if allowed else 'blocked'}")
-        if not allowed:
-            return {"content": [{"type": "text", "text": msg}], "is_error": True}
-        return {"content": [{"type": "text", "text": str(args.get("text", ""))}]}
+        return reveal_solution_result(convo, emit, args)
 
     server = create_sdk_mcp_server("tutor", tools=[_log_attempt, _reveal_solution])
 
