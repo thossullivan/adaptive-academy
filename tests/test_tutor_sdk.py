@@ -1,6 +1,13 @@
+import types
+
 import adaptive_academy.engine.tutor_sdk as mod
 from adaptive_academy.engine.tools import reveal_gate
-from adaptive_academy.engine.tutor_sdk import format_history, run_tutor_turn_sdk
+from adaptive_academy.engine.tutor_sdk import (
+    format_history,
+    log_attempt_result,
+    reveal_solution_result,
+    run_tutor_turn_sdk,
+)
 from adaptive_academy.models import (
     Concept, Conversation, KnowledgeEstimate, Message, Topic, Track,
 )
@@ -11,6 +18,31 @@ def test_reveal_gate_blocks_before_attempt_allows_after():
     assert allowed is False and "BLOCKED" in msg
     allowed, _ = reveal_gate(True)
     assert allowed is True
+
+
+def test_reveal_handler_blocks_and_never_leaks_solution():
+    # The load-bearing guardrail: with no attempt logged, the reveal tool returns a BLOCKED
+    # is_error result and the solution text NEVER appears.
+    convo = types.SimpleNamespace(attempt_logged=False)
+    events = []
+    out = reveal_solution_result(convo, lambda k, d="": events.append(k),
+                                 {"text": "THE SECRET ANSWER IS 42"})
+    assert out.get("is_error") is True
+    blob = str(out["content"])
+    assert "THE SECRET ANSWER IS 42" not in blob and "BLOCKED" in blob
+    assert "tool:reveal_solution:blocked" in events
+
+
+def test_log_attempt_then_reveal_allows_and_returns_solution():
+    convo = types.SimpleNamespace(attempt_logged=False)
+    events = []
+    emit = lambda k, d="": events.append(k)  # noqa: E731
+    log_attempt_result(convo, emit, {"summary": "I tried the chain rule"})
+    assert convo.attempt_logged is True
+    out = reveal_solution_result(convo, emit, {"text": "THE SECRET ANSWER IS 42"})
+    assert "is_error" not in out
+    assert "THE SECRET ANSWER IS 42" in str(out["content"])
+    assert "tool:log_attempt" in events and "tool:reveal_solution:allowed" in events
 
 
 def _seed(session):
