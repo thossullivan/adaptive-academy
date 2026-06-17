@@ -16,7 +16,7 @@ from adaptive_academy.jsonout import extract_json
 from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import PF_CONSOLIDATE, PF_GENERATE
-from adaptive_academy.models import Assessment, Concept, TopicFoundation, Track
+from adaptive_academy.models import Assessment, Concept, KnowledgeEstimate, TopicFoundation, Track
 
 
 
@@ -39,8 +39,10 @@ def _topic_id_for(session: Session, concept: Concept) -> int:
     return session.get(Track, concept.track_id).topic_id
 
 
-def build_generate_prompt(concept_name: str, foundation: TopicFoundation | None) -> tuple[str, str]:
-    lines = [f"CONCEPT: {concept_name}"]
+def build_generate_prompt(
+    concept_name: str, foundation: TopicFoundation | None, level: str = "unknown"
+) -> tuple[str, str]:
+    lines = [f"CONCEPT: {concept_name}", f"LEARNER PRIOR-KNOWLEDGE LEVEL: {level}"]
     if foundation and foundation.overview:
         lines.append(f"CONTEXT: {foundation.overview}")
     return PF_GENERATE, "\n".join(lines)
@@ -66,7 +68,10 @@ def generate_challenge(session: Session, concept: Concept, *, llm: LLMClient) ->
     foundation = session.exec(
         select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)
     ).first()
-    system, user = build_generate_prompt(concept.name, foundation)
+    est = session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)
+    ).first()
+    system, user = build_generate_prompt(concept.name, foundation, est.level if est else "unknown")
     trace_prompt(session, PF_GENERATE, topic_id=topic_id)
     resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
     return parse_problem_json(resp.text)
