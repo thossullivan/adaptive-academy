@@ -6,19 +6,19 @@ import adaptive_academy.llm.agent_sdk_client as mod
 from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient, flatten_messages
 
 
-def test_create_app_drops_api_key_only_in_agent_sdk_mode(monkeypatch):
-    from adaptive_academy.api.app import create_app
+def test_drop_api_key_only_in_agent_sdk_mode(monkeypatch):
+    from adaptive_academy.api.app import drop_api_key_if_agent_sdk
 
     # agent_sdk mode: key dropped process-wide so all SDK subprocesses use the subscription.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
     monkeypatch.setenv("AA_LLM_BACKEND", "agent_sdk")
-    create_app()
+    drop_api_key_if_agent_sdk()
     assert "ANTHROPIC_API_KEY" not in os.environ
 
     # Default mode: key untouched.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-y")
     monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
-    create_app()
+    drop_api_key_if_agent_sdk()
     assert os.environ["ANTHROPIC_API_KEY"] == "sk-y"
 
 
