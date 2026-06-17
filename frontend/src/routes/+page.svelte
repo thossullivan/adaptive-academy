@@ -2,14 +2,14 @@
   import { topics } from '$lib/topics.svelte';
   import { api } from '$lib/api';
   import type { Curriculum, Assessment, EventOut, Concept } from '$lib/types';
-  import { LEVEL_FILL } from '$lib/utils';
+  import { conceptSignals, conceptVerdict, VERDICT_RANK, type ConceptSignals, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
-  import { Card, Button, Badge, Stat, LevelBar, ProgressRing } from '$lib/ui';
+  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing } from '$lib/ui';
   import ScoreTrend from '$lib/charts/ScoreTrend.svelte';
   import CalibrationPlot from '$lib/charts/CalibrationPlot.svelte';
 
-  type ConceptRow = Concept & { level: string; n: number };
+  type ConceptRow = Concept & { signals: ConceptSignals; verdict: Verdict; n: number };
 
   let loading = $state(true);
   let hasCurriculum = $state(false);
@@ -26,7 +26,7 @@
   let phaseProg = $state<{ title: string; done: number; total: number }[]>([]);
 
   const overallPct = $derived(itemsTotal ? Math.round((itemsDone / itemsTotal) * 100) : 0);
-  const solidCount = $derived(rows.filter((r) => r.level === 'high').length);
+  const solidCount = $derived(rows.filter((r) => r.verdict === 'solid').length);
   const meanScore = $derived(trend.length ? trend.reduce((a, b) => a + b.score, 0) / trend.length : null);
   // Calibration accuracy: 1 − mean|predicted − actual| across calibration probes.
   const calAccuracy = $derived(
@@ -68,10 +68,8 @@
     );
 
     rows = cur.concepts.map((c, idx) => {
-      const list = assessLists[idx];
-      // listAssessments is newest-first → latest estimate is index 0.
-      const latest = list[0];
-      return { ...c, level: latest?.estimate_level ?? 'unknown', n: list.length };
+      const signals = conceptSignals(assessLists[idx]);
+      return { ...c, signals, verdict: conceptVerdict(signals), n: assessLists[idx].length };
     });
 
     const flat: { id: number; a: Assessment; label: string }[] = [];
@@ -106,7 +104,7 @@
   const tid = $derived(topics.current?.id ?? null);
   // Rank concepts: shakiest + load-bearing first — that's where attention belongs.
   const rankedRows = $derived(
-    [...rows].sort((a, b) => (LEVEL_FILL[a.level] ?? 0) - (LEVEL_FILL[b.level] ?? 0) || Number(b.is_load_bearing) - Number(a.is_load_bearing))
+    [...rows].sort((a, b) => VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict] || Number(b.is_load_bearing) - Number(a.is_load_bearing))
   );
 </script>
 
@@ -155,7 +153,7 @@
       <!-- Stat strip -->
       <div class="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card class="rise" pad><Stat label="Track progress" value={overallPct} unit="%" hint="{itemsDone} of {itemsTotal} steps" /></Card>
-        <Card class="rise" pad style="animation-delay:60ms"><Stat label="Concepts solid" value={solidCount} unit="/ {rows.length}" hint="knowledge estimate high" /></Card>
+        <Card class="rise" pad style="animation-delay:60ms"><Stat label="Concepts solid" value={solidCount} unit="/ {rows.length}" hint="triangulated, not just graded" /></Card>
         <Card class="rise" pad style="animation-delay:120ms"><Stat label="Due for review" value={dueCount} hint="{cardCount} cards total" /></Card>
         <Card class="rise" pad style="animation-delay:180ms"><Stat label="Mean score" value={meanScore == null ? '—' : Math.round(meanScore * 100)} unit={meanScore == null ? '' : '%'} delta={lastDelta == null ? null : Number(lastDelta.toFixed(2))} hint="across {trend.length} probes" /></Card>
       </div>
@@ -164,12 +162,13 @@
         <!-- Knowledge map -->
         <Card class="rise lg:col-span-2" eyebrow="Knowledge map" title="Where you stand">
           {#snippet header()}
-            <span class="text-xs text-faint">◆ load-bearing · ⌗ has quiz</span>
+            <span class="text-xs text-faint">◆ grade · ↺ held · ◷ calibrated · ◳ taught</span>
           {/snippet}
           {#if rankedRows.length}
+            <p class="mb-2 text-xs text-faint">Competence is <i>triangulated</i>, not graded — a concept reads "solid" only when independent signals agree.</p>
             <div class="flex flex-col divide-y divide-border/60">
               {#each rankedRows as r (r.id)}
-                <LevelBar name={r.name} level={r.level} loadBearing={r.is_load_bearing} hasAnchor={r.has_anchor} />
+                <SignalStrip name={r.name} signals={r.signals} verdict={r.verdict} loadBearing={r.is_load_bearing} hasAnchor={r.has_anchor} />
               {/each}
             </div>
           {:else}

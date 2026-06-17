@@ -8,9 +8,9 @@
     forceCollide,
     type Simulation
   } from 'd3-force';
-  import { levelColor, LEVEL_LABEL } from '$lib/utils';
+  import { VERDICT_COLOR, VERDICT_LABEL, type Verdict } from '$lib/competence';
 
-  type Node = { id: number; name: string; level: string; loadBearing: boolean; hasAnchor: boolean };
+  type Node = { id: number; name: string; verdict: Verdict; loadBearing: boolean; hasAnchor: boolean };
   type Edge = { source: number; target: number };
 
   let {
@@ -28,6 +28,8 @@
   type SimNode = Node & { x: number; y: number };
   let simNodes = $state<SimNode[]>([]);
   let simLinks = $state<{ source: any; target: any }[]>([]);
+
+  const LEGEND: Verdict[] = ['solid', 'verified', 'unverified', 'shaky', 'untested'];
 
   function radius(n: Node) {
     return n.loadBearing ? 11 : 7;
@@ -114,7 +116,7 @@
     <!-- nodes -->
     {#each simNodes as n (n.id)}
       {@const r = radius(n)}
-      {@const c = levelColor(n.level)}
+      {@const c = VERDICT_COLOR[n.verdict]}
       {@const dim = hovered != null && !isConnected(n.id)}
       <g
         transform="translate({n.x},{n.y})"
@@ -149,9 +151,9 @@
 
   <!-- legend -->
   <div class="absolute bottom-3 left-3 flex flex-wrap gap-x-3 gap-y-1 rounded-[var(--radius-sm)] border border-border bg-[color-mix(in_oklab,var(--surface)_70%,transparent)] px-3 py-2 backdrop-blur">
-    {#each ['high', 'medium', 'low', 'unknown'] as lv}
+    {#each LEGEND as v}
       <span class="flex items-center gap-1.5 text-[0.7rem] text-muted">
-        <span class="size-2 rounded-full" style:background={levelColor(lv)}></span>{LEVEL_LABEL[lv]}
+        <span class="size-2 rounded-full" style:background={VERDICT_COLOR[v]}></span>{VERDICT_LABEL[v]}
       </span>
     {/each}
     <span class="flex items-center gap-1.5 text-[0.7rem] text-faint">◯ load-bearing</span>
