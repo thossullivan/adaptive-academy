@@ -51,3 +51,15 @@ export interface AssessBody {
 }
 export interface Anchor { id: number; source_doc_id: number; concept_id: number | null; question: string; reference_answer: string; key_points: string[]; }
 export interface AnchorGen { anchors: Anchor[]; events: EventOut[]; }
+export interface StoryFacts {
+  topic_title: string; goal: string; span_days: number;
+  items_done: number; items_total: number; progress_pct: number;
+  phases_completed: number; phases_total: number; shipped: string[];
+  concepts_solid: string[]; concepts_developing: string[]; concepts_shaky: string[];
+  load_bearing_shaky: string[]; assessments_count: number; mean_score: number | null;
+  improvements: string[]; calibration_note: string;
+}
+export interface Story {
+  headline: string; narrative: string[]; highlights: string[];
+  facts: StoryFacts; events: EventOut[];
+}

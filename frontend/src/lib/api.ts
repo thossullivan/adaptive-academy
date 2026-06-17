@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -91,4 +91,19 @@ export const api = {
     fetch(`/api/topics/${topicId}/anchors`, { method: 'POST' }).then(j<AnchorGen>),
   listConceptAnchors: (conceptId: number) =>
     fetch(`/api/concepts/${conceptId}/anchors`).then(j<Anchor[]>),
+  makeStory: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/story`, { method: 'POST' }).then(j<Story>),
 };
+
+/** Derive a per-concept knowledge level from its assessment history (latest estimate). */
+export async function conceptLevels(conceptIds: number[]): Promise<Record<number, string>> {
+  const lists = await Promise.all(
+    conceptIds.map((id) => api.listAssessments(id).catch(() => [] as Assessment[]))
+  );
+  const out: Record<number, string> = {};
+  conceptIds.forEach((id, i) => {
+    const last = lists[i][lists[i].length - 1];
+    out[id] = last?.estimate_level ?? 'unknown';
+  });
+  return out;
+}

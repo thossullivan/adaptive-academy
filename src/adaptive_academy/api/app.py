@@ -6,7 +6,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from adaptive_academy.api import routes_conversations, routes_items, routes_topics
+from adaptive_academy.api import (
+    routes_conversations,
+    routes_items,
+    routes_story,
+    routes_topics,
+)
 from adaptive_academy.api.routes_anchors import (
     concept_router as anchor_concept_router,
     topic_router as anchor_topic_router,
@@ -81,6 +86,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(routes_topics.router)
+    app.include_router(routes_story.router)
     app.include_router(routes_conversations.router)
     app.include_router(routes_items.router)
     app.include_router(assess_router)

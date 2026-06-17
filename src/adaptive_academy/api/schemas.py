@@ -244,3 +244,11 @@ class AnchorOut(BaseModel):
 class AnchorGenOut(BaseModel):
     anchors: list[AnchorOut]
     events: list[EventOut]
+
+
+class StoryOut(BaseModel):
+    headline: str
+    narrative: list[str]
+    highlights: list[str]
+    facts: dict
+    events: list[EventOut]
