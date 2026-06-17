@@ -12,6 +12,7 @@ from adaptive_academy.engine.track_markdown import (
     SidebarView,
     TrackView,
 )
+from adaptive_academy.llm.structured import structured_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import CURRICULUM
 from adaptive_academy.models import (
@@ -85,8 +86,62 @@ def insert_spaced_revisits(phases: list[PhaseView], load_bearing: set[str]) -> l
 
 
 
+# JSON Schema for forced-tool-use generation — guarantees the track comes back well-shaped.
+CURRICULUM_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "overview": {"type": "string"},
+        "phases": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "est_hours": {"type": "string"},
+                    "flags": {"type": "array", "items": {
+                        "type": "string", "enum": ["optional", "stretch", "parallel_track"]}},
+                    "items": {"type": "array", "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {"type": "string", "enum": ["read", "watch", "build", "write"]},
+                            "text": {"type": "string"},
+                            "concept_refs": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["type", "text"],
+                    }},
+                    "deliverable": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {"type": "string",
+                                     "enum": ["blog", "repo", "model", "talk", "ablation"]},
+                            "text": {"type": "string"},
+                            "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
+                        },
+                        "required": ["kind", "text"],
+                    },
+                },
+                "required": ["title", "items", "deliverable"],
+            },
+        },
+        "sidebars": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["math_refresh", "reading_list", "reference"]},
+                "title": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["kind", "title", "body"],
+        }},
+    },
+    "required": ["overview", "phases"],
+}
+
+
 def parse_curriculum_json(text: str, title: str) -> TrackView:
-    data = json.loads(extract_json(text))
+    return parse_curriculum_obj(json.loads(extract_json(text)), title)
+
+
+def parse_curriculum_obj(data: dict, title: str) -> TrackView:
     phases: list[PhaseView] = []
     for p in data.get("phases", []) or []:
         items = [
@@ -160,8 +215,10 @@ def generate_curriculum(
     emit("curriculum:plan", f"{len(foundation.key_concepts)} concepts, {len(sources)} sources")
     emit("prompt", CURRICULUM.tag)
     system, user = build_curriculum_prompt(topic.title, intent, foundation, sources)
-    resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
-    draft = parse_curriculum_json(resp.text, title=topic.title)
+    data = structured_json(
+        llm, system, [{"role": "user", "content": user}],
+        schema=CURRICULUM_SCHEMA, tool_name="emit_track")
+    draft = parse_curriculum_obj(data, title=topic.title)
 
     lb = load_bearing_concepts(foundation.prerequisite_map)
     before = sum(len(p.items) for p in draft.phases)
