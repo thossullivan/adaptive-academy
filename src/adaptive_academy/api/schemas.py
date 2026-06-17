@@ -318,3 +318,29 @@ class ArtifactReviewOut(BaseModel):
     verdict: str
     gaps: list[str]
     concepts: list[str]
+
+
+class VaultIngestIn(BaseModel):
+    vault_path: str = ""  # overrides settings.obsidian_vault_path when set
+    subfolder: str = ""
+
+
+class VaultIngestOut(BaseModel):
+    count: int
+    titles: list[str] = []
+
+
+class VaultExportIn(BaseModel):
+    vault_path: str = ""
+
+
+class VaultExportOut(BaseModel):
+    written: list[str] = []
+
+
+class VaultStatusOut(BaseModel):
+    configured: bool
+    path: str = ""
+    exists: bool = False
+    is_dir: bool = False
+    note_count: int = 0

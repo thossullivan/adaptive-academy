@@ -2,8 +2,12 @@
 path-safety, and entity→markdown renderers. All filesystem tests use tmp_path."""
 
 import pytest
+from sqlmodel import select
 
 from adaptive_academy.engine.vault import (
+    EXPORT_FOLDER,
+    export_vault,
+    ingest_vault,
     note_summary,
     note_title,
     parse_frontmatter,
@@ -15,6 +19,40 @@ from adaptive_academy.engine.vault import (
     scan_notes,
     slugify,
 )
+from adaptive_academy.models import (
+    Concept,
+    Item,
+    KnowledgeEstimate,
+    Phase,
+    SourceDoc,
+    Topic,
+    Track,
+)
+
+
+def _seed_topic(session):
+    topic = Topic(title="Build LLMs")
+    session.add(topic)
+    session.commit()
+    session.refresh(topic)
+    return topic
+
+
+def _seed_track(session, topic):
+    track = Track(topic_id=topic.id, title="LLMs from scratch", overview="Overview line.")
+    session.add(track)
+    session.commit()
+    session.refresh(track)
+    phase = Phase(track_id=track.id, title="Attention", position=0)
+    session.add(phase)
+    session.commit()
+    session.refresh(phase)
+    session.add(Item(phase_id=phase.id, text="read attention paper", type="read", position=0))
+    c = Concept(track_id=track.id, name="Self-Attention", is_load_bearing=True)
+    session.add(c)
+    session.commit()
+    session.refresh(c)
+    return track, c
 
 
 def test_slugify_normalizes():
@@ -114,3 +152,66 @@ def test_render_concept_note_has_verdict_and_backlink():
     fm, _ = parse_frontmatter(md)
     assert fm["verdict"] == "solid" and fm["load_bearing"] == "true"
     assert "[[build-llms]]" in md  # backlink to the topic hub
+
+
+# --- orchestration (DB <-> files) --------------------------------------------
+
+def test_export_vault_writes_hub_and_concept_notes(session, tmp_path):
+    topic = _seed_topic(session)
+    _, c = _seed_track(session, topic)
+    session.add(KnowledgeEstimate(concept_id=c.id, level="medium"))
+    session.commit()
+
+    res = export_vault(session, topic.id, str(tmp_path))
+
+    base = tmp_path / EXPORT_FOLDER / "build-llms"
+    hub = base / "build-llms.md"
+    note = base / "Concepts" / "self-attention.md"
+    assert hub.exists() and note.exists()
+    assert str(hub) in res.written
+    hub_text = hub.read_text()
+    assert "[[self-attention|Self-Attention]]" in hub_text
+    assert "Overview line." in hub_text
+    fm, _ = parse_frontmatter(note.read_text())
+    assert fm["verdict"] == "medium"
+
+
+def test_export_vault_is_idempotent(session, tmp_path):
+    topic = _seed_topic(session)
+    _seed_track(session, topic)
+    export_vault(session, topic.id, str(tmp_path))
+    res2 = export_vault(session, topic.id, str(tmp_path))  # second run must not error
+    assert any(w.endswith("build-llms.md") for w in res2.written)
+
+
+def test_export_vault_rejects_missing_path(session, tmp_path):
+    topic = _seed_topic(session)
+    with pytest.raises(ValueError):
+        export_vault(session, topic.id, str(tmp_path / "no-such-vault"))
+
+
+def test_ingest_vault_creates_sources_and_skips_our_folder(session, tmp_path):
+    topic = _seed_topic(session)
+    (tmp_path / "note1.md").write_text("---\ntitle: My Note\nsummary: A crisp summary.\n---\nbody")
+    (tmp_path / "note2.md").write_text("# Heading Title\n\nFirst paragraph.")
+    (tmp_path / EXPORT_FOLDER).mkdir()
+    (tmp_path / EXPORT_FOLDER / "ours.md").write_text("# Ours\nskip")
+
+    res = ingest_vault(session, topic.id, str(tmp_path))
+
+    assert res.count == 2
+    srcs = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic.id)).all()
+    assert {s.title for s in srcs} == {"My Note", "Heading Title"}
+    assert all(s.added_by == "obsidian" and s.angle == "vault" and s.status == "proposed"
+               for s in srcs)
+    assert all(s.url.startswith("file://") for s in srcs)
+    assert next(s for s in srcs if s.title == "My Note").summary == "A crisp summary."
+
+
+def test_ingest_vault_dedups_on_repeat(session, tmp_path):
+    topic = _seed_topic(session)
+    (tmp_path / "n.md").write_text("# N\n\nx")
+    ingest_vault(session, topic.id, str(tmp_path))
+    res2 = ingest_vault(session, topic.id, str(tmp_path))
+    assert res2.count == 0
+    assert len(session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic.id)).all()) == 1
