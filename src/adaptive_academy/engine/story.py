@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from sqlmodel import Session, select
 
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.prompts import STORY
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
@@ -164,17 +165,6 @@ def gather_story_facts(session: Session, topic_id: int) -> StoryFacts:
     return facts
 
 
-_STORY_SYSTEM = (
-    "You write a learner's build-in-public progress story. You are given DETERMINISTIC "
-    "FACTS about their journey learning a topic. Write in second person ('you'), in a warm "
-    "but HONEST voice — celebrate real wins, name the shaky spots plainly, never flatter or "
-    "inflate. Ground every claim in the facts; invent nothing. Respond with ONLY a JSON "
-    'object: {"headline": str (one vivid sentence, <= 12 words), "narrative": [str, 2-3 '
-    "short paragraphs], \"highlights\": [str, 3-5 punchy one-line milestones or next-steps]}. "
-    "No prose outside the JSON."
-)
-
-
 def build_story_prompt(facts: StoryFacts) -> tuple[str, str]:
     f = facts
     lines = [
@@ -193,7 +183,7 @@ def build_story_prompt(facts: StoryFacts) -> tuple[str, str]:
         f"IMPROVEMENTS: {'; '.join(f.improvements) if f.improvements else '(none recorded)'}",
         f"CALIBRATION: {f.calibration_note or 'not enough data'}",
     ]
-    return _STORY_SYSTEM, "\n".join(lines)
+    return STORY, "\n".join(lines)
 
 
 def _strip_fences(text: str) -> str:
@@ -224,6 +214,7 @@ def generate_story(session: Session, topic_id: int, *, llm: LLMClient) -> StoryR
         events.append(ev)
 
     emit("story:compose", f"{facts.assessments_count} assessments, {facts.progress_pct}% progress")
+    emit("prompt", STORY.tag)
     system, user = build_story_prompt(facts)
     resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
     headline, narrative, highlights = parse_story_json(resp.text)

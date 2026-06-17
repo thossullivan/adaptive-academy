@@ -15,12 +15,9 @@ from sqlmodel import Session, select
 
 from adaptive_academy.engine.assess import assess_concept
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.prompts import DECAY_RECALL
 from adaptive_academy.models import Assessment, Concept, RecallPrompt, Track
 
-_PROMPT_TMPL = (
-    "Without looking anything up, explain {concept} from memory — what it is and *why* it "
-    "works. This is a retention check: no hints, no tutor."
-)
 _HELD_DAYS = 7
 _DECAYED_DAYS = 2
 _HELD_RATIO = 0.85  # recall must retain >=85% of prior score to count as "held"
@@ -63,7 +60,7 @@ def schedule_decay_check(session: Session, concept_id: int, *, days: int = 3) ->
         return existing
     prompt = RecallPrompt(
         concept_id=concept_id,
-        prompt=_PROMPT_TMPL.format(concept=concept.name if concept else "this concept"),
+        prompt=DECAY_RECALL.format(concept=concept.name if concept else "this concept"),
         status="active",
         due_at=due,
     )

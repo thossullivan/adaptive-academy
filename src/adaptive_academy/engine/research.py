@@ -7,6 +7,7 @@ from sqlmodel import Session
 
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.prompts import RESEARCH_FOUNDATION
 from adaptive_academy.models import AgentEvent, SourceDoc, Topic, TopicFoundation, TopicIntent
 
 # (angle_key, query_template) — {topic} is filled in. Order is the fan-out order.
@@ -85,16 +86,6 @@ def rank_sources(sources: list[RawSource]) -> list[RawSource]:
     return sorted(sources, key=lambda s: (-score_source(s), s.url))
 
 
-_FOUNDATION_SYSTEM = (
-    "You are a research synthesizer for a self-directed advanced adult learner. "
-    "Given a topic, the learner's intent, and a ranked reading list, produce a concise "
-    "foundation. Respond with ONLY a JSON object with keys: "
-    '"overview" (string, 2-4 sentences), "key_concepts" (array of short strings, the '
-    'load-bearing ideas), "prerequisite_map" (object mapping each key concept to an array '
-    "of prerequisite concept names). No prose outside the JSON."
-)
-
-
 @dataclass
 class Foundation:
     overview: str
@@ -130,7 +121,7 @@ def synthesize_foundation(
     """Single structured LLM call → Foundation (overview + concepts + prereq map)."""
     user_msg = _build_foundation_user_msg(topic, intent, sources)
     resp = llm.complete(
-        system=_FOUNDATION_SYSTEM,
+        system=RESEARCH_FOUNDATION,
         messages=[{"role": "user", "content": user_msg}],
         tools=[],
     )
@@ -198,6 +189,7 @@ def research_topic(
     if dropped:
         emit("research:capped", f"dropped {len(dropped)} of {len(ranked)}")
 
+    emit("prompt", RESEARCH_FOUNDATION.tag)
     foundation_data = synthesize_foundation(topic.title, intent.goal, kept, llm)
     emit("research:synth", f"{len(foundation_data.key_concepts)} key concepts")
 

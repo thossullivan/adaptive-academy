@@ -3,8 +3,10 @@ from datetime import timedelta
 
 from sqlmodel import Session
 
+from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
-from adaptive_academy.models import Assessment, Concept, RecallPrompt, SRSCard, _now
+from adaptive_academy.prompts import RETENTION
+from adaptive_academy.models import Assessment, Concept, RecallPrompt, SRSCard, Track, _now
 
 _QUALITY = {"again": 2, "hard": 3, "good": 4, "easy": 5}
 
@@ -29,15 +31,6 @@ def sm2_schedule(ease: float, interval: int, reps: int, result: str) -> tuple[fl
     return new_ease, new_interval, new_reps
 
 
-_RETENTION_SYSTEM = (
-    "You propose a FEW high-quality, curated spaced-repetition cards and active-recall "
-    "prompts for ONE load-bearing concept, targeting the learner's demonstrated gaps. "
-    "Cards test understanding, not trivia. Respond with ONLY a JSON object: "
-    '{"cards": [{"front": str, "back": str}], "prompts": [str, free-recall/Feynman '
-    'prompts]}. At most 3 cards and 2 prompts. No prose outside the JSON.'
-)
-
-
 def _strip_fences(text: str) -> str:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -53,7 +46,9 @@ def propose_retention(
     """Generate proposed (user-reviewable) cards + recall prompts from gaps (§2.6)."""
     user = (f"CONCEPT: {concept.name}\nDEMONSTRATED GAPS: "
             f"{'; '.join(assessment.gaps) or '(none)'}\nVERDICT: {assessment.verdict}")
-    resp = llm.complete(system=_RETENTION_SYSTEM,
+    track = session.get(Track, concept.track_id)
+    trace_prompt(session, RETENTION, topic_id=track.topic_id if track else None)
+    resp = llm.complete(system=RETENTION,
                         messages=[{"role": "user", "content": user}], tools=[])
     data = json.loads(_strip_fences(resp.text))
     cards: list[SRSCard] = []

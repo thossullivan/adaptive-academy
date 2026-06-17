@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from sqlmodel import Session, select
 
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.prompts import REMEDIATE
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
@@ -92,20 +93,6 @@ def parse_remediation_json(text: str) -> RemediationDraft:
     )
 
 
-_REMEDIATE_SYSTEM = (
-    "You are a CurriculumDirector in ADAPT MODE for an ADVANCED, self-directed adult "
-    "learner who just revealed specific GAPS on one concept. Propose a SHORT, targeted "
-    "remediation. Evidence-driven rules (follow them):\n"
-    "- Default to LOW-ASSISTANCE, PROJECT/PROBLEM-FIRST items (expertise-reversal effect: "
-    "high guidance harms experts). Each item must directly attack a NAMED gap.\n"
-    "- Key the remediation to the learner's PRIOR-KNOWLEDGE level, not raw difficulty.\n"
-    "- Deliberate-practice drills are SUPPORTING, never the spine.\n"
-    "- Propose ONE item per listed gap, plus optionally ONE spaced 'revisit' for later.\n"
-    'Respond with ONLY a JSON object: {"items": [{"type": "read"|"build"|"write", '
-    '"text": str}], "revisit": {"text": str} | null}. No prose outside the JSON.'
-)
-
-
 def build_remediate_prompt(
     concept_name: str, gaps: list[str], level: str, *,
     foundation_overview: str = "", sources_summary: str = "",
@@ -120,7 +107,7 @@ def build_remediate_prompt(
         lines += ["", f"FOUNDATION OVERVIEW: {foundation_overview}"]
     if sources_summary:
         lines += [f"SOURCES: {sources_summary}"]
-    return _REMEDIATE_SYSTEM, "\n".join(lines)
+    return REMEDIATE, "\n".join(lines)
 
 
 class RemediationError(Exception):
@@ -195,6 +182,7 @@ def remediate_concept(session: Session, concept: Concept, *,
         concept.name, open_gaps, level,
         foundation_overview=(foundation.overview if foundation else ""),
         sources_summary=sources_summary)
+    emit("prompt", REMEDIATE.tag)
     draft = parse_remediation_json(
         llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[]).text)
 

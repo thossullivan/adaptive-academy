@@ -5,14 +5,7 @@ from anthropic import Anthropic
 
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
-
-_SYSTEM = (
-    "You are a research subagent. Use web search to find the best foundational sources "
-    "for the given brief. Return ONLY a JSON array; each element has keys: title, url, "
-    "tier (1=authoritative/seminal, 2=synthesis/course, 3=supporting), summary (one "
-    "sentence), why (one sentence on why it belongs in a learner's reading list), "
-    "relevance (0..1). No prose outside the JSON array."
-)
+from adaptive_academy.prompts import RESEARCH_SEARCH
 
 
 def parse_sources_json(text: str) -> list[RawSource]:
@@ -64,7 +57,7 @@ class AnthropicResearcherClient:
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
-            system=_SYSTEM,
+            system=RESEARCH_SEARCH,
             tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": self._max_searches}],
             messages=[{"role": "user", "content": brief.query}],
         )
