@@ -71,6 +71,35 @@ def test_research_topic_persists_and_traces(session: Session):
     assert any(e.kind == "research:done" for e in events)
 
 
+class _FlakyResearcher:
+    """Returns sources for most angles but raises for one (a transient failure)."""
+
+    def __init__(self, ok_angle: str, boom_angle: str):
+        self._ok, self._boom = ok_angle, boom_angle
+
+    def search(self, brief):
+        if brief.angle == self._boom:
+            raise RuntimeError("529 Overloaded")
+        if brief.angle == self._ok:
+            return [RawSource(title="S", url="https://s.com", tier=1, relevance=0.9)]
+        return []
+
+
+def test_research_topic_survives_a_single_angle_failure(session: Session):
+    topic, intent = _topic_with_intent(session)
+    researcher = _FlakyResearcher(ok_angle="foundational_papers", boom_angle="critiques")
+    research_topic(session, topic, intent, researcher=researcher,
+                   llm=_foundation_llm(), max_subagents=5)
+
+    # The fan-out did NOT abort: the healthy angle's source persisted.
+    sources = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic.id)).all()
+    assert len(sources) == 1
+    # The failed angle is traced as an error event, not a silent drop.
+    events = session.exec(select(AgentEvent).where(AgentEvent.topic_id == topic.id)).all()
+    assert any(e.kind == "research:subagent_error" and "critiques" in e.detail for e in events)
+    assert any(e.kind == "research:done" for e in events)
+
+
 def test_research_topic_caps_reading_list_and_logs_drop(session: Session):
     topic, intent = _topic_with_intent(session)
     many = [RawSource(title=f"S{i}", url=f"https://s{i}.com", tier=1, relevance=0.9) for i in range(20)]
