@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import {
     forceSimulation,
     forceManyBody,
@@ -62,16 +62,14 @@
     });
   }
 
-  onMount(() => {
-    build();
-    return () => sim?.stop();
-  });
-
-  // Rebuild when the data set changes.
+  // Rebuild ONLY when the data set changes. `build()` reads w/h, but we read them via
+  // untrack so they don't become effect dependencies — otherwise the bound clientWidth/
+  // clientHeight re-measure on every tick and the effect rebuilds forever (captive page).
   $effect(() => {
     nodes;
     links;
-    if (sim) build();
+    untrack(() => build());
+    return () => sim?.stop();
   });
 
   function isConnected(id: number): boolean {
