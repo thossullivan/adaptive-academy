@@ -5,7 +5,7 @@
   import type { Concept, Assessment, Consolidation } from '$lib/types';
   import { pct } from '$lib/utils';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Field, Select, Textarea } from '$lib/ui';
+  import { Card, Button, Badge, Field, Select, Textarea, Markdown } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let concepts = $state<Concept[]>([]);
@@ -145,7 +145,7 @@
         {#if problem}
           <Card accent pad class="rise">
             <span class="eyebrow text-accent">the problem</span>
-            <p class="mt-2 whitespace-pre-wrap text-[0.95rem] leading-relaxed text-fg">{problem}</p>
+            <p class="mt-2 text-[0.95rem] leading-relaxed text-fg"><Markdown text={problem} block /></p>
           </Card>
 
           {#if !consolidation}
@@ -166,10 +166,10 @@
                 <span class="eyebrow text-accent">consolidation</span>
                 <Badge tone={consolidation.score >= 0.6 ? 'success' : 'accent'} dot>effort {Math.round(consolidation.score * 100)}%</Badge>
               </div>
-              <p class="mt-3 text-sm leading-relaxed text-fg-dim">{consolidation.feedback}</p>
+              <p class="mt-3 text-sm leading-relaxed text-fg-dim"><Markdown text={consolidation.feedback} block /></p>
               <div class="mt-4 border-t border-border pt-3">
                 <span class="eyebrow">canonical approach</span>
-                <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-fg">{consolidation.canonical}</p>
+                <p class="mt-1.5 text-sm leading-relaxed text-fg"><Markdown text={consolidation.canonical} block /></p>
               </div>
             </Card>
           {/if}

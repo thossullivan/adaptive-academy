@@ -178,6 +178,24 @@
     color: var(--muted);
   }
 
+  /* Rendered inline markdown (see lib/md.ts + ui/Markdown.svelte). */
+  .md strong {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .md em {
+    font-style: italic;
+  }
+  .md code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    color: var(--fg-dim);
+    background: var(--surface-3);
+    padding: 0.05em 0.35em;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
   /* Hairline grid texture for chart backdrops. */
   .gridlines {
     background-image:
