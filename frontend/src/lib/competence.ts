@@ -13,6 +13,7 @@ export interface ConceptSignals {
   decay: SignalState; // held cold on delayed recall?
   calibration: SignalState; // felt confidence matched reality?
   taught: SignalState; // explained to an audience?
+  shipped: SignalState; // built an artifact that meets its acceptance criteria?
 }
 
 export type Verdict = 'solid' | 'verified' | 'unverified' | 'shaky' | 'untested';
@@ -26,6 +27,7 @@ export function conceptSignals(list: Assessment[]): ConceptSignals {
   const recall = list.find((a) => a.kind === 'recall');
   const calib = list.find((a) => a.confidence_predicted != null && a.confidence_actual != null);
   const teach = list.find((a) => a.kind === 'teach');
+  const artifact = list.find((a) => a.kind === 'artifact_review');
   return {
     grade: latest?.estimate_level ?? 'unknown',
     decay: recall ? (recall.score >= HELD ? 'lit' : 'bad') : 'unlit',
@@ -34,21 +36,22 @@ export function conceptSignals(list: Assessment[]): ConceptSignals {
         ? 'lit'
         : 'bad'
       : 'unlit',
-    taught: teach ? (teach.score >= HELD ? 'lit' : 'bad') : 'unlit'
+    taught: teach ? (teach.score >= HELD ? 'lit' : 'bad') : 'unlit',
+    shipped: artifact ? (artifact.score >= HELD ? 'lit' : 'bad') : 'unlit'
   };
 }
 
 /** The triangulated verdict: signals must AGREE for "solid". */
 export function conceptVerdict(s: ConceptSignals): Verdict {
   const gradeFill = LEVEL_FILL[s.grade] ?? 0;
-  const states = [s.decay, s.calibration, s.taught];
-  const anyDisagree = states.includes('bad'); // a signal actively failed (decayed / miscalibrated)
+  const states = [s.decay, s.calibration, s.taught, s.shipped];
+  const anyDisagree = states.includes('bad'); // a signal actively failed (decayed / shipped-but-fails)
   const corroborated = states.includes('lit');
   const hasGrade = s.grade !== 'unknown';
 
   if (!hasGrade && !corroborated && !anyDisagree) return 'untested';
   if (s.grade === 'low' || anyDisagree) return 'shaky';
-  if (s.grade === 'high' && (s.decay === 'lit' || s.taught === 'lit')) return 'solid';
+  if (s.grade === 'high' && (s.decay === 'lit' || s.taught === 'lit' || s.shipped === 'lit')) return 'solid';
   if (gradeFill >= 0.6 && corroborated) return 'verified';
   return 'unverified'; // a grade, but nothing yet corroborates it
 }

@@ -162,7 +162,7 @@
         <!-- Knowledge map -->
         <Card class="rise lg:col-span-2" eyebrow="Knowledge map" title="Where you stand">
           {#snippet header()}
-            <span class="text-xs text-faint">◆ grade · ↺ held · ◷ calibrated · ◳ taught</span>
+            <span class="text-xs text-faint">◆ grade · ↺ held · ◷ calibrated · ◳ taught · ⚒ shipped</span>
           {/snippet}
           {#if rankedRows.length}
             <p class="mb-2 text-xs text-faint">Competence is <i>triangulated</i>, not graded — a concept reads "solid" only when independent signals agree.</p>

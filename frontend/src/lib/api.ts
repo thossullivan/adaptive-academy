@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -111,6 +111,11 @@ export const api = {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ explanation })
     }).then(j<TeachResult>),
+  shipDeliverable: (deliverableId: number, artifact_url: string, content: string) =>
+    fetch(`/api/deliverables/${deliverableId}/ship`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ artifact_url, content })
+    }).then(j<ShipResult>),
 };
 
 /** Derive a per-concept knowledge level from its assessment history (latest estimate). */

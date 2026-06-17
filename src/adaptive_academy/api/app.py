@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from adaptive_academy.api import (
     routes_conversations,
+    routes_deliverables,
     routes_items,
     routes_practice,
     routes_story,
@@ -106,6 +107,7 @@ def create_app() -> FastAPI:
     app.include_router(decay_ops_router)
     app.include_router(routes_practice.router)
     app.include_router(routes_teach.router)
+    app.include_router(routes_deliverables.router)
     return app
 
 

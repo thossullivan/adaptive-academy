@@ -112,6 +112,8 @@ class DeliverableOut(BaseModel):
     kind: str
     text: str
     acceptance_criteria: list[str]
+    artifact_url: str = ""
+    review_verdict: str = ""
 
 
 class SidebarOut(BaseModel):
@@ -304,3 +306,15 @@ class TeachOut(BaseModel):
     feedback: str
     strengths: list[str]
     gaps: list[str]
+
+
+class ShipIn(BaseModel):
+    artifact_url: str = ""
+    content: str
+
+
+class ArtifactReviewOut(BaseModel):
+    score: float
+    verdict: str
+    gaps: list[str]
+    concepts: list[str]
