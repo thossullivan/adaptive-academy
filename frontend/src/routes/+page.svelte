@@ -28,6 +28,12 @@
   const overallPct = $derived(itemsTotal ? Math.round((itemsDone / itemsTotal) * 100) : 0);
   const solidCount = $derived(rows.filter((r) => r.level === 'high').length);
   const meanScore = $derived(trend.length ? trend.reduce((a, b) => a + b.score, 0) / trend.length : null);
+  // Calibration accuracy: 1 − mean|predicted − actual| across calibration probes.
+  const calAccuracy = $derived(
+    calibration.length
+      ? Math.round((1 - calibration.reduce((a, b) => a + Math.abs(b.predicted - b.actual), 0) / calibration.length) * 100)
+      : null
+  );
   const lastDelta = $derived(
     trend.length >= 2 ? trend[trend.length - 1].score - trend[trend.length - 2].score : null
   );
@@ -63,8 +69,9 @@
 
     rows = cur.concepts.map((c, idx) => {
       const list = assessLists[idx];
-      const last = list[list.length - 1];
-      return { ...c, level: last?.estimate_level ?? 'unknown', n: list.length };
+      // listAssessments is newest-first → latest estimate is index 0.
+      const latest = list[0];
+      return { ...c, level: latest?.estimate_level ?? 'unknown', n: list.length };
     });
 
     const flat: { id: number; a: Assessment; label: string }[] = [];
@@ -172,6 +179,11 @@
 
         <!-- Calibration -->
         <Card class="rise" eyebrow="Metacognition" title="Calibration">
+          {#snippet header()}
+            {#if calAccuracy != null}
+              <span class="nums text-sm" style:color={calAccuracy >= 80 ? 'var(--success)' : calAccuracy >= 60 ? 'var(--accent)' : 'var(--danger)'}>{calAccuracy}% accurate</span>
+            {/if}
+          {/snippet}
           <CalibrationPlot data={calibration} />
         </Card>
 

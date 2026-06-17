@@ -27,6 +27,7 @@
               { label: 'Tutor', icon: 'tutor', href: `/topics/${tid}/tutor`, match: (p) => p.endsWith('/tutor') },
               { label: 'Track', icon: 'track', href: `/topics/${tid}/track`, match: (p) => p.endsWith('/track') },
               { label: 'Assess', icon: 'assess', href: `/topics/${tid}/assess`, match: (p) => p.endsWith('/assess') },
+              { label: 'Practice', icon: 'practice', href: `/topics/${tid}/practice`, match: (p) => p.endsWith('/practice') },
               { label: 'Retention', icon: 'retention', href: `/topics/${tid}/retention`, match: (p) => p.endsWith('/retention') },
               { label: 'Sources', icon: 'sources', href: `/topics/${tid}/review`, match: (p) => p.endsWith('/review') }
             ]
@@ -35,6 +36,7 @@
             label: 'Reflect',
             items: [
               { label: 'Constellation', icon: 'map', href: `/topics/${tid}/map`, match: (p) => p.endsWith('/map') },
+              { label: 'Teach', icon: 'teach', href: `/topics/${tid}/teach`, match: (p) => p.endsWith('/teach') },
               { label: 'Story', icon: 'story', href: `/topics/${tid}/story`, match: (p) => p.endsWith('/story') }
             ]
           }

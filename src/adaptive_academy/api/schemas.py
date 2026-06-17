@@ -252,3 +252,55 @@ class StoryOut(BaseModel):
     highlights: list[str]
     facts: dict
     events: list[EventOut]
+
+
+class DecayItemOut(BaseModel):
+    prompt_id: int
+    concept_id: int
+    concept_name: str
+    prompt: str
+    last_result: str
+
+
+class DecayDueOut(BaseModel):
+    items: list[DecayItemOut]
+
+
+class DecayGradeIn(BaseModel):
+    response: str
+
+
+class DecayGradeOut(BaseModel):
+    recall_score: float
+    baseline_score: Optional[float] = None
+    decay_delta: Optional[float] = None
+    held: bool
+    verdict: str
+    gaps: list[str]
+    estimate_level: str
+
+
+class ChallengeOut(BaseModel):
+    problem: str
+
+
+class ConsolidateIn(BaseModel):
+    problem: str
+    attempt: str
+
+
+class ConsolidateOut(BaseModel):
+    canonical: str
+    feedback: str
+    score: float
+
+
+class TeachIn(BaseModel):
+    explanation: str
+
+
+class TeachOut(BaseModel):
+    score: float
+    feedback: str
+    strengths: list[str]
+    gaps: list[str]

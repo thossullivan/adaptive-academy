@@ -10,6 +10,7 @@
   const topicId = Number($page.params.id);
   let loading = $state(true);
   let dueCount = $state(0);
+  let decayCount = $state(0);
   let nextItems = $state<{ item: Item; phase: string }[]>([]);
   let weakest = $state<Concept | null>(null);
   let weakestLevel = $state('unknown');
@@ -40,6 +41,11 @@
     } catch {
       dueCount = 0;
     }
+    try {
+      decayCount = (await api.listDecay(topicId)).items.length;
+    } catch {
+      decayCount = 0;
+    }
 
     // Shakiest load-bearing concept (unmeasured counts as a priority to probe).
     if (concepts.length) {
@@ -68,13 +74,14 @@
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-2">
               <h2 class="text-lg text-fg">Warm up</h2>
-              <Badge tone={dueCount ? 'accent' : 'success'} dot>{dueCount ? `${dueCount} due` : 'clear'}</Badge>
+              {#if decayCount}<Badge tone="accent" dot>{decayCount} decay check{decayCount > 1 ? 's' : ''}</Badge>{/if}
+              <Badge tone={dueCount ? 'accent' : 'success'} dot>{dueCount ? `${dueCount} card${dueCount > 1 ? 's' : ''} due` : 'cards clear'}</Badge>
             </div>
             <p class="mt-1 text-sm text-muted">
-              {dueCount ? 'Retrieval practice on cards due today — fast, before you build.' : 'No spaced reviews due. Nice and clear.'}
+              {#if decayCount}Unassisted recall checks are due — prove it still holds without the tutor.{:else if dueCount}Retrieval practice on cards due today — fast, before you build.{:else}No reviews due. Nice and clear.{/if}
             </p>
           </div>
-          {#if dueCount}<Button href="/topics/{topicId}/retention">Review {dueCount} →</Button>{/if}
+          {#if dueCount || decayCount}<Button href="/topics/{topicId}/retention">Review →</Button>{/if}
         </div>
       </Card>
 

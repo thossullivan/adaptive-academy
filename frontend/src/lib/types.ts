@@ -63,3 +63,12 @@ export interface Story {
   headline: string; narrative: string[]; highlights: string[];
   facts: StoryFacts; events: EventOut[];
 }
+export interface DecayItem { prompt_id: number; concept_id: number; concept_name: string; prompt: string; last_result: string; }
+export interface DecayDue { items: DecayItem[]; }
+export interface DecayGrade {
+  recall_score: number; baseline_score: number | null; decay_delta: number | null;
+  held: boolean; verdict: string; gaps: string[]; estimate_level: string;
+}
+export interface Challenge { problem: string; }
+export interface Consolidation { canonical: string; feedback: string; score: number; }
+export interface TeachResult { score: number; feedback: string; strengths: string[]; gaps: string[]; }

@@ -30,6 +30,11 @@ def assess(concept_id: int, body: AssessIn, session: Session = Depends(get_sessi
                                 anchor_id=body.anchor_id)
     except AnchorError as e:
         raise HTTPException(400, str(e))
+    # Engaging with a concept arms a delayed, unassisted retrieval check (§8.6).
+    # A decay-check recall is itself rescheduled inside grade_decay_check, so skip re-arming.
+    if body.kind != "recall":
+        from adaptive_academy.engine.decay import schedule_decay_check
+        schedule_decay_check(session, concept_id)
     return _assessment_out(result.assessment, result.estimate.level)
 
 
