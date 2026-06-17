@@ -4,6 +4,9 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import type { SourceDoc, Foundation, EventOut } from '$lib/types';
+  import Page from '$lib/shell/Page.svelte';
+  import { Card, Button, Badge } from '$lib/ui';
+  import EventFeed from '$lib/shell/EventFeed.svelte';
 
   const topicId = Number($page.params.id);
   let foundation = $state<Foundation | null>(null);
@@ -19,11 +22,15 @@
   onMount(async () => {
     try {
       foundation = await api.getFoundation(topicId);
-    } catch { foundation = null; }
+    } catch {
+      foundation = null;
+    }
     sources = await api.listSources(topicId, 'proposed');
     for (const s of sources) keep[s.id] = true;
     events = await api.listEvents(topicId);
   });
+
+  const keptCount = $derived(sources.filter((s) => keep[s.id]).length);
 
   async function save() {
     busy = true;
@@ -58,65 +65,76 @@
   }
 </script>
 
-<main class="mx-auto max-w-3xl p-6 flex flex-col gap-4">
-  <h1 class="text-xl font-semibold">Review reading list</h1>
+<Page eyebrow="Researcher" title="Review reading list" lead="Curate the foundation before the CurriculumDirector builds your track. Keep what earns its place." width="normal">
+  {#snippet actions()}
+    <Button variant="outline" onclick={generateAnchors} disabled={generatingAnchors}>
+      {generatingAnchors ? 'Generating…' : 'Generate quizzes'}
+    </Button>
+  {/snippet}
 
-  {#if foundation}
-    <section class="border rounded p-4 bg-gray-50">
-      <p class="text-sm">{foundation.overview}</p>
-      {#if foundation.key_concepts.length}
-        <div class="mt-2 flex flex-wrap gap-1">
-          {#each foundation.key_concepts as c}
-            <span class="text-xs bg-gray-200 rounded px-2 py-0.5">{c}</span>
-          {/each}
-        </div>
+  <div class="flex flex-col gap-4">
+    {#if foundation}
+      <Card accent pad class="rise" eyebrow="Foundation" title="The lay of the land">
+        <p class="text-sm leading-relaxed text-fg-dim">{foundation.overview}</p>
+        {#if foundation.key_concepts.length}
+          <div class="mt-3 flex flex-wrap gap-1.5">
+            {#each foundation.key_concepts as c}<Badge tone="neutral">{c}</Badge>{/each}
+          </div>
+        {/if}
+      </Card>
+    {/if}
+
+    {#if anchorCount != null}
+      <p class="text-sm text-success">Generated {anchorCount} source-grounded quiz anchor(s).</p>
+    {/if}
+
+    <div class="flex items-center justify-between">
+      <span class="eyebrow">{keptCount} of {sources.length} kept</span>
+      {#if saved}<Badge tone="success" dot>saved</Badge>{/if}
+    </div>
+
+    <ul class="flex flex-col gap-2.5">
+      {#each sources as s (s.id)}
+        <li>
+          <Card pad class="rise transition-opacity {keep[s.id] ? '' : 'opacity-45'}">
+            <div class="flex items-start gap-3">
+              <button
+                onclick={() => (keep[s.id] = !keep[s.id])}
+                class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-[var(--radius-xs)] border transition-colors"
+                style:border-color={keep[s.id] ? 'var(--accent)' : 'var(--border-strong)'}
+                style:background={keep[s.id] ? 'var(--accent)' : 'transparent'}
+                aria-label={keep[s.id] ? 'drop source' : 'keep source'}
+              >
+                {#if keep[s.id]}
+                  <svg viewBox="0 0 16 16" class="size-3.5 text-accent-fg" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 8l3.5 3.5L13 5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                {/if}
+              </button>
+              <div class="min-w-0 flex-1">
+                <a href={s.url} target="_blank" rel="noreferrer" class="font-medium text-fg underline decoration-border underline-offset-2 transition-colors hover:decoration-accent">{s.title}</a>
+                <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                  <Badge mono tone={s.tier === 1 ? 'accent' : 'neutral'}>tier {s.tier}</Badge>
+                  <span class="eyebrow !text-[0.55rem]">{s.angle}</span>
+                </div>
+                {#if s.summary}<p class="mt-2 text-sm text-fg-dim">{s.summary}</p>{/if}
+                {#if s.why}<p class="mt-1 text-sm text-muted"><span class="text-faint">Why:</span> {s.why}</p>{/if}
+              </div>
+            </div>
+          </Card>
+        </li>
+      {/each}
+    </ul>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <Button onclick={save} disabled={busy || !sources.length}>{busy ? 'Saving…' : 'Save reading list'}</Button>
+      {#if saved}
+        <Button onclick={generate} disabled={generating}>{generating ? 'Generating curriculum…' : 'Generate curriculum →'}</Button>
       {/if}
-    </section>
-  {/if}
+    </div>
 
-  {#if saved}
-    <p class="text-green-700 text-sm">Reading list saved.</p>
-  {/if}
-
-  <ul class="flex flex-col gap-2">
-    {#each sources as s (s.id)}
-      <li class="border rounded p-3 flex gap-3 items-start">
-        <input type="checkbox" class="mt-1" bind:checked={keep[s.id]} />
-        <div class="flex flex-col gap-1">
-          <a href={s.url} target="_blank" rel="noreferrer" class="font-medium underline">{s.title}</a>
-          <div class="text-xs text-gray-500">tier {s.tier} · {s.angle}</div>
-          {#if s.summary}<p class="text-sm">{s.summary}</p>{/if}
-          {#if s.why}<p class="text-sm text-gray-600">Why: {s.why}</p>{/if}
-        </div>
-      </li>
-    {/each}
-  </ul>
-
-  <button class="bg-black text-white rounded px-4 py-2 disabled:opacity-50 self-start" onclick={save} disabled={busy || !sources.length}>
-    {busy ? 'Saving…' : 'Save reading list'}
-  </button>
-
-  {#if saved}
-    <button class="bg-black text-white rounded px-4 py-2 disabled:opacity-50 self-start"
-            onclick={generate} disabled={generating}>
-      {generating ? 'Generating…' : 'Generate curriculum →'}
-    </button>
-  {/if}
-
-  <button class="border rounded px-4 py-2 disabled:opacity-50 self-start"
-          onclick={generateAnchors} disabled={generatingAnchors}>
-    {generatingAnchors ? 'Generating…' : 'Generate quizzes from sources'}
-  </button>
-  {#if anchorCount != null}
-    <p class="text-sm text-gray-600">Generated {anchorCount} quiz anchor(s).</p>
-  {/if}
-
-  {#if events.length}
-    <details class="text-sm text-gray-600">
-      <summary class="cursor-pointer">What the agents did ({events.length})</summary>
-      <ul class="mt-2 flex flex-col gap-1">
-        {#each events as e}<li><span class="font-mono text-xs">{e.kind}</span> — {e.detail}</li>{/each}
-      </ul>
-    </details>
-  {/if}
-</main>
+    {#if events.length}
+      <Card pad eyebrow="Observability" title="What the agents did">
+        <EventFeed {events} limit={20} />
+      </Card>
+    {/if}
+  </div>
+</Page>

@@ -1,1 +1,210 @@
 @import 'tailwindcss';
+
+/* Observatory typography — distinctive display serif over a precise grotesk + mono */
+@import '@fontsource-variable/fraunces';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+/* ──────────────────────────────────────────────────────────────
+   Observatory — refined dark instrument panel.
+   Tokens are runtime CSS variables (dark by default, light override),
+   surfaced to Tailwind via @theme inline so utilities track the theme.
+   ────────────────────────────────────────────────────────────── */
+:root,
+[data-theme='dark'] {
+  --bg: #0e1014;
+  --bg-glow: #1a1408;
+  --surface: #16191f;
+  --surface-2: #1b1f27;
+  --surface-3: #222732;
+  --border: #2a2f3a;
+  --border-strong: #3a404e;
+  --fg: #e9e7e1;
+  --fg-dim: #b7bac2;
+  --muted: #868c98;
+  --faint: #5b616d;
+
+  --accent: #e0a83e;
+  --accent-bright: #f2bf5d;
+  --accent-dim: #8a6a28;
+  --accent-fg: #1a1206;
+  --accent-wash: color-mix(in oklab, var(--accent) 14%, transparent);
+
+  --success: #5cc08c;
+  --warn: #d99a3c;
+  --danger: #e76d63;
+  --info: #6aa9d8;
+
+  --ring: color-mix(in oklab, var(--accent) 55%, transparent);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.55);
+
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  --bg: #f3efe6;
+  --bg-glow: #f6e6c4;
+  --surface: #fbf9f3;
+  --surface-2: #f4f0e6;
+  --surface-3: #ebe5d7;
+  --border: #ddd5c5;
+  --border-strong: #cabfa8;
+  --fg: #221f19;
+  --fg-dim: #45413a;
+  --muted: #6d685c;
+  --faint: #978f7e;
+
+  --accent: #b07a1e;
+  --accent-bright: #c98e2a;
+  --accent-dim: #c9a866;
+  --accent-fg: #fffaf0;
+  --accent-wash: color-mix(in oklab, var(--accent) 12%, transparent);
+
+  --success: #2f9460;
+  --warn: #b07a1e;
+  --danger: #c64b40;
+  --info: #3d7daf;
+
+  --ring: color-mix(in oklab, var(--accent) 45%, transparent);
+  --shadow: 0 1px 2px rgb(120 100 60 / 0.12), 0 10px 30px -16px rgb(80 60 20 / 0.25);
+
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-dim: var(--fg-dim);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-bright: var(--accent-bright);
+  --color-accent-dim: var(--accent-dim);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-wash: var(--accent-wash);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --font-display: 'Fraunces Variable', ui-serif, Georgia, serif;
+  --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
+
+  --radius-xs: 4px;
+  --radius-sm: 7px;
+  --radius-md: 11px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv05', 'ss03';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* Atmosphere: a warm observatory glow off the top-left, not a flat fill. */
+    background-image:
+      radial-gradient(120% 80% at 8% -10%, var(--bg-glow) 0%, transparent 42%),
+      radial-gradient(90% 60% at 100% 0%, color-mix(in oklab, var(--info) 7%, transparent) 0%, transparent 50%);
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: var(--accent-wash);
+    color: var(--fg);
+  }
+
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--faint);
+    background-clip: padding-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Tabular figures for all data readouts — numbers must align. */
+  .nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  /* Eyebrow label: the small-caps signpost used across the panels. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* Hairline grid texture for chart backdrops. */
+  .gridlines {
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 100% 25%, 12.5% 100%;
+    opacity: 0.5;
+  }
+}
+
+/* Staggered entrance used on dashboard panels. */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+}
