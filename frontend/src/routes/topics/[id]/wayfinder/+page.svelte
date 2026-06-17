@@ -69,8 +69,9 @@
       deliverable: c.p.deliverable ? { kind: c.p.deliverable.kind, text: c.p.deliverable.text } : null
     }));
 
-    // Display order: future (near the star) → past (the start line).
-    wayPhases = withStatus.reverse();
+    // Ascending: Phase 1 at the top, the journey descending toward the North Star (the
+    // destination) at the bottom.
+    wayPhases = withStatus;
     loading = false;
   });
 </script>
