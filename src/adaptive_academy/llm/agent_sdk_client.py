@@ -6,20 +6,20 @@ plan (the SDK's supported "your own projects" case) instead of paying per-token 
 This is a drop-in backend behind the LLMClient Protocol; select it with
 `AA_LLM_BACKEND=agent_sdk` (see api/deps.py). Defaults stay on the API-key client.
 
-Auth detail: the SDK spawns the Claude Code engine as a subprocess that **inherits the
-parent's environment**, and a per-call `env` override can ADD but not REMOVE an inherited
-`ANTHROPIC_API_KEY` (verified). If the key is present the subprocess bills API credits, so
-we pop it from `os.environ` for the duration of the call (under a lock) and restore it
-after — leaving the still-API-key Researcher/Anchor clients (which capture their key at
-construction) unaffected.
+Auth detail: the SDK subprocess inherits the parent's environment, and a per-call `env`
+override can ADD but not REMOVE an inherited `ANTHROPIC_API_KEY` (verified) — if the key is
+present the subprocess bills API credits. So agent_sdk mode is **fully subscription-only**:
+`create_app()` drops `ANTHROPIC_API_KEY` from the process env once (see api/app.py), and every
+SDK-backed client (LLM, Researcher, Anchor) then uses the subscription. No per-call key
+juggling, no lock, no race.
 
-Scope (spike): the no-tools structured-completion path (rubric/grade/curriculum/anchors).
-Tool calls (the Tutor's gated reveal_solution) and web-search fan-out are follow-ups.
+Scope: the no-tools structured-completion path (rubric/grade/curriculum/anchors). Tool calls
+(the Tutor's gated reveal_solution) are not ported — in agent_sdk mode (no key) they raise a
+legible AgentSDKError; with a key present they bridge to the API-key client.
 """
 
 import asyncio
 import os
-import threading
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -29,8 +29,6 @@ from claude_agent_sdk import (
 
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.types import AgentSDKError, LLMResponse
-
-_ENV_LOCK = threading.Lock()
 
 __all__ = ["AgentSDKLLMClient", "AgentSDKError", "flatten_messages"]
 
@@ -82,14 +80,7 @@ class AgentSDKLLMClient:
                     "key, or use assess/curriculum/anchors which run on your subscription.")
             from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
             return AnthropicLLMClient(role=self._role).complete(system, messages, tools)
-        prompt = flatten_messages(messages)
-        # Strip ANTHROPIC_API_KEY for this subprocess so it uses subscription auth, then
-        # restore so other (API-key) clients keep working. Lock = no concurrent strip race.
-        with _ENV_LOCK:
-            saved = os.environ.pop("ANTHROPIC_API_KEY", None)
-            try:
-                text = asyncio.run(self._run(system, prompt))
-            finally:
-                if saved is not None:
-                    os.environ["ANTHROPIC_API_KEY"] = saved
+        # The key is already absent process-wide (create_app dropped it), so the subprocess
+        # uses subscription auth — no per-call strip, no lock, parallel-safe.
+        text = asyncio.run(self._run(system, flatten_messages(messages)))
         return LLMResponse(text=text, tool_calls=[])
