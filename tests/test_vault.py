@@ -20,6 +20,7 @@ from adaptive_academy.engine.vault import (
     slugify,
 )
 from adaptive_academy.models import (
+    Assessment,
     Concept,
     Item,
     KnowledgeEstimate,
@@ -160,6 +161,8 @@ def test_export_vault_writes_hub_and_concept_notes(session, tmp_path):
     topic = _seed_topic(session)
     _, c = _seed_track(session, topic)
     session.add(KnowledgeEstimate(concept_id=c.id, level="medium"))
+    session.add(Assessment(concept_id=c.id, kind="self_explanation", prompt="p", score=0.6,
+                           verdict="ok"))
     session.commit()
 
     res = export_vault(session, topic.id, str(tmp_path))
@@ -174,6 +177,21 @@ def test_export_vault_writes_hub_and_concept_notes(session, tmp_path):
     assert "Overview line." in hub_text
     fm, _ = parse_frontmatter(note.read_text())
     assert fm["verdict"] == "medium"
+
+
+def test_export_concept_unassessed_reads_untested_not_default_high(session, tmp_path):
+    """Anti-Goodhart: a default KnowledgeEstimate (level defaults 'high') with no assessments
+    must NOT export as 'high' competence — an unverified concept reads 'untested'."""
+    topic = _seed_topic(session)
+    _, c = _seed_track(session, topic)
+    session.add(KnowledgeEstimate(concept_id=c.id))  # level defaults to "high", no assessments
+    session.commit()
+
+    export_vault(session, topic.id, str(tmp_path))
+
+    note = tmp_path / EXPORT_FOLDER / "build-llms" / "Concepts" / "self-attention.md"
+    fm, _ = parse_frontmatter(note.read_text())
+    assert fm["verdict"] == "untested"
 
 
 def test_export_vault_is_idempotent(session, tmp_path):
