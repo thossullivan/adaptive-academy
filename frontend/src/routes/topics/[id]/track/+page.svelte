@@ -179,6 +179,10 @@
                       fetched automatically — paste below only to add context or if the URL isn't public.
                     </p>
                     <Textarea bind:value={shipContent[d.id]} rows={6} placeholder="Optionally paste the artifact — key code, the writeup, the ablation table. Graded against the acceptance criteria above." />
+                    <p class="text-xs text-faint">
+                      Strongest evidence: paste your <span class="text-fg-dim">run output</span> — test results,
+                      the training curve, the benchmark numbers. Proof it actually works beats a description of it.
+                    </p>
                     <div class="flex items-center gap-2">
                       <Button size="sm" onclick={() => ship(d)} disabled={shipping === d.id || !canShip(shipUrl[d.id] ?? '', shipContent[d.id] ?? '')}>
                         {shipping === d.id ? 'Reviewing…' : 'Ship & review'}
