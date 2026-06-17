@@ -29,25 +29,29 @@ def _concept(session, level="high"):
     return topic, concept
 
 
-def _llm(rubric_must, grade_score, gaps=None):
+def _llm(rubric_must, grade_score, gaps=None, mechanism_present=None):
     rubric = json.dumps({"criteria": ["c"], "must_include": rubric_must,
                          "strong_signs": [], "weak_signs": [], "source_refs": []})
-    grade = json.dumps({"score": grade_score, "verdict": "v", "gaps": gaps or []})
+    grade_d = {"score": grade_score, "verdict": "v", "gaps": gaps or []}
+    if mechanism_present is not None:
+        grade_d["mechanism_present"] = mechanism_present
+    grade = json.dumps(grade_d)
     return ScriptedLLMClient([LLMResponse(text=rubric), LLMResponse(text=grade)])
 
 
 def test_weak_self_explanation_lowers_estimate_and_traces(session: Session):
     topic, concept = _concept(session, level="high")
-    # rubric requires "softmax" + "QK^T"; learner omits both -> rules penalty
-    llm = _llm(["softmax", "QK^T"], grade_score=0.7, gaps=["vague"])
+    # The grader scores the no-mechanism answer low (band 0.30); rubric requires
+    # "softmax" + "QK^T", which the learner omits -> rules gaps recorded too.
+    llm = _llm(["softmax", "QK^T"], grade_score=0.3, gaps=["vague"])
     result = assess_concept(session, concept, "self_explanation",
                             "attention is about focusing", llm=llm)
     assert isinstance(result, AssessmentResult)
 
     a = session.exec(select(Assessment)).one()
     assert a.rubric_id is not None
-    # 0.7 - 2*0.15 = 0.4 -> level low
-    assert abs(a.score - 0.4) < 1e-6
+    # 0.3 is already below the omission ceiling (0.70) -> unchanged -> level low
+    assert abs(a.score - 0.3) < 1e-6
     assert any("omitted required element" in g for g in a.gaps)
 
     est = session.exec(select(KnowledgeEstimate)
@@ -60,6 +64,18 @@ def test_weak_self_explanation_lowers_estimate_and_traces(session: Session):
     kinds = {e.kind for e in events}
     assert {"assess:probe", "assess:graded", "assess:estimate", "assess:done"}.issubset(kinds)
     assert all(e.conversation_id is None for e in events)
+
+
+def test_mechanism_absent_caps_score_at_developing(session: Session):
+    # A confidently fluent answer the grader marks mechanism_present=false must be capped at
+    # 0.50 no matter how high the raw score — the code-enforced illusion-of-competence guard.
+    topic, concept = _concept(session, level="high")
+    llm = _llm([], grade_score=0.9, mechanism_present=False)
+    assess_concept(session, concept, "self_explanation", "lots of fluent words", llm=llm)
+    a = session.exec(select(Assessment)).one()
+    assert a.score == 0.5  # capped down from 0.9
+    events = {e.kind for e in session.exec(select(AgentEvent)).all()}
+    assert "assess:mechanism" in events
 
 
 def test_calibration_records_predicted_vs_actual(session: Session):

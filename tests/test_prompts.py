@@ -13,7 +13,7 @@ def test_prompt_is_a_str_with_metadata():
 
 
 def test_registry_prompts_have_tags():
-    assert GRADE.tag == "assess.grade@v2"  # bumped: injection-immunity clause added
+    assert GRADE.tag == "assess.grade@v3"  # v2 injection clause, v3 bands + mechanism cap
     assert STORY.tag == "story.compose@v1"
     # The skeptical-grader phrasing the assessor relies on is preserved.
     assert "SKEPTICAL grader" in GRADE

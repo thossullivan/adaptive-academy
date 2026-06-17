@@ -28,9 +28,12 @@ def test_apply_rules_checks_flags_omissions_and_misconceptions():
     assert not any("softmax" in g for g in gaps)  # present -> no gap
 
 
-def test_penalize_score_floors_for_omissions():
+def test_penalize_score_applies_band_ceilings():
+    # Ceilings, not subtractions: an omission caps at 0.70, and a present misconception
+    # caps further at 0.50 (worst applicable ceiling wins).
     gaps = ["omitted required element: a", "omitted required element: b",
             "contains likely misconception: c"]
-    # 0.9 - 2*0.15 = 0.6 (misconception does not subtract here)
-    assert penalize_score(0.9, gaps) == 0.6
-    assert penalize_score(0.1, ["omitted required element: a"]) == 0.0  # floored
+    assert penalize_score(0.9, gaps) == 0.5
+    assert penalize_score(0.9, ["omitted required element: a"]) == 0.7  # omission only
+    assert penalize_score(0.3, ["omitted required element: a"]) == 0.3  # already below ceiling
+    assert penalize_score(0.9, []) == 0.9  # a clean explanation passes through untouched
