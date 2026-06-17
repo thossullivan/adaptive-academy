@@ -6,12 +6,38 @@ lives in the API layer; this module stays side-effect-light and unit-testable.
 """
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from sqlmodel import Session, select
+
+from adaptive_academy.engine.track_markdown import (
+    DeliverableView,
+    ItemView,
+    PhaseView,
+    SidebarView,
+    TrackView,
+    track_to_markdown,
+)
+from adaptive_academy.models import (
+    AgentEvent,
+    Assessment,
+    Concept,
+    Deliverable,
+    Item,
+    KnowledgeEstimate,
+    Phase,
+    Sidebar,
+    SourceDoc,
+    Topic,
+    Track,
+)
 
 # We own this subfolder for exports; ingest skips it to avoid a feedback loop.
 EXPORT_FOLDER = "Adaptive Academy"
 _SUMMARY_CAP = 280
 _MAX_SCAN_FILES = 2000
+_MAX_READ_CHARS = 100_000  # only the head is needed for title/summary
 
 
 def slugify(name: str) -> str:
@@ -151,3 +177,132 @@ def render_concept_note(
         parts.append(summary + "\n")
     parts.append(f"Part of [[{hub_slug}]].")
     return "\n".join(parts).rstrip() + "\n"
+
+
+# --- orchestration (DB <-> files) --------------------------------------------
+
+@dataclass
+class IngestResult:
+    count: int
+    titles: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ExportResult:
+    written: list[str] = field(default_factory=list)
+
+
+def _track_markdown(session: Session, track: Track) -> str:
+    """Build a TrackView from the DB and render it (mirrors the curriculum.md route)."""
+    phases = session.exec(
+        select(Phase).where(Phase.track_id == track.id).order_by(Phase.position)
+    ).all()
+    pvs = []
+    for p in phases:
+        items = session.exec(
+            select(Item).where(Item.phase_id == p.id).order_by(Item.position)
+        ).all()
+        d = session.exec(select(Deliverable).where(Deliverable.phase_id == p.id)).first()
+        pvs.append(PhaseView(
+            title=p.title, est_hours=p.est_hours, flags=p.flags,
+            items=[ItemView(text=i.text, type=i.type, status=i.status) for i in items],
+            deliverable=DeliverableView(
+                text=d.text, kind=d.kind, acceptance_criteria=d.acceptance_criteria) if d else None,
+        ))
+    sidebars = session.exec(
+        select(Sidebar).where(Sidebar.track_id == track.id).order_by(Sidebar.position)
+    ).all()
+    view = TrackView(
+        title=track.title, overview=track.overview, phases=pvs,
+        sidebars=[SidebarView(kind=s.kind, title=s.title, body=s.body) for s in sidebars])
+    return track_to_markdown(view)
+
+
+def _concept_verdict_summary(session: Session, concept: Concept) -> tuple[str, str]:
+    """v1: verdict = the concept's knowledge level (untested if none); summary = latest assessment.
+    Full 5-signal triangulation lives in frontend competence.ts — porting it is a follow-up."""
+    est = session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
+    verdict = est.level if est else "untested"
+    latest = session.exec(
+        select(Assessment).where(Assessment.concept_id == concept.id)
+        .order_by(Assessment.id.desc())).first()
+    if latest is None:
+        return verdict, "No assessments yet."
+    bits = [f"Latest: **{latest.kind}** — score {latest.score:.2f}"]
+    if latest.verdict:
+        bits.append(latest.verdict)
+    if latest.gaps:
+        bits.append("Gaps: " + "; ".join(latest.gaps))
+    return verdict, "  \n".join(bits)
+
+
+def ingest_vault(
+    session: Session, topic_id: int, vault_path: str, *, subfolder: str = ""
+) -> IngestResult:
+    """Scan a vault for markdown notes and register them as `proposed` SourceDocs for the topic.
+    Already-ingested notes (same file URL) are skipped, so re-running is safe."""
+    vault = safe_vault_dir(vault_path)
+    root = safe_child(vault, subfolder) if subfolder else vault
+    existing = {
+        s.url for s in session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
+    }
+    titles: list[str] = []
+    for path in scan_notes(root):
+        url = path.resolve().as_uri()
+        if url in existing:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")[:_MAX_READ_CHARS]
+        title = note_title(text, path.stem)
+        session.add(SourceDoc(
+            topic_id=topic_id, title=title, url=url, tier=2, summary=note_summary(text),
+            angle="vault", added_by="obsidian", status="proposed"))
+        existing.add(url)
+        titles.append(title)
+    if titles:
+        session.add(AgentEvent(
+            topic_id=topic_id, kind="vault:ingest", detail=f"{len(titles)} note(s) from vault"))
+    session.commit()
+    return IngestResult(count=len(titles), titles=titles)
+
+
+def export_vault(session: Session, topic_id: int, vault_path: str) -> ExportResult:
+    """Write the topic's hub note + per-concept notes into `<vault>/Adaptive Academy/<topic>/`.
+    Idempotent — we own that folder and regenerate it; the learner's own notes are never touched."""
+    vault = safe_vault_dir(vault_path)
+    topic = session.get(Topic, topic_id)
+    if topic is None:
+        raise ValueError("topic not found")
+    topic_slug = slugify(topic.title)
+    base = safe_child(vault, EXPORT_FOLDER, topic_slug)
+    base.mkdir(parents=True, exist_ok=True)
+
+    track = session.exec(select(Track).where(Track.topic_id == topic_id)).first()
+    overview = track.overview if track else ""
+    track_md = _track_markdown(session, track) if track else ""
+    concepts = (
+        session.exec(select(Concept).where(Concept.track_id == track.id)).all() if track else []
+    )
+
+    written: list[str] = []
+    hub_path = safe_child(base, f"{topic_slug}.md")
+    hub_path.write_text(
+        render_hub_note(topic.title, overview, track_md, [c.name for c in concepts]),
+        encoding="utf-8")
+    written.append(str(hub_path))
+
+    if concepts:
+        concepts_dir = safe_child(base, "Concepts")
+        concepts_dir.mkdir(parents=True, exist_ok=True)
+        for c in concepts:
+            verdict, summary = _concept_verdict_summary(session, c)
+            note_path = safe_child(concepts_dir, f"{slugify(c.name)}.md")
+            note_path.write_text(
+                render_concept_note(c.name, verdict, c.is_load_bearing, summary, topic_slug),
+                encoding="utf-8")
+            written.append(str(note_path))
+
+    session.add(AgentEvent(
+        topic_id=topic_id, kind="vault:export", detail=f"{len(written)} note(s) to vault"))
+    session.commit()
+    return ExportResult(written=written)

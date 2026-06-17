@@ -14,6 +14,7 @@ from adaptive_academy.api import (
     routes_story,
     routes_teach,
     routes_topics,
+    routes_vault,
 )
 from adaptive_academy.api.routes_anchors import (
     concept_router as anchor_concept_router,
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_practice.router)
     app.include_router(routes_teach.router)
     app.include_router(routes_deliverables.router)
+    app.include_router(routes_vault.router)
     return app
 
 
