@@ -193,6 +193,12 @@ class ExportResult:
     written: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ExportAllResult:
+    topics: int
+    written: list[str] = field(default_factory=list)
+
+
 def _track_markdown(session: Session, track: Track) -> str:
     """Build a TrackView from the DB and render it (mirrors the curriculum.md route)."""
     phases = session.exec(
@@ -308,3 +314,13 @@ def export_vault(session: Session, topic_id: int, vault_path: str) -> ExportResu
         topic_id=topic_id, kind="vault:export", detail=f"{len(written)} note(s) to vault"))
     session.commit()
     return ExportResult(written=written)
+
+
+def export_all_topics(session: Session, vault_path: str) -> ExportAllResult:
+    """Mirror every topic into its own `Adaptive Academy/<topic>/` folder in one pass."""
+    safe_vault_dir(vault_path)  # validate once, up front
+    topics = session.exec(select(Topic)).all()
+    written: list[str] = []
+    for t in topics:
+        written.extend(export_vault(session, t.id, vault_path).written)
+    return ExportAllResult(topics=len(topics), written=written)

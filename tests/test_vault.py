@@ -6,6 +6,7 @@ from sqlmodel import select
 
 from adaptive_academy.engine.vault import (
     EXPORT_FOLDER,
+    export_all_topics,
     export_vault,
     ingest_vault,
     note_summary,
@@ -233,3 +234,21 @@ def test_ingest_vault_dedups_on_repeat(session, tmp_path):
     res2 = ingest_vault(session, topic.id, str(tmp_path))
     assert res2.count == 0
     assert len(session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic.id)).all()) == 1
+
+
+def test_export_all_topics_writes_every_topic(session, tmp_path):
+    t1 = _seed_topic(session)  # "Build LLMs"
+    _seed_track(session, t1)
+    t2 = Topic(title="Learn Rust")
+    session.add(t2)
+    session.commit()
+    session.refresh(t2)
+    session.add(Track(topic_id=t2.id, title="rust", overview="Systems."))
+    session.commit()
+
+    res = export_all_topics(session, str(tmp_path))
+
+    assert res.topics == 2
+    assert (tmp_path / EXPORT_FOLDER / "build-llms" / "build-llms.md").exists()
+    assert (tmp_path / EXPORT_FOLDER / "learn-rust" / "learn-rust.md").exists()
+    assert len(res.written) >= 2
