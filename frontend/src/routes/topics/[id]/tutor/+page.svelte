@@ -24,7 +24,9 @@
     topic = topics.list.find((t) => t.id === topicId) ?? (await api.getTopic(topicId).catch(() => null));
     if (topic && topics.currentId !== topicId) topics.select(topicId);
     if (topic?.concepts.length) {
-      conceptId = topic.concepts[0].id;
+      // Honor a ?concept=ID deep-link (from Today / Constellation), else first concept.
+      const wanted = Number($page.url.searchParams.get('concept'));
+      conceptId = topic.concepts.some((c) => c.id === wanted) ? wanted : topic.concepts[0].id;
       await start();
     }
   });

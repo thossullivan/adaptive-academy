@@ -1,0 +1,148 @@
+<script lang="ts">
+  import { page } from '$app/stores';
+  import { onMount } from 'svelte';
+  import { api, conceptLevels } from '$lib/api';
+  import type { Concept, Item } from '$lib/types';
+  import { LEVEL_FILL, LEVEL_LABEL, levelColor } from '$lib/utils';
+  import Page from '$lib/shell/Page.svelte';
+  import { Card, Button, Badge } from '$lib/ui';
+
+  const topicId = Number($page.params.id);
+  let loading = $state(true);
+  let dueCount = $state(0);
+  let nextItems = $state<{ item: Item; phase: string }[]>([]);
+  let weakest = $state<Concept | null>(null);
+  let weakestLevel = $state('unknown');
+  let allDone = $state(false);
+
+  onMount(async () => {
+    let concepts: Concept[] = [];
+    try {
+      const cur = await api.getCurriculum(topicId);
+      concepts = cur.concepts;
+      const upcoming: { item: Item; phase: string }[] = [];
+      let total = 0;
+      for (const p of cur.phases) {
+        for (const it of p.items) {
+          total++;
+          if (it.status !== 'done' && upcoming.length < 3) upcoming.push({ item: it, phase: p.title });
+        }
+      }
+      nextItems = upcoming;
+      allDone = total > 0 && upcoming.length === 0;
+    } catch {
+      nextItems = [];
+    }
+
+    try {
+      const due = await api.listRetention(topicId, { due: true });
+      dueCount = due.cards.length;
+    } catch {
+      dueCount = 0;
+    }
+
+    // Shakiest load-bearing concept (unmeasured counts as a priority to probe).
+    if (concepts.length) {
+      const levels = await conceptLevels(concepts.map((c) => c.id));
+      const lb = concepts.filter((c) => c.is_load_bearing);
+      const pool = lb.length ? lb : concepts;
+      pool.sort((a, b) => (LEVEL_FILL[levels[a.id]] ?? 0) - (LEVEL_FILL[levels[b.id]] ?? 0));
+      weakest = pool[0] ?? null;
+      if (weakest) weakestLevel = levels[weakest.id] ?? 'unknown';
+    }
+    loading = false;
+  });
+
+  const typeGlyph: Record<string, string> = { read: '▢', watch: '▷', build: '◈', write: '✎', do: '◆' };
+</script>
+
+<Page eyebrow="Today's session" title="What to do right now" lead="A focused loop assembled from where you actually are — warm up, build, probe, teach back." width="normal">
+  {#if loading}
+    <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">composing your session…</span></div>
+  {:else}
+    <div class="flex flex-col gap-3">
+      <!-- 1. Warm up -->
+      <Card class="rise" pad>
+        <div class="flex items-start gap-4">
+          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">1</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <h2 class="text-lg text-fg">Warm up</h2>
+              <Badge tone={dueCount ? 'accent' : 'success'} dot>{dueCount ? `${dueCount} due` : 'clear'}</Badge>
+            </div>
+            <p class="mt-1 text-sm text-muted">
+              {dueCount ? 'Retrieval practice on cards due today — fast, before you build.' : 'No spaced reviews due. Nice and clear.'}
+            </p>
+          </div>
+          {#if dueCount}<Button href="/topics/{topicId}/retention">Review {dueCount} →</Button>{/if}
+        </div>
+      </Card>
+
+      <!-- 2. Build -->
+      <Card class="rise" pad>
+        <div class="flex items-start gap-4">
+          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">2</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <h2 class="text-lg text-fg">Build</h2>
+              {#if allDone}<Badge tone="success" dot>track complete</Badge>{/if}
+            </div>
+            {#if nextItems.length}
+              <p class="mt-1 text-sm text-muted">Your next steps on the track:</p>
+              <ul class="mt-2 flex flex-col gap-1.5">
+                {#each nextItems as { item, phase }}
+                  <li class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3 py-2 text-sm">
+                    <span class="font-mono text-xs text-faint">{typeGlyph[item.type] ?? '·'}</span>
+                    <span class="flex-1 text-fg-dim">{item.text}</span>
+                    <span class="eyebrow !text-[0.55rem]">{phase}</span>
+                  </li>
+                {/each}
+              </ul>
+            {:else if allDone}
+              <p class="mt-1 text-sm text-muted">Every step is done — time to ship and assess.</p>
+            {:else}
+              <p class="mt-1 text-sm text-muted">No track yet. Generate a curriculum to get build steps.</p>
+            {/if}
+          </div>
+          <Button variant="outline" href="/topics/{topicId}/track">Open track →</Button>
+        </div>
+      </Card>
+
+      <!-- 3. Probe -->
+      <Card class="rise" pad>
+        <div class="flex items-start gap-4">
+          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">3</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <h2 class="text-lg text-fg">Probe</h2>
+              {#if weakest}<Badge tone={weakestLevel === 'low' ? 'danger' : weakestLevel === 'unknown' ? 'neutral' : 'accent'} dot>{LEVEL_LABEL[weakestLevel]}</Badge>{/if}
+            </div>
+            {#if weakest}
+              <p class="mt-1 text-sm text-muted">
+                Test your shakiest load-bearing concept —
+                <span class="font-medium" style:color={levelColor(weakestLevel)}>{weakest.name}</span>. Desirable difficulty: explain it cold.
+              </p>
+            {:else}
+              <p class="mt-1 text-sm text-muted">No concepts to probe yet.</p>
+            {/if}
+          </div>
+          {#if weakest}<Button href="/topics/{topicId}/assess">Assess →</Button>{/if}
+        </div>
+      </Card>
+
+      <!-- 4. Teach back -->
+      <Card class="rise" pad>
+        <div class="flex items-start gap-4">
+          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">4</span>
+          <div class="min-w-0 flex-1">
+            <h2 class="text-lg text-fg">Teach back</h2>
+            <p class="mt-1 text-sm text-muted">
+              {weakest ? `Work through ${weakest.name} with the tutor — it won't hand you the answer.` : 'Open the tutor to work a concept Socratically.'}
+            </p>
+          </div>
+          <Button variant="outline" href={weakest ? `/topics/${topicId}/tutor?concept=${weakest.id}` : `/topics/${topicId}/tutor`}>Open tutor →</Button>
+        </div>
+      </Card>
+    </div>
+  {/if}
+</Page>

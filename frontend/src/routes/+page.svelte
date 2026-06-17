@@ -126,8 +126,8 @@
 {:else}
   <Page eyebrow="Learning command center" title={topics.current.title} width="wide">
     {#snippet actions()}
-      <Button variant="outline" href="/topics/{tid}/assess">Assess</Button>
-      <Button href="/topics/{tid}/tutor">Open tutor →</Button>
+      <Button variant="outline" href="/topics/{tid}/map">Constellation</Button>
+      <Button href="/topics/{tid}/today">Start today's session →</Button>
     {/snippet}
 
     {#if loading}

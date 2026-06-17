@@ -8,17 +8,36 @@
   const tid = $derived(topics.current?.id ?? null);
 
   type Nav = { label: string; icon: string; href: string; match: (p: string) => boolean };
+  type Section = { label: string; items: Nav[] };
 
-  const nav = $derived<Nav[]>(
+  const sections = $derived<Section[]>(
     tid == null
       ? []
       : [
-          { label: 'Dashboard', icon: 'dashboard', href: '/', match: (p) => p === '/' },
-          { label: 'Tutor', icon: 'tutor', href: `/topics/${tid}/tutor`, match: (p) => p.endsWith('/tutor') },
-          { label: 'Track', icon: 'track', href: `/topics/${tid}/track`, match: (p) => p.endsWith('/track') },
-          { label: 'Assess', icon: 'assess', href: `/topics/${tid}/assess`, match: (p) => p.endsWith('/assess') },
-          { label: 'Retention', icon: 'retention', href: `/topics/${tid}/retention`, match: (p) => p.endsWith('/retention') },
-          { label: 'Sources', icon: 'sources', href: `/topics/${tid}/review`, match: (p) => p.endsWith('/review') }
+          {
+            label: 'Daily',
+            items: [
+              { label: 'Today', icon: 'today', href: `/topics/${tid}/today`, match: (p) => p.endsWith('/today') }
+            ]
+          },
+          {
+            label: 'Workspace',
+            items: [
+              { label: 'Dashboard', icon: 'dashboard', href: '/', match: (p) => p === '/' },
+              { label: 'Tutor', icon: 'tutor', href: `/topics/${tid}/tutor`, match: (p) => p.endsWith('/tutor') },
+              { label: 'Track', icon: 'track', href: `/topics/${tid}/track`, match: (p) => p.endsWith('/track') },
+              { label: 'Assess', icon: 'assess', href: `/topics/${tid}/assess`, match: (p) => p.endsWith('/assess') },
+              { label: 'Retention', icon: 'retention', href: `/topics/${tid}/retention`, match: (p) => p.endsWith('/retention') },
+              { label: 'Sources', icon: 'sources', href: `/topics/${tid}/review`, match: (p) => p.endsWith('/review') }
+            ]
+          },
+          {
+            label: 'Reflect',
+            items: [
+              { label: 'Constellation', icon: 'map', href: `/topics/${tid}/map`, match: (p) => p.endsWith('/map') },
+              { label: 'Story', icon: 'story', href: `/topics/${tid}/story`, match: (p) => p.endsWith('/story') }
+            ]
+          }
         ]
   );
 
@@ -43,25 +62,29 @@
   <TopicSwitcher />
 
   <!-- Nav -->
-  <nav class="flex flex-1 flex-col gap-0.5">
-    <div class="eyebrow mb-1.5 px-2.5">Workspace</div>
-    {#each nav as item (item.label)}
-      {@const active = item.match(pathname)}
-      <a
-        href={item.href}
-        class="group relative flex h-9 items-center gap-3 rounded-[var(--radius-sm)] px-2.5 text-sm transition-colors"
-        class:text-fg={active}
-        class:bg-surface-2={active}
-        class:text-muted={!active}
-      >
-        {#if active}
-          <span class="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-accent"></span>
-        {/if}
-        <span class={active ? 'text-accent' : 'text-faint transition-colors group-hover:text-fg-dim'}>
-          <Icon name={item.icon} />
-        </span>
-        <span class="transition-colors group-hover:text-fg">{item.label}</span>
-      </a>
+  <nav class="flex flex-1 flex-col gap-3 overflow-y-auto">
+    {#each sections as section (section.label)}
+      <div class="flex flex-col gap-0.5">
+        <div class="eyebrow mb-1 px-2.5">{section.label}</div>
+        {#each section.items as item (item.label)}
+          {@const active = item.match(pathname)}
+          <a
+            href={item.href}
+            class="group relative flex h-9 items-center gap-3 rounded-[var(--radius-sm)] px-2.5 text-sm transition-colors"
+            class:text-fg={active}
+            class:bg-surface-2={active}
+            class:text-muted={!active}
+          >
+            {#if active}
+              <span class="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-accent"></span>
+            {/if}
+            <span class={active ? 'text-accent' : 'text-faint transition-colors group-hover:text-fg-dim'}>
+              <Icon name={item.icon} />
+            </span>
+            <span class="transition-colors group-hover:text-fg">{item.label}</span>
+          </a>
+        {/each}
+      </div>
     {/each}
     {#if tid == null}
       <a href="/topics/new" class="flex h-9 items-center gap-3 rounded-[var(--radius-sm)] px-2.5 text-sm text-accent hover:bg-accent-wash">
