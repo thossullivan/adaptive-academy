@@ -17,6 +17,7 @@
   let saved = $state(false);
   let generating = $state(false);
   let generatingAnchors = $state(false);
+  let error = $state('');
   let anchorCount = $state<number | null>(null);
 
   onMount(async () => {
@@ -25,7 +26,13 @@
     } catch {
       foundation = null;
     }
+    // Show proposed sources; once they've been saved (accepted), show those instead so the
+    // curated list persists on a revisit — otherwise the page reads an empty "0 of 0 kept".
     sources = await api.listSources(topicId, 'proposed');
+    if (!sources.length) {
+      sources = await api.listSources(topicId, 'accepted');
+      saved = sources.length > 0;
+    }
     for (const s of sources) keep[s.id] = true;
     events = await api.listEvents(topicId);
   });
@@ -34,11 +41,14 @@
 
   async function save() {
     busy = true;
+    error = '';
     const accepted = sources.filter((s) => keep[s.id]).map((s) => s.id);
     const pruned = sources.filter((s) => !keep[s.id]).map((s) => s.id);
     try {
       await api.reviewSources(topicId, accepted, pruned);
       saved = true;
+    } catch (e) {
+      error = `Couldn't save the reading list: ${e}`;
     } finally {
       busy = false;
     }
@@ -46,9 +56,12 @@
 
   async function generate() {
     generating = true;
+    error = '';
     try {
       await api.generateCurriculum(topicId);
       await goto(`/topics/${topicId}/track`);
+    } catch (e) {
+      error = `Curriculum generation failed: ${e}. It's safe to retry — your reading list is saved.`;
     } finally {
       generating = false;
     }
@@ -56,9 +69,12 @@
 
   async function generateAnchors() {
     generatingAnchors = true;
+    error = '';
     try {
       const r = await api.generateAnchors(topicId);
       anchorCount = r.anchors.length;
+    } catch (e) {
+      error = `Quiz generation failed: ${e}`;
     } finally {
       generatingAnchors = false;
     }
@@ -128,8 +144,15 @@
       <Button onclick={save} disabled={busy || !sources.length}>{busy ? 'Saving…' : 'Save reading list'}</Button>
       {#if saved}
         <Button onclick={generate} disabled={generating}>{generating ? 'Generating curriculum…' : 'Generate curriculum →'}</Button>
+        {#if generating}
+          <span class="text-xs text-faint">The CurriculumDirector is designing your whole track — this can take a couple of minutes.</span>
+        {/if}
       {/if}
     </div>
+
+    {#if error}
+      <p class="rounded-[var(--radius-sm)] border border-danger/40 bg-danger/10 px-3 py-2 text-sm" style:color="var(--danger)">{error}</p>
+    {/if}
 
     {#if events.length}
       <Card pad eyebrow="Observability" title="What the agents did">
