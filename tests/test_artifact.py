@@ -21,6 +21,21 @@ class FixedLLM:
         return LLMResponse(text=self._text, tool_calls=[])
 
 
+class CapturingLLM:
+    """Records the user prompt it was handed so tests can assert what got graded."""
+
+    def __init__(self, text):
+        self._text = text
+        self.user = None
+
+    def complete(self, system, messages, tools):  # noqa: ANN001
+        self.user = messages[0]["content"]
+        return LLMResponse(text=self._text, tool_calls=[])
+
+
+_OK = json.dumps({"score": 0.7, "mechanism_present": True, "verdict": "ok", "gaps": []})
+
+
 def _seed(session, criteria=None):
     topic = Topic(title="Build LLMs")
     session.add(topic)
@@ -66,7 +81,8 @@ def test_review_artifact_grades_and_records_shipped_signal(session):
     _, d, c = _seed(session)
     fake = FixedLLM(json.dumps({"score": 0.8, "mechanism_present": True,
                                 "verdict": "meets the criteria with evidence", "gaps": []}))
-    result = review_artifact(session, d, "https://github.com/me/attn", "def attn(): ...", llm=fake)
+    result = review_artifact(session, d, "https://github.com/me/attn", "def attn(): ...",
+                             llm=fake, fetch=lambda _u: None)
 
     assert result.score == 0.8
     assert result.concepts == ["self-attention"]
@@ -76,6 +92,23 @@ def test_review_artifact_grades_and_records_shipped_signal(session):
     # a per-concept artifact_review assessment was recorded (the 'shipped' signal)
     a = session.exec(select(Assessment).where(Assessment.kind == "artifact_review")).one()
     assert a.concept_id == c.id and a.score == 0.8
+
+
+def test_review_artifact_merges_fetched_url_text_into_grading(session):
+    _, d, _ = _seed(session)
+    llm = CapturingLLM(_OK)
+    review_artifact(session, d, "https://raw.githubusercontent.com/me/p/main/README.md",
+                    "my notes", llm=llm, fetch=lambda _u: "FETCHED_README_BODY")
+    assert "FETCHED_README_BODY" in llm.user  # the grader saw the fetched artifact
+    assert "my notes" in llm.user             # ...alongside the pasted notes
+
+
+def test_review_artifact_degrades_to_paste_when_fetch_fails(session):
+    _, d, _ = _seed(session)
+    llm = CapturingLLM(_OK)
+    review_artifact(session, d, "https://raw.githubusercontent.com/me/p",
+                    "only my notes", llm=llm, fetch=lambda _u: None)
+    assert "only my notes" in llm.user
 
 
 def test_review_artifact_caps_when_no_mechanism(session):
