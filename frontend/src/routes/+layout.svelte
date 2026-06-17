@@ -5,6 +5,7 @@
   import { theme } from '$lib/theme.svelte';
   import { topics } from '$lib/topics.svelte';
   import Rail from '$lib/shell/Rail.svelte';
+  import Toaster from '$lib/ui/Toaster.svelte';
 
   let { children } = $props();
   let ready = $state(false);
@@ -43,3 +44,5 @@
     {/if}
   </main>
 </div>
+
+<Toaster />

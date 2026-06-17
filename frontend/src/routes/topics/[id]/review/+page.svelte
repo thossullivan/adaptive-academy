@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { toasts } from '$lib/toast.svelte';
   import type { SourceDoc, Foundation, EventOut } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge } from '$lib/ui';
@@ -59,6 +60,7 @@
     error = '';
     try {
       await api.generateCurriculum(topicId);
+      toasts.show('Track ready — your curriculum is built. ✨');
       await goto(`/topics/${topicId}/track`);
     } catch (e) {
       error = `Curriculum generation failed: ${e}. It's safe to retry — your reading list is saved.`;
