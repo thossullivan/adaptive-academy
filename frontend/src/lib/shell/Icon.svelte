@@ -14,7 +14,8 @@
     story: 'M5 4h9l5 5v11H5V4Zm9 0v5h5M8 13h8M8 16h5',
     practice: 'M13 2L4 14h6l-1 8 9-12h-6l1-8Z',
     teach: 'M3 5h18v11H3zM8 20h8M12 16v4M9 10l2 2 4-4',
-    wayfinder: 'M12 2l1.7 7.8L21 12l-7.3 1.7L12 22l-1.7-8.3L3 12l7.3-2.2z'
+    wayfinder: 'M12 2l1.7 7.8L21 12l-7.3 1.7L12 22l-1.7-8.3L3 12l7.3-2.2z',
+    vault: 'M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Zm8 4v4m-2-2h4'
   };
 
   const filled = new Set(['dashboard', 'map', 'wayfinder']);

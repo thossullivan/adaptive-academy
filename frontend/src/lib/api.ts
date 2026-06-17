@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -116,6 +116,19 @@ export const api = {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ artifact_url, content })
     }).then(j<ShipResult>),
+
+  vaultStatus: (vaultPath: string) =>
+    fetch(`/api/vault/status?vault_path=${encodeURIComponent(vaultPath)}`).then(j<VaultStatus>),
+  vaultIngest: (topicId: number, vault_path: string, subfolder = '') =>
+    fetch(`/api/topics/${topicId}/vault/ingest`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vault_path, subfolder })
+    }).then(j<VaultIngestResult>),
+  vaultExport: (topicId: number, vault_path: string) =>
+    fetch(`/api/topics/${topicId}/vault/export`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vault_path })
+    }).then(j<VaultExportResult>),
 };
 
 /** Derive a per-concept knowledge level from its assessment history (latest estimate). */

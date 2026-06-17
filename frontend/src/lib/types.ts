@@ -73,3 +73,18 @@ export interface DecayGrade {
 export interface Challenge { problem: string; }
 export interface Consolidation { canonical: string; feedback: string; score: number; }
 export interface TeachResult { score: number; feedback: string; strengths: string[]; gaps: string[]; }
+
+export interface VaultStatus {
+  configured: boolean;
+  path: string;
+  exists: boolean;
+  is_dir: boolean;
+  note_count: number;
+}
+export interface VaultIngestResult {
+  count: number;
+  titles: string[];
+}
+export interface VaultExportResult {
+  written: string[];
+}
