@@ -168,18 +168,28 @@ def research_topic(
 
     # Fan out concurrently; collect per-brief results in brief order for deterministic tracing.
     per_brief: list[list[RawSource]] = [[] for _ in briefs]
+    failures: dict[int, str] = {}
     if briefs:
         with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(briefs)))) as ex:
             futures = {ex.submit(researcher.search, b): i for i, b in enumerate(briefs)}
             for fut in as_completed(futures):
-                per_brief[futures[fut]] = fut.result()
+                idx = futures[fut]
+                try:
+                    per_brief[idx] = fut.result()
+                except Exception as e:  # noqa: BLE001
+                    # One angle failing (transient 529, parse error, …) must not abort the
+                    # whole fan-out — record it and keep the other angles' sources.
+                    failures[idx] = type(e).__name__
 
     raw: list[RawSource] = []
     for i, brief in enumerate(briefs):
         found = per_brief[i]
         for s in found:
             s.angle = brief.angle
-        emit("research:subagent", f"{brief.angle}: {len(found)} sources")
+        if i in failures:
+            emit("research:subagent_error", f"{brief.angle}: {failures[i]}")
+        else:
+            emit("research:subagent", f"{brief.angle}: {len(found)} sources")
         raw.extend(found)
 
     deduped = dedupe_by_url(raw)

@@ -1,4 +1,5 @@
 import json
+import os
 
 import anthropic
 from fastapi import FastAPI, Request
@@ -21,6 +22,15 @@ from adaptive_academy.db import create_db_and_tables
 from adaptive_academy.llm.types import AgentSDKError
 
 
+def drop_api_key_if_agent_sdk() -> None:
+    """Fully subscription-only in agent_sdk mode: drop ANTHROPIC_API_KEY so every Agent SDK
+    subprocess (LLM, Researcher, Anchor) uses the Claude plan, not API credits — which lets
+    the SDK clients skip per-call key juggling and run parallel/lock-free. Called from the
+    startup hook (not import time) so merely importing this module never mutates the env."""
+    if os.getenv("AA_LLM_BACKEND", "").lower() == "agent_sdk":
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Adaptive Academy")
     app.add_middleware(
@@ -32,6 +42,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     def _startup() -> None:
+        drop_api_key_if_agent_sdk()
         create_db_and_tables()
 
     @app.exception_handler(anthropic.APIError)

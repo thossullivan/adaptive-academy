@@ -33,7 +33,10 @@ def get_llm() -> LLMClient:
 
 
 def get_researcher() -> ResearcherClient:
-    # Web-search fan-out via the Agent SDK's WebSearch tool is a follow-up; stays API-key.
+    # In agent_sdk mode, fan out via the SDK's WebSearch tool on the subscription.
+    if _use_agent_sdk():
+        from adaptive_academy.llm.agent_sdk_researcher import AgentSDKResearcherClient
+        return AgentSDKResearcherClient(role="reasoning")
     return AnthropicResearcherClient(role="reasoning")
 
 

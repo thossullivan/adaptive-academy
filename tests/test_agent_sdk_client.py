@@ -6,6 +6,22 @@ import adaptive_academy.llm.agent_sdk_client as mod
 from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient, flatten_messages
 
 
+def test_drop_api_key_only_in_agent_sdk_mode(monkeypatch):
+    from adaptive_academy.api.app import drop_api_key_if_agent_sdk
+
+    # agent_sdk mode: key dropped process-wide so all SDK subprocesses use the subscription.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+    monkeypatch.setenv("AA_LLM_BACKEND", "agent_sdk")
+    drop_api_key_if_agent_sdk()
+    assert "ANTHROPIC_API_KEY" not in os.environ
+
+    # Default mode: key untouched.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-y")
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    drop_api_key_if_agent_sdk()
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-y"
+
+
 def test_flatten_single_passthrough_and_multi_roleprefix():
     assert flatten_messages([{"role": "user", "content": "hi"}]) == "hi"
     out = flatten_messages([{"role": "user", "content": "a"}, {"role": "tutor", "content": "b"}])
@@ -48,12 +64,10 @@ class _FakeResult:
         self.is_error = is_error
 
 
-def test_complete_strips_key_during_call_and_restores_after(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real")
-
+def test_complete_no_tools_returns_query_text(monkeypatch):
+    # agent_sdk mode drops the key process-wide (create_app), so the client just queries —
+    # no per-call strip, no lock.
     async def fake_query(prompt, options):
-        # The whole point: the subprocess must NOT see the API key (-> subscription auth).
-        assert "ANTHROPIC_API_KEY" not in os.environ
         assert prompt == "explain softmax"
         yield _FakeResult("graded text")
 
@@ -64,13 +78,9 @@ def test_complete_strips_key_during_call_and_restores_after(monkeypatch):
         "sys", [{"role": "user", "content": "explain softmax"}], tools=[])
     assert resp.text == "graded text"
     assert resp.tool_calls == []
-    # Restored for the still-API-key Researcher/Anchor clients.
-    assert os.environ["ANTHROPIC_API_KEY"] == "sk-real"
 
 
 def test_complete_raises_on_error_result(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real")
-
     async def fake_query(prompt, options):
         yield _FakeResult("Invalid API key", is_error=True)
 
@@ -80,5 +90,3 @@ def test_complete_raises_on_error_result(monkeypatch):
     with pytest.raises(mod.AgentSDKError):
         AgentSDKLLMClient(role="reasoning").complete(
             "s", [{"role": "user", "content": "x"}], tools=[])
-    # Even on error, the key is restored.
-    assert os.environ["ANTHROPIC_API_KEY"] == "sk-real"
