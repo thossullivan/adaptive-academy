@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { conceptSignals, conceptVerdict } from './competence';
+import { conceptSignals, conceptVerdict, verdictRationale } from './competence';
 import type { Assessment } from './types';
 
 // Minimal assessment factory (the signal logic only reads these fields).
@@ -84,5 +84,68 @@ describe('conceptVerdict (signals must agree)', () => {
       a({ id: 1, kind: 'teach', score: 0.7 })
     ]));
     expect(v).toBe('verified');
+  });
+});
+
+describe('verdictRationale (why this verdict)', () => {
+  const role = (r: ReturnType<typeof verdictRationale>, k: string) =>
+    r.signals.find((d) => d.key === k)!.role;
+
+  it('lists all five signals in a fixed order', () => {
+    const r = verdictRationale(conceptSignals([]));
+    expect(r.signals.map((d) => d.key)).toEqual([
+      'grade', 'decay', 'calibration', 'taught', 'shipped'
+    ]);
+  });
+
+  it('untested: no signals, points to a first read', () => {
+    const r = verdictRationale(conceptSignals([]));
+    expect(r.verdict).toBe('untested');
+    expect(r.nextStep).toMatch(/assess|grade|first/i);
+  });
+
+  it('unverified: high grade, nothing corroborating — says so and suggests corroboration', () => {
+    const r = verdictRationale(conceptSignals([a({ estimate_level: 'high', score: 0.9 })]));
+    expect(r.verdict).toBe('unverified');
+    expect(r.headline).toMatch(/nothing|corroborat/i);
+    expect(r.nextStep).toMatch(/recall|teach|ship/i);
+  });
+
+  it('shaky from a low grade names the grade', () => {
+    const r = verdictRationale(conceptSignals([a({ estimate_level: 'low', score: 0.2 })]));
+    expect(r.verdict).toBe('shaky');
+    expect(r.headline).toMatch(/low/i);
+  });
+
+  it('shaky from a failed signal names the failing signal and marks it a fault', () => {
+    const r = verdictRationale(conceptSignals([
+      a({ estimate_level: 'high', score: 0.9 }),
+      a({ kind: 'recall', score: 0.2 }) // decayed
+    ]));
+    expect(r.verdict).toBe('shaky');
+    expect(r.headline.toLowerCase()).toContain('decay');
+    expect(role(r, 'decay')).toBe('fault');
+  });
+
+  it('solid names the corroborating signal and has no next step', () => {
+    const r = verdictRationale(conceptSignals([
+      a({ estimate_level: 'high', score: 0.9 }),
+      a({ kind: 'teach', score: 0.8 })
+    ]));
+    expect(r.verdict).toBe('solid');
+    expect(r.headline).toMatch(/teach/i);
+    expect(r.nextStep).toBeNull();
+  });
+
+  it('classifies lit/unlit/bad as support/gap/fault', () => {
+    const r = verdictRationale(conceptSignals([
+      a({ estimate_level: 'high', score: 0.9 }),
+      a({ kind: 'teach', score: 0.8 }), // lit -> support
+      a({ kind: 'recall', score: 0.2 }) // bad -> fault
+    ]));
+    expect(role(r, 'taught')).toBe('support');
+    expect(role(r, 'decay')).toBe('fault');
+    expect(role(r, 'calibration')).toBe('gap'); // unlit
+    expect(role(r, 'grade')).toBe('support'); // high
   });
 });

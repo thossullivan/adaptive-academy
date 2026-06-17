@@ -165,8 +165,8 @@
             <span class="text-xs text-faint">◆ grade · ↺ held · ◷ calibrated · ◳ taught · ⚒ shipped</span>
           {/snippet}
           {#if rankedRows.length}
-            <p class="mb-2 text-xs text-faint">Competence is <i>triangulated</i>, not graded — a concept reads "solid" only when independent signals agree.</p>
-            <div class="flex flex-col divide-y divide-border/60">
+            <p class="mb-2 text-xs text-faint">Competence is <i>triangulated</i>, not graded — a concept reads "solid" only when independent signals agree. <span class="text-fg-dim">Click any concept for why.</span></p>
+            <div class="flex flex-col">
               {#each rankedRows as r (r.id)}
                 <SignalStrip name={r.name} signals={r.signals} verdict={r.verdict} loadBearing={r.is_load_bearing} hasAnchor={r.has_anchor} />
               {/each}
