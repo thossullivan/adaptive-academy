@@ -20,7 +20,8 @@ export interface ResearchResult { foundation: Foundation; sources: SourceDoc[]; 
 export interface CreateTopicBody { title: string; goal: string; prior_knowledge?: string; time_budget?: string; }
 export interface Item { id: number; text: string; type: string; status: string; position: number; is_remediation?: boolean; }
 export interface Remediation { items: Item[]; events: EventOut[]; }
-export interface Deliverable { id: number; kind: string; text: string; acceptance_criteria: string[]; }
+export interface Deliverable { id: number; kind: string; text: string; acceptance_criteria: string[]; artifact_url?: string; review_verdict?: string; }
+export interface ShipResult { score: number; verdict: string; gaps: string[]; concepts: string[]; }
 export interface Sidebar { id: number; kind: string; title: string; body: string; position: number; }
 export interface Phase {
   id: number; title: string; position: number; est_hours: string; flags: string[];

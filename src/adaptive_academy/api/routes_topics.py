@@ -259,7 +259,9 @@ def _curriculum_out(session: Session, track: Track, events=None) -> CurriculumOu
                            is_remediation=i.added_by == "remediation") for i in items],
             deliverable=DeliverableOut(id=deliverable.id, kind=deliverable.kind,
                                        text=deliverable.text,
-                                       acceptance_criteria=deliverable.acceptance_criteria)
+                                       acceptance_criteria=deliverable.acceptance_criteria,
+                                       artifact_url=deliverable.artifact_url,
+                                       review_verdict=deliverable.review_verdict)
             if deliverable else None,
         ))
     sidebars = session.exec(

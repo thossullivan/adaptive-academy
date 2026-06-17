@@ -2,14 +2,42 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { Curriculum } from '$lib/types';
+  import type { Curriculum, ShipResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Markdown } from '$lib/ui';
+  import { Card, Button, Badge, Markdown, Input, Textarea } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let cur = $state<Curriculum | null>(null);
   let loading = $state(true);
   const cycle: Record<string, string> = { todo: 'doing', doing: 'done', done: 'todo' };
+
+  // Ship-it (per deliverable) state.
+  let shipOpen = $state<Record<number, boolean>>({});
+  let shipUrl = $state<Record<number, string>>({});
+  let shipContent = $state<Record<number, string>>({});
+  let shipResult = $state<Record<number, ShipResult>>({});
+  let shipping = $state<number | null>(null);
+
+  async function ship(d: { id: number }) {
+    const content = shipContent[d.id];
+    if (!content?.trim() || shipping === d.id) return;
+    shipping = d.id;
+    try {
+      const r = await api.shipDeliverable(d.id, shipUrl[d.id] ?? '', content);
+      shipResult[d.id] = r;
+      // Persist the shipped state on the curriculum so the badge sticks.
+      if (cur) {
+        for (const p of cur.phases) {
+          if (p.deliverable?.id === d.id) {
+            p.deliverable.review_verdict = r.verdict;
+            p.deliverable.artifact_url = shipUrl[d.id] ?? p.deliverable.artifact_url;
+          }
+        }
+      }
+    } finally {
+      shipping = null;
+    }
+  }
 
   const statusTone: Record<string, 'neutral' | 'accent' | 'success'> = {
     todo: 'neutral',
@@ -115,6 +143,7 @@
           </ul>
 
           {#if p.deliverable}
+            {@const d = p.deliverable}
             <div class="mt-3 rounded-[var(--radius-md)] border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-accent-wash p-3.5">
               <div class="flex items-center gap-2">
                 <span class="text-accent">🎯</span>
@@ -128,6 +157,47 @@
                   {/each}
                 </ul>
               {/if}
+
+              <!-- Ship it -->
+              <div class="mt-3 border-t border-[color-mix(in_oklab,var(--accent)_20%,transparent)] pt-3">
+                {#if d.review_verdict && !shipOpen[d.id]}
+                  <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <Badge tone="success" dot>⚒ shipped</Badge>
+                    {#if d.artifact_url}<a href={d.artifact_url} target="_blank" rel="noreferrer" class="text-accent underline">artifact ↗</a>{/if}
+                    <span class="text-muted">{d.review_verdict}</span>
+                    <button class="eyebrow ml-auto transition-colors hover:text-fg-dim" onclick={() => (shipOpen[d.id] = true)}>re-ship</button>
+                  </div>
+                {:else if !shipOpen[d.id]}
+                  <Button variant="outline" size="sm" onclick={() => (shipOpen[d.id] = true)}>⚒ Ship it for review</Button>
+                {:else}
+                  <div class="flex flex-col gap-2">
+                    <Input bind:value={shipUrl[d.id]} placeholder="Artifact URL (repo / blog / notebook) — optional" />
+                    <Textarea bind:value={shipContent[d.id]} rows={6} placeholder="Paste the artifact — key code, the writeup, the ablation table. It's graded against the acceptance criteria above." />
+                    <div class="flex items-center gap-2">
+                      <Button size="sm" onclick={() => ship(d)} disabled={shipping === d.id || !shipContent[d.id]?.trim()}>
+                        {shipping === d.id ? 'Reviewing…' : 'Ship & review'}
+                      </Button>
+                      <button class="eyebrow transition-colors hover:text-fg-dim" onclick={() => (shipOpen[d.id] = false)}>cancel</button>
+                    </div>
+                  </div>
+                {/if}
+
+                {#if shipResult[d.id]}
+                  {@const r = shipResult[d.id]}
+                  <div class="mt-2 rounded-[var(--radius-sm)] border border-border bg-surface p-3 text-sm">
+                    <div class="flex items-center gap-2">
+                      <Badge tone={r.score >= 0.7 ? 'success' : r.score >= 0.45 ? 'accent' : 'danger'} dot>{Math.round(r.score * 100)}%</Badge>
+                      <span class="text-fg-dim">{r.verdict}</span>
+                    </div>
+                    {#if r.gaps.length}
+                      <ul class="mt-2 flex flex-col gap-1">
+                        {#each r.gaps as g}<li class="flex items-start gap-2 text-xs text-muted"><span class="text-warn">▸</span>{g}</li>{/each}
+                      </ul>
+                    {/if}
+                    {#if r.concepts.length}<p class="mt-2 text-xs text-faint">Counts toward: {r.concepts.join(' · ')}</p>{/if}
+                  </div>
+                {/if}
+              </div>
             </div>
           {/if}
         </Card>

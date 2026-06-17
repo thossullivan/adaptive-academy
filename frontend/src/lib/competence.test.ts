@@ -62,6 +62,22 @@ describe('conceptVerdict (signals must agree)', () => {
     expect(v).toBe('shaky');
   });
 
+  it('a shipped artifact corroborates a high grade into solid', () => {
+    const v = conceptVerdict(conceptSignals([
+      a({ id: 2, estimate_level: 'high', score: 0.9 }),
+      a({ id: 1, kind: 'artifact_review', score: 0.8 })
+    ]));
+    expect(v).toBe('solid');
+  });
+
+  it('a shipped-but-failing artifact pulls to shaky', () => {
+    const v = conceptVerdict(conceptSignals([
+      a({ id: 2, estimate_level: 'high', score: 0.9 }),
+      a({ id: 1, kind: 'artifact_review', score: 0.2 })
+    ]));
+    expect(v).toBe('shaky');
+  });
+
   it('medium grade with corroboration is verified', () => {
     const v = conceptVerdict(conceptSignals([
       a({ id: 2, estimate_level: 'medium', score: 0.6 }),
