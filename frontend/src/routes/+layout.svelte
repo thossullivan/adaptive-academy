@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import { theme } from '$lib/theme.svelte';
   import { topics } from '$lib/topics.svelte';
   import Rail from '$lib/shell/Rail.svelte';
@@ -23,7 +24,12 @@
   <Rail />
   <main class="min-w-0 flex-1">
     {#if ready}
-      {@render children()}
+      <!-- Re-key on the topic id so switching topics on the SAME route (e.g.
+           /topics/1/wayfinder → /topics/2/wayfinder) remounts the page and reloads
+           its data, instead of showing stale data until a manual refresh. -->
+      {#key $page.params.id}
+        {@render children()}
+      {/key}
     {:else}
       <div class="grid h-screen place-items-center">
         <div class="flex flex-col items-center gap-3 text-muted">
