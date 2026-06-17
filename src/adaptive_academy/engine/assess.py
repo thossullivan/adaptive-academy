@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import GRADE, PROBE_TEXT, RUBRIC
 from adaptive_academy.models import (
@@ -78,14 +79,6 @@ class GradeDraft:
     confidence_actual: float | None = None
 
 
-def _strip_fences(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-    return cleaned.strip()
-
 
 def _as_float(v, default: float | None) -> float | None:
     try:
@@ -95,7 +88,7 @@ def _as_float(v, default: float | None) -> float | None:
 
 
 def parse_rubric_json(text: str) -> RubricDraft:
-    d = json.loads(_strip_fences(text))
+    d = json.loads(extract_json(text))
     return RubricDraft(
         criteria=list(d.get("criteria", []) or []),
         must_include=list(d.get("must_include", []) or []),
@@ -106,7 +99,7 @@ def parse_rubric_json(text: str) -> RubricDraft:
 
 
 def parse_grade_json(text: str) -> GradeDraft:
-    d = json.loads(_strip_fences(text))
+    d = json.loads(extract_json(text))
     return GradeDraft(
         score=_as_float(d.get("score"), 0.0) or 0.0,
         verdict=str(d.get("verdict", "")),
@@ -169,7 +162,7 @@ def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
         lines.append(f"- {c}")
     if reference:
         lines.append(f"REFERENCE ANSWER: {reference}")
-    lines += ["", "LEARNER RESPONSE:", response or "(empty)"]
+    lines += ["", "<<<RESPONSE>>>", response or "(empty)", "<<<END_RESPONSE>>>"]
     return GRADE, "\n".join(lines)
 
 

@@ -6,6 +6,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from sqlmodel import Session
 
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import RESEARCH_FOUNDATION
 from adaptive_academy.models import AgentEvent, SourceDoc, Topic, TopicFoundation, TopicIntent
@@ -94,20 +95,15 @@ class Foundation:
 
 
 def _build_foundation_user_msg(topic: str, intent: str, sources: list[RawSource]) -> str:
-    lines = [f"TOPIC: {topic}", f"LEARNER INTENT: {intent}", "", "READING LIST:"]
+    lines = [f"TOPIC: {topic}", f"LEARNER INTENT: {intent}", "", "<<<SOURCES>>>"]
     for s in sources:
         lines.append(f"- [{s.tier}] {s.title} ({s.url}) — {s.summary}".rstrip(" —"))
+    lines.append("<<<END_SOURCES>>>")
     return "\n".join(lines)
 
 
 def _parse_foundation_json(text: str) -> Foundation:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-        cleaned = cleaned.strip()
-    data = json.loads(cleaned)
+    data = json.loads(extract_json(text))
     return Foundation(
         overview=str(data.get("overview", "")),
         key_concepts=list(data.get("key_concepts", [])),

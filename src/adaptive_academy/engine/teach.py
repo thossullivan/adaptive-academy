@@ -11,19 +11,12 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import TEACH
 from adaptive_academy.models import Assessment, Concept, Track
 
-
-def _strip_fences(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-    return cleaned.strip()
 
 
 def _as_float(v, default: float) -> float:
@@ -43,7 +36,7 @@ class TeachResult:
 
 
 def parse_teaching_json(text: str) -> tuple[float, str, list[str], list[str]]:
-    d = json.loads(_strip_fences(text))
+    d = json.loads(extract_json(text))
     return (
         max(0.0, min(1.0, _as_float(d.get("score"), 0.0))),
         str(d.get("feedback", "")).strip(),
@@ -54,7 +47,8 @@ def parse_teaching_json(text: str) -> tuple[float, str, list[str], list[str]]:
 
 def grade_teaching(session: Session, concept: Concept, explanation: str, *, llm: LLMClient) -> TeachResult:
     """Grade a public explanation under a teaching expectancy; persist as a teach assessment."""
-    user = f"CONCEPT: {concept.name}\n\nLEARNER'S PUBLIC EXPLANATION:\n{explanation or '(empty)'}"
+    user = (f"CONCEPT: {concept.name}\n\n<<<TEACHING>>>\n"
+            f"{explanation or '(empty)'}\n<<<END_TEACHING>>>")
     track = session.get(Track, concept.track_id)
     trace_prompt(session, TEACH, topic_id=track.topic_id if track else None)
     resp = llm.complete(system=TEACH, messages=[{"role": "user", "content": user}], tools=[])

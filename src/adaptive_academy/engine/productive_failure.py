@@ -12,19 +12,12 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import PF_CONSOLIDATE, PF_GENERATE
 from adaptive_academy.models import Assessment, Concept, TopicFoundation, Track
 
-
-def _strip_fences(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```", 2)[1]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[len("json"):]
-    return cleaned.strip()
 
 
 def _as_float(v, default: float) -> float:
@@ -54,12 +47,12 @@ def build_generate_prompt(concept_name: str, foundation: TopicFoundation | None)
 
 
 def parse_problem_json(text: str) -> str:
-    d = json.loads(_strip_fences(text))
+    d = json.loads(extract_json(text))
     return str(d.get("problem", "")).strip()
 
 
 def parse_consolidation_json(text: str) -> tuple[str, str, float]:
-    d = json.loads(_strip_fences(text))
+    d = json.loads(extract_json(text))
     return (
         str(d.get("canonical", "")).strip(),
         str(d.get("feedback", "")).strip(),
@@ -83,7 +76,8 @@ def consolidate(
     session: Session, concept: Concept, problem: str, attempt: str, *, llm: LLMClient
 ) -> ConsolidateResult:
     """Grade the generative attempt and teach the canonical approach; persist the record."""
-    user = f"CONCEPT: {concept.name}\n\nPROBLEM:\n{problem}\n\nLEARNER ATTEMPT:\n{attempt or '(none)'}"
+    user = (f"CONCEPT: {concept.name}\n\n<<<PROBLEM>>>\n{problem}\n<<<END_PROBLEM>>>\n\n"
+            f"<<<ATTEMPT>>>\n{attempt or '(none)'}\n<<<END_ATTEMPT>>>")
     trace_prompt(session, PF_CONSOLIDATE, topic_id=_topic_id_for(session, concept))
     resp = llm.complete(
         system=PF_CONSOLIDATE, messages=[{"role": "user", "content": user}], tools=[]
