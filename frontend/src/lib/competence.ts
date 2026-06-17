@@ -85,6 +85,121 @@ export function sigColor(state: SignalState): string {
   return state === 'lit' ? 'var(--success)' : state === 'bad' ? 'var(--danger)' : 'var(--faint)';
 }
 
+// --- Why this verdict? -------------------------------------------------------
+// A faithful, plain-language account of which signals drove a concept's verdict,
+// mirroring conceptVerdict() exactly so the explanation can never drift from the rule.
+
+export type SignalRole = 'support' | 'fault' | 'gap'; // corroborating / failing / missing
+
+export interface SignalDetail {
+  key: keyof ConceptSignals;
+  glyph: string;
+  label: string;
+  role: SignalRole;
+  note: string;
+}
+
+export interface VerdictRationale {
+  verdict: Verdict;
+  headline: string; // the one deciding sentence
+  signals: SignalDetail[]; // all five, in fixed order
+  nextStep: string | null; // what would move it up; null when already solid
+}
+
+const GLYPH: Record<keyof ConceptSignals, string> = {
+  grade: '◆', decay: '↺', calibration: '◷', taught: '◳', shipped: '⚒'
+};
+const LABEL: Record<keyof ConceptSignals, string> = {
+  grade: 'grade', decay: 'decay', calibration: 'calibration', taught: 'teaching', shipped: 'shipping'
+};
+
+function stateRole(state: SignalState): SignalRole {
+  return state === 'lit' ? 'support' : state === 'bad' ? 'fault' : 'gap';
+}
+
+const NOTE: Record<keyof ConceptSignals, Record<string, string>> = {
+  grade: {
+    high: 'Graded high — a strong mechanism-anchored read.',
+    medium: 'Graded medium — partial command.',
+    low: 'Graded low — the latest read is weak.',
+    unknown: 'Not graded yet.'
+  },
+  decay: {
+    lit: 'Held cold on delayed recall.',
+    bad: 'Slipped on delayed recall.',
+    unlit: 'Not retested cold yet.'
+  },
+  calibration: {
+    lit: 'Felt confidence matched reality.',
+    bad: "Felt confidence didn't match reality.",
+    unlit: 'Not calibrated yet.'
+  },
+  taught: {
+    lit: 'Explained it to an audience.',
+    bad: 'Teaching fell short.',
+    unlit: 'Not taught yet.'
+  },
+  shipped: {
+    lit: 'Shipped an artifact that meets its criteria.',
+    bad: 'Shipped artifact fell short of its criteria.',
+    unlit: 'Nothing shipped yet.'
+  }
+};
+
+export function roleColor(role: SignalRole): string {
+  return role === 'support' ? 'var(--success)' : role === 'fault' ? 'var(--danger)' : 'var(--faint)';
+}
+
+export function verdictRationale(s: ConceptSignals): VerdictRationale {
+  const verdict = conceptVerdict(s);
+  const gradeRole: SignalRole =
+    s.grade === 'unknown' ? 'gap' : s.grade === 'low' ? 'fault' : 'support';
+
+  const signals: SignalDetail[] = [
+    { key: 'grade', glyph: GLYPH.grade, label: LABEL.grade, role: gradeRole,
+      note: NOTE.grade[s.grade] ?? NOTE.grade.unknown },
+    ...(['decay', 'calibration', 'taught', 'shipped'] as const).map((k) => ({
+      key: k, glyph: GLYPH[k], label: LABEL[k], role: stateRole(s[k]),
+      note: NOTE[k][s[k]]
+    }))
+  ];
+
+  // Name the lit corroborators (everything but grade) and the active faults.
+  const litLabels = (['decay', 'calibration', 'taught', 'shipped'] as const)
+    .filter((k) => s[k] === 'lit').map((k) => LABEL[k]);
+  const faults: string[] = [];
+  if (s.grade === 'low') faults.push('the grade is low');
+  if (s.decay === 'bad') faults.push('decay slipped');
+  if (s.calibration === 'bad') faults.push('calibration was off');
+  if (s.taught === 'bad') faults.push('teaching fell short');
+  if (s.shipped === 'bad') faults.push('the shipped artifact fell short');
+
+  let headline: string;
+  let nextStep: string | null;
+  switch (verdict) {
+    case 'untested':
+      headline = 'No signals yet — this concept is untested.';
+      nextStep = 'Get a first read: answer a probe or take an assessment.';
+      break;
+    case 'shaky':
+      headline = `Shaky — ${faults.join('; ')}.`;
+      nextStep = 'Shore it up: revisit the concept, then re-grade or retest it cold.';
+      break;
+    case 'solid':
+      headline = `Solid — graded high and corroborated by ${litLabels.join(' & ')}.`;
+      nextStep = null;
+      break;
+    case 'verified':
+      headline = `Verified — graded ${s.grade} and corroborated by ${litLabels.join(' & ')}.`;
+      nextStep = 'Push to solid: hold it cold on delayed recall, teach it, or ship it.';
+      break;
+    default: // unverified
+      headline = `Unverified — graded ${s.grade}, but nothing corroborates it yet.`;
+      nextStep = 'Corroborate it: pass a delayed recall, teach it, or ship an artifact.';
+  }
+  return { verdict, headline, signals, nextStep };
+}
+
 /** Fetch + triangulate every concept at once (used by the Constellation). */
 export async function conceptSignalsMap(
   conceptIds: number[]
