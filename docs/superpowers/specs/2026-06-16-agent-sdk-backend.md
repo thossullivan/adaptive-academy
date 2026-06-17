@@ -60,7 +60,11 @@ live dogfooding drained API credits; the web-search fan-out is credit-hungry.
   research and tutoring rarely overlap) but real. The clean fix is to also route the
   Researcher through the SDK (so the key can be dropped process-wide) — a follow-up.
 - **Not ported:** web-search fan-out (Researcher) — needs the SDK's `WebSearch` tool; and
-  native tool-use (Tutor reveal_solution) — currently bridged to the API key.
+  native tool-use (Tutor reveal_solution) — currently bridged to the API key. A
+  pure-subscription user with **no key set** gets a legible `AgentSDKError` → 502 on Tutor
+  tool-turns (not a 500), telling them to set a key or use assess/curriculum/anchors.
+- **Error legibility:** `AgentSDKError` (auth/usage/subscription failures) is registered with
+  the app's exception handlers → **502**, matching the API-key backend's legible-error contract.
 - **ToS:** personal / your-own-subscription use is the supported case; *hosting* a service
   that brokers other users' claude.ai logins needs API keys/approval. Open-source BYO-plan
   local use is fine.
