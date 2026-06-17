@@ -17,7 +17,8 @@
           {
             label: 'Daily',
             items: [
-              { label: 'Today', icon: 'today', href: `/topics/${tid}/today`, match: (p) => p.endsWith('/today') }
+              { label: 'Today', icon: 'today', href: `/topics/${tid}/today`, match: (p) => p.endsWith('/today') },
+              { label: 'Wayfinder', icon: 'wayfinder', href: `/topics/${tid}/wayfinder`, match: (p) => p.endsWith('/wayfinder') }
             ]
           },
           {
