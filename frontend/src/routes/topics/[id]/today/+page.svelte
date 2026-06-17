@@ -5,7 +5,7 @@
   import type { Concept, Item } from '$lib/types';
   import { LEVEL_FILL, LEVEL_LABEL, levelColor } from '$lib/utils';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge } from '$lib/ui';
+  import { Card, Button, Badge, Markdown } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let loading = $state(true);
@@ -98,10 +98,12 @@
               <p class="mt-1 text-sm text-muted">Your next steps on the track:</p>
               <ul class="mt-2 flex flex-col gap-1.5">
                 {#each nextItems as { item, phase }}
-                  <li class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3 py-2 text-sm">
-                    <span class="font-mono text-xs text-faint">{typeGlyph[item.type] ?? '·'}</span>
-                    <span class="flex-1 text-fg-dim">{item.text}</span>
-                    <span class="eyebrow !text-[0.55rem]">{phase}</span>
+                  <li class="rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3 py-2">
+                    <div class="flex items-start gap-2">
+                      <span class="mt-0.5 shrink-0 font-mono text-xs text-faint">{typeGlyph[item.type] ?? '·'}</span>
+                      <Markdown text={item.text} class="min-w-0 flex-1 text-sm text-fg-dim" />
+                    </div>
+                    <div class="eyebrow mt-1 pl-5 !text-[0.55rem]">{phase}</div>
                   </li>
                 {/each}
               </ul>

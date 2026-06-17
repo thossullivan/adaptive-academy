@@ -3,7 +3,7 @@
   import { api } from '$lib/api';
   import type { Story } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge } from '$lib/ui';
+  import { Card, Button, Badge, Markdown } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let story = $state<Story | null>(null);
@@ -51,7 +51,7 @@
         <h2 class="mt-2 font-display text-3xl leading-tight text-fg">{story.headline}</h2>
         <div class="mt-5 flex flex-col gap-4">
           {#each story.narrative as para}
-            <p class="text-[0.95rem] leading-relaxed text-fg-dim">{para}</p>
+            <p class="text-[0.95rem] leading-relaxed text-fg-dim"><Markdown text={para} block /></p>
           {/each}
         </div>
       </Card>
@@ -61,7 +61,7 @@
           {#each story.highlights as h}
             <div class="flex items-start gap-2.5 rounded-[var(--radius-md)] border border-border bg-surface-2 p-3">
               <span class="mt-0.5 text-accent">→</span>
-              <span class="text-sm text-fg-dim">{h}</span>
+              <Markdown text={h} class="text-sm text-fg-dim" />
             </div>
           {/each}
         </div>

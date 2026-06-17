@@ -5,7 +5,7 @@
   import type { Curriculum, Assessment } from '$lib/types';
   import { pct } from '$lib/utils';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Field, Select, Textarea } from '$lib/ui';
+  import { Card, Button, Badge, Field, Select, Textarea, Markdown } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let cur = $state<Curriculum | null>(null);
@@ -170,13 +170,13 @@
               </div>
             {/if}
 
-            <p class="mt-3 text-sm leading-relaxed text-fg-dim">{result.verdict}</p>
+            <p class="mt-3 text-sm leading-relaxed text-fg-dim"><Markdown text={result.verdict} block /></p>
 
             {#if result.gaps.length}
               <div class="mt-4">
                 <span class="eyebrow">gaps</span>
                 <ul class="mt-1.5 flex flex-col gap-1">
-                  {#each result.gaps as g}<li class="flex items-start gap-2 text-sm text-muted"><span class="text-danger">▸</span>{g}</li>{/each}
+                  {#each result.gaps as g}<li class="flex items-start gap-2 text-sm text-muted"><span class="shrink-0 text-danger">▸</span><Markdown text={g} class="min-w-0" /></li>{/each}
                 </ul>
                 <Button variant="outline" size="sm" class="mt-3" onclick={remediate} disabled={remediating}>
                   {remediating ? 'Remediating…' : 'Remediate these gaps'}

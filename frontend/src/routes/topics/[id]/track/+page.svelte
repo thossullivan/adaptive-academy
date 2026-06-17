@@ -4,7 +4,7 @@
   import { api } from '$lib/api';
   import type { Curriculum } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge } from '$lib/ui';
+  import { Card, Button, Badge, Markdown } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let cur = $state<Curriculum | null>(null);
@@ -108,7 +108,7 @@
                   {/if}
                 </button>
                 <span class="shrink-0 font-mono text-xs text-faint" title={it.type}>{typeGlyph[it.type] ?? '·'}</span>
-                <span class="flex-1 text-sm {it.status === 'done' ? 'text-faint line-through' : 'text-fg-dim'}">{it.text}</span>
+                <Markdown text={it.text} class="min-w-0 flex-1 text-sm {it.status === 'done' ? 'text-faint line-through' : 'text-fg-dim'}" />
                 {#if it.is_remediation}<Badge tone="warn" mono>remediation</Badge>{/if}
               </li>
             {/each}
@@ -120,11 +120,11 @@
                 <span class="text-accent">🎯</span>
                 <span class="eyebrow !text-accent">Ship · {p.deliverable.kind}</span>
               </div>
-              <p class="mt-1.5 text-sm text-fg">{p.deliverable.text}</p>
+              <p class="mt-1.5 text-sm text-fg"><Markdown text={p.deliverable.text} /></p>
               {#if p.deliverable.acceptance_criteria.length}
                 <ul class="mt-2 flex flex-col gap-1">
                   {#each p.deliverable.acceptance_criteria as c}
-                    <li class="flex items-start gap-2 text-xs text-muted"><span class="text-accent-dim">▸</span>{c}</li>
+                    <li class="flex items-start gap-2 text-xs text-muted"><span class="shrink-0 text-accent-dim">▸</span><Markdown text={c} /></li>
                   {/each}
                 </ul>
               {/if}
@@ -141,7 +141,7 @@
                 <span class="eyebrow !text-info">{s.kind}</span>
               </div>
               <h3 class="mt-1 text-base text-fg">{s.title}</h3>
-              <p class="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-muted">{s.body}</p>
+              <p class="mt-1.5 text-sm leading-relaxed text-muted"><Markdown text={s.body} block /></p>
             </Card>
           {/each}
         </div>

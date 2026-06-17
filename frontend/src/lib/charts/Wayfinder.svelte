@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Badge } from '$lib/ui';
+  import { Badge, Markdown } from '$lib/ui';
 
   type WayPhase = {
     id: number;
@@ -34,6 +34,9 @@
   const DOTTED = 'background: repeating-linear-gradient(var(--border-strong) 0 3px, transparent 3px 7px)';
   // A leg of the course is charted (solid) once the phase above it is traversed.
   const leg = (s: string) => (s === 'traversed' ? SOLID : DOTTED);
+
+  // Strip light inline markdown (**bold**, *em*, `code`) for clean single-line display.
+  const plain = (t: string) => t.replace(/[*`_]/g, '').trim();
 </script>
 
 <div class="relative overflow-hidden rounded-[var(--radius-lg)] border border-border bg-[radial-gradient(120%_90%_at_50%_110%,color-mix(in_oklab,var(--accent)_9%,transparent),transparent_55%)] px-5 py-8 md:px-8">
@@ -82,7 +85,7 @@
         </div>
 
         <!-- waypoint card -->
-        <div class="flex-1 pb-8">
+        <div class="min-w-0 flex-1 pb-8">
           <div class="rounded-[var(--radius-md)] border p-4 transition-colors {p.status === 'current' ? 'border-[color-mix(in_oklab,var(--accent)_45%,transparent)] bg-accent-wash' : p.status === 'ahead' ? 'border-border bg-surface/60' : 'border-border bg-surface'}">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
@@ -106,14 +109,14 @@
             {#if p.status === 'current' && nextItem}
               <a href="/topics/{topicId}/tutor" class="mt-3 flex items-center gap-2 rounded-[var(--radius-sm)] border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-surface-2 px-3 py-2 text-sm transition-colors hover:border-accent">
                 <span class="shrink-0 text-accent">↓ steer toward</span>
-                <span class="truncate text-fg-dim">{nextItem.text}</span>
+                <span class="min-w-0 flex-1 truncate text-fg-dim">{plain(nextItem.text)}</span>
               </a>
             {/if}
 
             {#if p.deliverable}
               <div class="mt-3 flex items-start gap-2 text-xs">
                 <span class="shrink-0 text-accent-dim">⚓ landfall</span>
-                <span class="text-muted">{p.deliverable.text}</span>
+                <Markdown text={p.deliverable.text} class="min-w-0 text-muted" />
               </div>
             {/if}
 
