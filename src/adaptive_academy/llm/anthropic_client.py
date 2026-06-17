@@ -10,10 +10,11 @@ from adaptive_academy.llm.types import LLMResponse, ToolCall
 class AnthropicLLMClient:
     """Sync, non-streaming Anthropic client implementing the LLMClient protocol."""
 
-    def __init__(self, role: str = "reasoning", max_tokens: int = 8192):
-        # 8192, not 1024: structured outputs (rubrics, curriculum, anchors) overflowed
-        # the old ceiling and truncated mid-JSON. Billing is per output token generated,
-        # not per max_tokens, so a high ceiling is free insurance against truncation.
+    def __init__(self, role: str = "reasoning", max_tokens: int = 16384):
+        # 16384, not 8192/1024: structured outputs (esp. a full curriculum track) overflowed
+        # the old ceilings and truncated mid-JSON → "malformed JSON" 502s. The curriculum prompt
+        # also bounds scope (6-12 phases), but billing is per output token generated, not per
+        # max_tokens, so a high ceiling is free insurance against truncation.
         self._client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=3)
         self._model = get_model(role)
         self._max_tokens = max_tokens

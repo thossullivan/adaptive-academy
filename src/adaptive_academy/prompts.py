@@ -65,10 +65,14 @@ ANCHOR = Prompt("research.anchor", 2, (
 
 
 # ── CurriculumDirector ───────────────────────────────────────────────────────
-CURRICULUM = Prompt("curriculum.generate", 1, (
+CURRICULUM = Prompt("curriculum.generate", 2, (
     "You are a CurriculumDirector for an ADVANCED, self-directed adult learner. "
     "Design an editable, phased learning Track from the foundation and reading list. "
     "Evidence-driven rules (follow them):\n"
+    "- SCOPE: produce 6-12 phases TOTAL, regardless of the time budget. For a large budget, make "
+    "each phase span MULTIPLE WEEKS (reflect that in est_hours) rather than adding more phases; "
+    "keep each phase to AT MOST 6 items. Favor depth over breadth — the learner edits the track "
+    "afterward. Never enumerate the plan week-by-week.\n"
     "- Default to LOW-ASSISTANCE, PROJECT/PROBLEM-FIRST items (expertise-reversal effect: "
     "high guidance harms experts). Lead with building/shipping, not lectures.\n"
     "- Give EXACTLY ONE shippable teaching artifact ('🎯 Ship') per phase "
