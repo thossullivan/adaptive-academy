@@ -24,7 +24,7 @@ def test_decayed_wind_is_tz_robust():
 
 
 def test_classify_states():
-    assert classify(0.0, None) == "becalmed"        # never sailed
+    assert classify(0.0, None) == "unsailed"         # never sailed (distinct from lapsed)
     assert classify(1.0, 12.0) == "becalmed"         # gone 12 days
     assert classify(1.0, 5.0) == "fading"            # gone 5 days
     assert classify(2.5, 0.0) == "cruising"          # rich + recent
@@ -69,22 +69,24 @@ def test_topic_wind_counts_only_qualifying_assessments(session):
     assert ws.days_since == 0.0
 
 
-def test_topic_wind_becalmed_when_no_assessments(session):
+def test_topic_wind_unsailed_when_no_assessments(session):
     t, _ = _topic_with_concept(session, "Quiet topic")
     ws = topic_wind(session, t.id, now=NOW)
-    assert ws.state == "becalmed" and ws.value == 0.0 and ws.last_sailed is None
+    assert ws.state == "unsailed" and ws.value == 0.0 and ws.last_sailed is None
 
 
 def test_topic_wind_dedups_same_commit_ship(session):
-    # An artifact ship writes one artifact_review per concept in the SAME commit (identical
-    # timestamp). That's one real action — one gust, not N.
+    # An artifact ship writes one artifact_review per concept in one commit. The rows are
+    # constructed in a loop, so default_factory=_now fires per row -> timestamps differ by
+    # microseconds (NOT identical). That's still ONE real action -> one gust, not N. Use
+    # realistic sub-second-apart timestamps so this actually guards the dedup.
     t, c = _topic_with_concept(session, "Ship day")
     c2 = Concept(track_id=c.track_id, name="C2")
     session.add(c2)
     session.commit()
     session.refresh(c2)
     _assess(session, c.id, "artifact_review", NOW)
-    _assess(session, c2.id, "artifact_review", NOW)
+    _assess(session, c2.id, "artifact_review", NOW + timedelta(microseconds=37))
     ws = topic_wind(session, t.id, now=NOW)
     assert round(ws.value, 3) == 1.0                   # collapsed to a single action
 
@@ -131,7 +133,26 @@ def test_comeback_move_falls_back_without_track(session):
     t = Topic(title="No track")
     session.add(t)
     session.commit()
-    session.refresh(t)  # no track/assessments -> becalmed
+    session.refresh(t)  # no track/assessments -> unsailed
     move = comeback_move(session, t.id, now=NOW)
     assert move is not None and move.kind == "self_explain"
     assert move.href == f"/topics/{t.id}/assess"
+
+
+def test_comeback_move_fires_first_launch_for_unsailed_with_track(session):
+    # A never-sailed topic that already has a curriculum gets a first-launch nudge toward the
+    # next undone item (not suppressed, not the self-explain fallback).
+    t, c = _topic_with_concept(session, "Charted but unsailed")
+    phase = Phase(track_id=c.track_id, title="P1", position=0)
+    session.add(phase)
+    session.commit()
+    session.refresh(phase)
+    session.add(Item(phase_id=phase.id, text="read the attention paper", type="read",
+                     position=0, status="todo"))
+    session.commit()
+    ws = topic_wind(session, t.id, now=NOW)
+    assert ws.state == "unsailed"
+    move = comeback_move(session, t.id, now=NOW)
+    assert move is not None
+    assert move.label == "read the attention paper"
+    assert move.href == f"/topics/{t.id}/track"
