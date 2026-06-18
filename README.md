@@ -89,6 +89,7 @@ cd frontend && npx vitest run   # frontend (vitest)
 
 ## Design & evidence
 
+- Overview (architecture + goal): [`docs/OVERVIEW.md`](docs/OVERVIEW.md)
 - Design spec: [`docs/superpowers/specs/2026-06-15-adaptive-academy-redesign.md`](docs/superpowers/specs/2026-06-15-adaptive-academy-redesign.md)
 - Learning-science evidence base (cited): [`docs/research/2026-06-15-learning-science-evidence.md`](docs/research/2026-06-15-learning-science-evidence.md)
 
