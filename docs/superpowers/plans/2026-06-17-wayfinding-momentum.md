@@ -1,5 +1,20 @@
 # Wayfinding Momentum ("The Voyage") Implementation Plan
 
+> **STATUS: IMPLEMENTED + shipped to main (2026-06-17).** All 8 tasks done across two slices.
+>
+> **Source-table reconciliation (the pre-Task-1 reality-check earned its keep):** this plan derives
+> wind from the `AgentEvent` log, but a live-schema check found the five real learning actions are
+> NOT uniformly there — **teach-backs, productive-failure attempts, and decay recalls persist as
+> `Assessment` rows and emit no AgentEvent** (only `assess:graded` and `artifact:reviewed` are
+> AgentEvents). The shipped engine therefore derives wind from **`Assessment.created_at`** (the
+> unified record of completed generative work), reading only the timestamp + the concept→track→topic
+> mapping, never the score/verdict (preserving competence independence). `QUALIFYING_KINDS` became
+> Assessment.kinds `{self_explanation, calibration, source_quiz, recall, teach, productive_failure,
+> artifact_review}`; same-commit artifact-ship rows collapse to one action; the engine is tz-robust.
+> Tasks 1–2 below are described against AgentEvent for history; read the shipped
+> `engine/momentum.py` + `tests/test_momentum.py` for the actual implementation. Tasks 3–8 shipped
+> as written.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a forgiving, game-like "wind/momentum" persistence layer — per-voyage wind derived from the event log, a cross-topic Fleet view, a sea-state Wayfinder, and an anti-guilt comeback card — that models whether the learner keeps going, kept strictly independent of competence verdicts.
