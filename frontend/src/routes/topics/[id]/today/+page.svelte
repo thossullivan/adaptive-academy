@@ -2,10 +2,10 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api, conceptLevels } from '$lib/api';
-  import type { Concept, Item } from '$lib/types';
+  import type { Concept, Item, WindState, Comeback } from '$lib/types';
   import { LEVEL_FILL, LEVEL_LABEL, levelColor } from '$lib/utils';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Markdown } from '$lib/ui';
+  import { Card, Button, Badge, Markdown, ComebackCard } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let loading = $state(true);
@@ -15,6 +15,8 @@
   let weakest = $state<Concept | null>(null);
   let weakestLevel = $state('unknown');
   let allDone = $state(false);
+  let wind = $state<WindState | null>(null);
+  let comeback = $state<Comeback | null>(null);
 
   onMount(async () => {
     let concepts: Concept[] = [];
@@ -46,6 +48,8 @@
     } catch {
       decayCount = 0;
     }
+    wind = await api.getWind(topicId).catch(() => null);
+    comeback = await api.getComeback(topicId).catch(() => null);
 
     // Shakiest load-bearing concept (unmeasured counts as a priority to probe).
     if (concepts.length) {
@@ -63,6 +67,9 @@
 </script>
 
 <Page eyebrow="Today's session" title="What to do right now" lead="A focused loop assembled from where you actually are — warm up, build, probe, teach back." width="normal">
+  {#if wind && comeback}
+    <div class="mb-5"><ComebackCard {wind} {comeback} /></div>
+  {/if}
   {#if loading}
     <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">composing your session…</span></div>
   {:else}
