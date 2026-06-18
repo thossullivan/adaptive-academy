@@ -92,3 +92,21 @@ export interface VaultExportAllResult {
   topics: number;
   written: string[];
 }
+
+export interface WindState {
+  topic_id: number;
+  topic_title: string;
+  value: number;
+  state: string;
+  last_sailed: string | null;
+  days_since: number | null;
+}
+export interface ComebackMove {
+  kind: string;
+  label: string;
+  href: string;
+  minutes: number;
+}
+export interface Comeback {
+  move: ComebackMove | null;
+}
