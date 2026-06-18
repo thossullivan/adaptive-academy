@@ -358,6 +358,7 @@ class WindStateOut(BaseModel):
     state: str
     last_sailed: Optional[str] = None
     days_since: Optional[float] = None
+    progress: float = 0.0  # distance: fraction of curriculum done (orthogonal to wind)
 
 
 class ComebackMoveOut(BaseModel):
