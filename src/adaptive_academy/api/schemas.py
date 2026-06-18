@@ -349,3 +349,23 @@ class VaultStatusOut(BaseModel):
 class VaultExportAllOut(BaseModel):
     topics: int
     written: list[str] = []
+
+
+class WindStateOut(BaseModel):
+    topic_id: int
+    topic_title: str
+    value: float
+    state: str
+    last_sailed: Optional[str] = None
+    days_since: Optional[float] = None
+
+
+class ComebackMoveOut(BaseModel):
+    kind: str
+    label: str
+    href: str
+    minutes: int
+
+
+class ComebackOut(BaseModel):
+    move: Optional[ComebackMoveOut] = None
