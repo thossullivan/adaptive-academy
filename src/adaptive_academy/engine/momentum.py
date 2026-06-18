@@ -60,7 +60,9 @@ def decayed_wind(event_times: list[datetime], now: datetime) -> float:
 
 
 def classify(value: float, days_since: float | None) -> str:
-    if days_since is None or days_since >= BECALMED_DAYS:
+    if days_since is None:
+        return "unsailed"  # never had a learning action — distinct from a real lapse
+    if days_since >= BECALMED_DAYS:
         return "becalmed"
     if days_since >= FADING_DAYS:
         return "fading"
@@ -69,7 +71,9 @@ def classify(value: float, days_since: float | None) -> str:
     return "steady"
 
 
-_ATTENTION_ORDER = {"becalmed": 0, "fading": 1, "steady": 2, "cruising": 3}
+# Attention-first: lapsed voyages demand wind; never-sailed ones sit at the bottom (parked, not
+# at-risk), so the Fleet surfaces real abandonment risk above topics that simply haven't launched.
+_ATTENTION_ORDER = {"becalmed": 0, "fading": 1, "steady": 2, "cruising": 3, "unsailed": 4}
 
 
 @dataclass
@@ -101,7 +105,16 @@ def _qualifying_times(session: Session, topic_id: int) -> set[datetime]:
         return set()
     rows = session.exec(
         select(Assessment).where(Assessment.concept_id.in_(concept_ids))).all()
-    return {a.created_at for a in rows if a.kind in QUALIFYING_KINDS}
+    # Round to the whole second before deduping: an artifact ship writes one row per concept in a
+    # loop, so default_factory=_now gives them sub-second-apart timestamps. Without rounding the
+    # set keeps them all and one ship reads as N gusts. Two *deliberate* human actions in the same
+    # literal second is implausible (each grade is an LLM round-trip), so this only collapses
+    # same-commit bursts.
+    return {
+        _naive_utc(a.created_at).replace(microsecond=0)
+        for a in rows
+        if a.kind in QUALIFYING_KINDS
+    }
 
 
 def topic_wind(session: Session, topic_id: int, *, now: datetime | None = None) -> WindState:
@@ -141,7 +154,7 @@ def comeback_move(
     comeback state without any caller changing. Returns None when the voyage is healthy.
     """
     ws = topic_wind(session, topic_id, now=now)
-    if ws.state not in ("fading", "becalmed"):
+    if ws.state not in ("fading", "becalmed", "unsailed"):
         return None
     track = session.exec(select(Track).where(Track.topic_id == topic_id)).first()
     if track is not None:
