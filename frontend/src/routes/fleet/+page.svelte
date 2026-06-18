@@ -48,12 +48,13 @@
         <div class="eyebrow">North Star</div>
       </div>
       {#each fleet as w, i (w.topic_id)}
-        <!-- Even horizontal spread (no colliding hash); height = momentum; parked voyages stay
-             quiet at the harbor floor and only reveal their name on hover. -->
+        <!-- Even horizontal spread (no colliding hash). Height = progress toward the North Star;
+             liveliness (opacity) = momentum — so a far-along-but-stalled voyage sits high yet dim.
+             Parked voyages stay quiet at the harbor floor and reveal their name only on hover. -->
         <a
           href={`/topics/${w.topic_id}/wayfinder`}
           class="group absolute flex -translate-x-1/2 flex-col items-center transition-transform hover:z-10 hover:scale-110"
-          style={`left:${8 + ((i + 0.5) / fleet.length) * 84}%; bottom:${10 + seaIntensity(w.state) * 60 + ((i % 3) - 1) * 4}%; opacity:${0.4 + seaIntensity(w.state) * 0.6}`}
+          style={`left:${8 + ((i + 0.5) / fleet.length) * 84}%; bottom:${8 + w.progress * 64 + ((i % 3) - 1) * 3}%; opacity:${0.4 + seaIntensity(w.state) * 0.6}`}
         >
           <span class="text-xl">⛵</span>
           <span
@@ -81,6 +82,14 @@
             <div class="flex items-center gap-3">
               <span class="text-lg" style:opacity={0.4 + seaIntensity(w.state) * 0.6}>⛵</span>
               <span class="flex-1 truncate text-sm text-fg-dim">{w.topic_title}</span>
+              {#if w.progress > 0}
+                <div class="hidden items-center gap-1.5 sm:flex" title="{Math.round(w.progress * 100)}% toward the North Star">
+                  <span class="h-1 w-14 overflow-hidden rounded-full bg-border">
+                    <span class="block h-full rounded-full bg-accent" style:width={`${Math.round(w.progress * 100)}%`}></span>
+                  </span>
+                  <span class="eyebrow text-faint">{Math.round(w.progress * 100)}%</span>
+                </div>
+              {/if}
               {#if w.days_since != null}
                 <span class="eyebrow text-faint">{Math.round(w.days_since)}d</span>
               {/if}

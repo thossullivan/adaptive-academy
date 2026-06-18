@@ -100,6 +100,7 @@ export interface WindState {
   state: string;
   last_sailed: string | null;
   days_since: number | null;
+  progress: number;
 }
 export interface ComebackMove {
   kind: string;
