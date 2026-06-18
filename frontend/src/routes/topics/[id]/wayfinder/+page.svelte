@@ -3,7 +3,8 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import { topics } from '$lib/topics.svelte';
-  import type { Curriculum } from '$lib/types';
+  import type { Curriculum, WindState } from '$lib/types';
+  import { seaIntensity, STATE_LABEL, STATE_COLOR } from '$lib/wind';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button } from '$lib/ui';
   import Wayfinder from '$lib/charts/Wayfinder.svelte';
@@ -11,6 +12,7 @@
   const topicId = Number($page.params.id);
   let loading = $state(true);
   let hasCurriculum = $state(false);
+  let wind = $state<WindState | null>(null);
   let goal = $state('');
   let reached = $state(false);
   let nextItem = $state<{ text: string; phaseTitle: string } | null>(null);
@@ -26,6 +28,7 @@
     // North Star = the topic's stated goal.
     const topic = topics.list.find((t) => t.id === topicId) ?? (await api.getTopic(topicId).catch(() => null));
     goal = topic?.intent?.goal ?? topic?.title ?? '';
+    wind = await api.getWind(topicId).catch(() => null);
 
     let cur: Curriculum;
     try {
@@ -93,8 +96,56 @@
       </div>
     </Card>
   {:else}
+    {#if wind}
+      <div class="mb-3 flex items-center gap-2">
+        <span class="eyebrow" style:color={STATE_COLOR[wind.state]}>⛵ {STATE_LABEL[wind.state]}</span>
+        {#if wind.days_since != null}<span class="eyebrow text-faint">· last sailed {Math.round(wind.days_since)}d ago</span>{/if}
+      </div>
+      <div class="sea pointer-events-none" style={`--swell:${seaIntensity(wind.state)}`} aria-hidden="true">
+        <div class="wave"></div>
+        <div class="wave wave2"></div>
+      </div>
+    {/if}
     <div class="rise">
       <Wayfinder {goal} phases={wayPhases} {nextItem} {reached} {topicId} />
     </div>
   {/if}
 </Page>
+
+<style>
+  /* Sea-state band: still and flat when becalmed (--swell 0), lively when cruising (--swell 1). */
+  .sea {
+    position: relative;
+    height: calc(8px + var(--swell) * 22px);
+    opacity: calc(0.25 + var(--swell) * 0.6);
+    margin-bottom: 1rem;
+    overflow: hidden;
+    border-radius: var(--radius-sm);
+  }
+  .wave {
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 18px,
+      color-mix(in oklab, var(--accent) 30%, transparent) 19px,
+      transparent 20px
+    );
+    animation: drift calc(6s - var(--swell) * 3s) linear infinite;
+  }
+  .wave2 {
+    opacity: 0.5;
+    animation-duration: calc(9s - var(--swell) * 3s);
+  }
+  @keyframes drift {
+    to {
+      transform: translateX(-40px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wave {
+      animation: none;
+    }
+  }
+</style>
