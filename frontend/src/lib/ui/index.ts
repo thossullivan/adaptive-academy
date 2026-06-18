@@ -10,3 +10,4 @@ export { default as Textarea } from './Textarea.svelte';
 export { default as Select } from './Select.svelte';
 export { default as Markdown } from './Markdown.svelte';
 export { default as SignalStrip } from './SignalStrip.svelte';
+export { default as ComebackCard } from './ComebackCard.svelte';
