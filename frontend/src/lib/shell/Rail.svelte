@@ -10,10 +10,16 @@
   type Nav = { label: string; icon: string; href: string; match: (p: string) => boolean };
   type Section = { label: string; items: Nav[] };
 
+  const voyages: Section = {
+    label: 'Voyages',
+    items: [{ label: 'Fleet', icon: 'fleet', href: '/fleet', match: (p) => p === '/fleet' }]
+  };
+
   const sections = $derived<Section[]>(
     tid == null
-      ? []
+      ? [voyages]
       : [
+          voyages,
           {
             label: 'Daily',
             items: [
