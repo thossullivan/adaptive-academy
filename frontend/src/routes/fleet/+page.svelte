@@ -10,6 +10,9 @@
   let loading = $state(true);
   let panorama = $state(true); // hero panorama vs. collapsed sea-tiles
 
+  // Never-sailed voyages sort last (API attention order); mark where that bucket begins.
+  const firstUnsailed = $derived(fleet.findIndex((w) => w.state === 'unsailed'));
+
   onMount(async () => {
     try {
       fleet = await api.getFleet();
@@ -62,7 +65,13 @@
   {:else}
     <!-- Collapsed sea-tiles: becalmed first (already sorted by the API) -->
     <div class="flex flex-col gap-2">
-      {#each fleet as w (w.topic_id)}
+      {#each fleet as w, i (w.topic_id)}
+        {#if i === firstUnsailed && i > 0}
+          <div class="mt-3 flex items-center gap-3 px-1">
+            <span class="eyebrow text-faint">Not yet sailed</span>
+            <span class="h-px flex-1 bg-border"></span>
+          </div>
+        {/if}
         <a href={`/topics/${w.topic_id}/wayfinder`} class="block">
           <Card pad class="transition-colors hover:border-accent">
             <div class="flex items-center gap-3">
