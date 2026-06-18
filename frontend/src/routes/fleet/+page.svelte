@@ -48,13 +48,17 @@
         <div class="eyebrow">North Star</div>
       </div>
       {#each fleet as w, i (w.topic_id)}
+        <!-- Even horizontal spread (no colliding hash); height = momentum; parked voyages stay
+             quiet at the harbor floor and only reveal their name on hover. -->
         <a
           href={`/topics/${w.topic_id}/wayfinder`}
-          class="absolute flex flex-col items-center transition-transform hover:scale-110"
-          style={`left:${6 + ((i * 37) % 80)}%; bottom:${10 + seaIntensity(w.state) * 62}%; opacity:${0.45 + seaIntensity(w.state) * 0.55}`}
+          class="group absolute flex -translate-x-1/2 flex-col items-center transition-transform hover:z-10 hover:scale-110"
+          style={`left:${8 + ((i + 0.5) / fleet.length) * 84}%; bottom:${10 + seaIntensity(w.state) * 60 + ((i % 3) - 1) * 4}%; opacity:${0.4 + seaIntensity(w.state) * 0.6}`}
         >
           <span class="text-xl">⛵</span>
-          <span class="eyebrow whitespace-nowrap" style:color={STATE_COLOR[w.state]}>{w.topic_title}</span>
+          <span
+            class="eyebrow max-w-[120px] truncate transition-opacity {w.state === 'unsailed' ? 'opacity-0 group-hover:opacity-100' : ''}"
+            style:color={STATE_COLOR[w.state]}>{w.topic_title}</span>
         </a>
       {/each}
       <div
