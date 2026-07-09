@@ -7,9 +7,15 @@
 
   let programs = $state<Program[]>([]);
   let loading = $state(true);
+  let error = $state('');
   onMount(async () => {
-    programs = await api.listPrograms();
-    loading = false;
+    try {
+      programs = await api.listPrograms();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      loading = false;
+    }
   });
 </script>
 
@@ -25,6 +31,8 @@
   {/snippet}
   {#if loading}
     <p class="text-sm text-muted">Loading…</p>
+  {:else if error}
+    <p class="text-sm text-danger">Couldn’t load programs: {error}</p>
   {:else if programs.length === 0}
     <Card>
       <p class="text-sm text-muted">
