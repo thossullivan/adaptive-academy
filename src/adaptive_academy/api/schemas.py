@@ -370,3 +370,90 @@ class ComebackMoveOut(BaseModel):
 
 class ComebackOut(BaseModel):
     move: Optional[ComebackMoveOut] = None
+
+
+class CreateProgramIn(BaseModel):
+    title: str
+    goal_statement: str = ""
+    target_depth: str = ""
+    prior_knowledge: str = ""
+    weekly_time_budget: str = ""
+    horizon: str = ""
+    focus_area: str = ""
+
+
+class ProgramOut(BaseModel):
+    id: int
+    title: str
+    goal_statement: str
+    status: str
+    milestone_count: int = 0
+
+
+class LinkOut(BaseModel):
+    id: int
+    status: str
+    proposed_title: str
+    why: str
+    sources: list[str] = []
+    topic_id: Optional[int] = None
+
+
+class MilestoneOut(BaseModel):
+    id: int
+    title: str
+    success_criteria: str
+    order_index: int
+    gate_status: str
+    depends_on: list[int] = []
+    override_reason: str = ""
+    links: list[LinkOut] = []
+
+
+class ProgramDetailOut(BaseModel):
+    program: ProgramOut
+    milestones: list[MilestoneOut]
+
+
+class MilestoneUpdateIn(BaseModel):
+    title: Optional[str] = None
+    success_criteria: Optional[str] = None
+    order_index: Optional[int] = None
+    depends_on: Optional[list[int]] = None
+
+
+class AcceptIn(BaseModel):
+    accepted_link_ids: list[int] = []
+    pruned_link_ids: list[int] = []
+
+
+class StartOut(BaseModel):
+    topic_id: int
+
+
+class OverrideIn(BaseModel):
+    reason: str
+
+
+class ConceptEvidenceOut(BaseModel):
+    concept_id: int
+    name: str
+    delayed_ok: bool
+    artifact_ok: bool
+    verdict: str
+
+
+class GateReportOut(BaseModel):
+    milestone_id: int
+    verdict: str
+    reason: str
+    concepts: list[ConceptEvidenceOut]
+
+
+class ProgramContextOut(BaseModel):
+    program_id: int
+    program_title: str
+    milestone_id: int
+    milestone_title: str
+    gate_status: str
+    unverified: list[str] = []

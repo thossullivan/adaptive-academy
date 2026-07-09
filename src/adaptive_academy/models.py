@@ -9,6 +9,9 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+now_utc = _now  # public alias for callers outside this module (e.g. API routes)
+
+
 class Topic(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
