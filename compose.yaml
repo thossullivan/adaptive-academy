@@ -2,13 +2,12 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     restart: unless-stopped
     environment:
       AA_DATABASE_URL: sqlite:////data/adaptive_academy.db
       AA_OBSIDIAN_VAULT_PATH: /vault
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      DEFAULT_MODEL: ${DEFAULT_MODEL:-}
     volumes:
       - aa-data:/data
       # iCloud-synced vault: files evicted by iCloud may read as empty in the

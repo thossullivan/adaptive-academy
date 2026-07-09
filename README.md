@@ -111,6 +111,11 @@ Notes:
 - Quote `OBSIDIAN_VAULT_PATH` in `.env` if the path contains spaces (e.g.
   `OBSIDIAN_VAULT_PATH="/Users/you/Library/Mobile Documents/..."`) —
   unquoted values with spaces break `just`'s dotenv parsing.
+- Building the image (or running `cd frontend && npm run build`) leaves a
+  `frontend/build/` directory on the host; host-dev `just api` will then
+  serve that increasingly stale SPA at http://localhost:8000/ instead of
+  a 404/API-only response. Run `rm -rf frontend/build` to restore pure-API
+  host dev (frontend dev via `npm run dev` stays on :5173 either way).
 
 ## Design & evidence
 
