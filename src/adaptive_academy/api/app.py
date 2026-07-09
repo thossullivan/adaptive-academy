@@ -1,10 +1,13 @@
 import json
 import os
+from pathlib import Path
 
 import anthropic
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+
+from adaptive_academy.settings import settings
 
 from adaptive_academy.api import (
     routes_conversations,
@@ -43,6 +46,25 @@ def drop_api_key_if_agent_sdk() -> None:
     startup hook (not import time) so merely importing this module never mutates the env."""
     if os.getenv("AA_LLM_BACKEND", "").lower() == "agent_sdk":
         os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def _mount_spa(app: FastAPI) -> None:
+    """Serve the built SvelteKit SPA when a build directory exists (i.e. in the
+    container image). Registered last so every /api route wins; unknown /api paths
+    stay 404 rather than returning index.html to a confused API client."""
+    dist = Path(settings.frontend_dist).resolve()
+    index = dist / "index.html"
+    if not index.is_file():
+        return
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def spa(full_path: str) -> FileResponse:
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        candidate = (dist / full_path).resolve()
+        if full_path and candidate.is_relative_to(dist) and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index)
 
 
 def create_app() -> FastAPI:
@@ -112,6 +134,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_deliverables.router)
     app.include_router(routes_vault.router)
     app.include_router(routes_momentum.router)
+    _mount_spa(app)
     return app
 
 
