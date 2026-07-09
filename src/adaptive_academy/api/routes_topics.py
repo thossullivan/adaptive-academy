@@ -16,6 +16,7 @@ from adaptive_academy.api.schemas import (
     IntentOut,
     ItemOut,
     PhaseOut,
+    ProgramContextOut,
     ResearchOut,
     ReviewSourcesIn,
     SidebarOut,
@@ -23,7 +24,9 @@ from adaptive_academy.api.schemas import (
     TopicOut,
     TrackOut,
 )
+from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
+from adaptive_academy.engine.gates import milestone_gate
 from adaptive_academy.engine.research import research_topic
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
@@ -43,7 +46,10 @@ from adaptive_academy.models import (
     Deliverable,
     Item,
     KnowledgeEstimate,
+    Milestone,
     Phase,
+    Program,
+    ProgramTopicLink,
     ReferenceAnchor,
     Sidebar,
     SourceDoc,
@@ -328,6 +334,7 @@ def generate_curriculum_route(
         raise HTTPException(400, "no accepted sources; review the reading list first")
     accepted.sort(key=lambda s: s.rank)
     result = generate_curriculum(session, topic, intent, foundation, accepted, llm=llm)
+    apply_program_aliases(session, topic_id)
     return _curriculum_out(session, result.track, result.events)
 
 
@@ -402,3 +409,20 @@ def import_curriculum(
     session.commit()
     session.refresh(track)
     return _curriculum_out(session, track)
+
+
+@router.get("/{topic_id}/program-context", response_model=ProgramContextOut)
+def get_program_context(topic_id: int, session: Session = Depends(get_session)):
+    link = session.exec(
+        select(ProgramTopicLink).where(ProgramTopicLink.topic_id == topic_id)
+    ).first()
+    if link is None:
+        raise HTTPException(404, "topic is not part of a program")
+    milestone = session.get(Milestone, link.milestone_id)
+    program = session.get(Program, milestone.program_id)
+    report = milestone_gate(session, milestone)
+    return ProgramContextOut(
+        program_id=program.id, program_title=program.title,
+        milestone_id=milestone.id, milestone_title=milestone.title,
+        gate_status=report.verdict,
+        unverified=[e.name for e in report.concepts if e.verdict != "verified"])
