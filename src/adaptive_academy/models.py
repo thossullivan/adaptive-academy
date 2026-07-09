@@ -75,12 +75,13 @@ class Message(SQLModel, table=True):
 class AgentEvent(SQLModel, table=True):
     """Observability trace: one row per engine/agent step.
 
-    Exactly one of conversation_id / topic_id is set (app-level invariant).
+    Exactly one of conversation_id / topic_id / program_id is set (app-level invariant).
     """
 
     id: Optional[int] = Field(default=None, primary_key=True)
     conversation_id: Optional[int] = Field(default=None, foreign_key="conversation.id")
     topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
+    program_id: Optional[int] = Field(default=None, foreign_key="program.id")
     kind: str
     detail: str = ""
     created_at: datetime = Field(default_factory=_now)
@@ -253,4 +254,65 @@ class RecallPrompt(SQLModel, table=True):
     status: str = "proposed"  # proposed | active | suspended
     due_at: datetime = Field(default_factory=_now)
     last_result: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class Program(SQLModel, table=True):
+    """A long-horizon learning program (spec 2026-07-09-program-layer §3)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    goal_statement: str = ""
+    status: str = "active"  # active | paused | done
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class ProgramIntent(SQLModel, table=True):
+    """Structured intake for the program-level research pass (mirrors TopicIntent)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: int = Field(foreign_key="program.id", unique=True)
+    target_depth: str = ""
+    prior_knowledge: str = ""
+    weekly_time_budget: str = ""
+    horizon: str = ""
+    focus_area: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class Milestone(SQLModel, table=True):
+    """An ordered stage of a Program; the unit gates attach to."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: int = Field(foreign_key="program.id")
+    title: str
+    success_criteria: str = ""
+    order_index: int = 0
+    gate_status: str = "open"  # open | passed | overridden
+    depends_on: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    override_reason: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class ProgramTopicLink(SQLModel, table=True):
+    """A Milestone's topic slot: proposed by research, stubbed on accept, started on demand."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    milestone_id: int = Field(foreign_key="milestone.id")
+    topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
+    status: str = "proposed"  # proposed | pruned | stub | started
+    proposed_title: str = ""
+    why: str = ""
+    sources: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+
+
+class ConceptAlias(SQLModel, table=True):
+    """Cross-topic concept identity inside a Program (knowledge carryover, spec §4.4)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: int = Field(foreign_key="program.id")
+    canonical_name: str
+    concept_id: int = Field(foreign_key="concept.id", unique=True)
     created_at: datetime = Field(default_factory=_now)
