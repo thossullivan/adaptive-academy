@@ -87,6 +87,31 @@ just test                       # backend (pytest)
 cd frontend && npx vitest run   # frontend (vitest)
 ```
 
+## Run in a container (Docker / OrbStack)
+
+Build and run the whole app (API + built frontend) as one service on
+http://localhost:8000, with the SQLite db in a named volume:
+
+```bash
+cp .env.example .env       # set ANTHROPIC_API_KEY and OBSIDIAN_VAULT_PATH
+just db-migrate-to-volume  # optional: copy an existing local db into the volume
+just up                    # build image + start (docker compose up -d --build)
+just logs                  # follow logs
+just down                  # stop
+```
+
+Notes:
+- The container uses API-key mode only (`ANTHROPIC_API_KEY`); the `agent_sdk`
+  subscription backend is host-only.
+- Data lives in the `adaptive-academy-data` volume; the repo's
+  `adaptive_academy.db` is untouched after migration. Avoid running host
+  and container against the same db file.
+- The Obsidian vault is bind-mounted read-write at `/vault`
+  (`AA_OBSIDIAN_VAULT_PATH=/vault`).
+- Quote `OBSIDIAN_VAULT_PATH` in `.env` if the path contains spaces (e.g.
+  `OBSIDIAN_VAULT_PATH="/Users/you/Library/Mobile Documents/..."`) —
+  unquoted values with spaces break `just`'s dotenv parsing.
+
 ## Design & evidence
 
 - Overview (architecture + goal): [`docs/OVERVIEW.md`](docs/OVERVIEW.md)
