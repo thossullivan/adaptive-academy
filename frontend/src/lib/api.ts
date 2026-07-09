@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, WindState, Comeback } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -136,7 +136,44 @@ export const api = {
     }).then(j<VaultExportAllResult>),
   getFleet: () => fetch('/api/fleet').then(j<WindState[]>),
   getWind: (topicId: number) => fetch(`/api/topics/${topicId}/wind`).then(j<WindState>),
-  getComeback: (topicId: number) => fetch(`/api/topics/${topicId}/comeback`).then(j<Comeback>)
+  getComeback: (topicId: number) => fetch(`/api/topics/${topicId}/comeback`).then(j<Comeback>),
+
+  listPrograms: () => fetch('/api/programs').then(j<Program[]>),
+  createProgram: (body: CreateProgramBody) =>
+    fetch('/api/programs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(j<Program>),
+  getProgram: (id: number) => fetch(`/api/programs/${id}`).then(j<ProgramDetail>),
+  programResearch: (id: number) =>
+    fetch(`/api/programs/${id}/research`, { method: 'POST' }).then(j<ProgramDetail>),
+  acceptProgram: (id: number, accepted_link_ids: number[], pruned_link_ids: number[]) =>
+    fetch(`/api/programs/${id}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ accepted_link_ids, pruned_link_ids })
+    }).then(j<ProgramDetail>),
+  startLink: (pid: number, linkId: number) =>
+    fetch(`/api/programs/${pid}/links/${linkId}/start`, { method: 'POST' }).then(j<{ topic_id: number }>),
+  milestoneGate: (pid: number, mid: number) =>
+    fetch(`/api/programs/${pid}/milestones/${mid}/gate`).then(j<GateReport>),
+  overrideGate: (pid: number, mid: number, reason: string) =>
+    fetch(`/api/programs/${pid}/milestones/${mid}/override`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason })
+    }).then(j<MilestoneInfo>),
+  updateMilestone: (pid: number, mid: number, body: Partial<Pick<MilestoneInfo, 'title' | 'success_criteria' | 'order_index' | 'depends_on'>>) =>
+    fetch(`/api/programs/${pid}/milestones/${mid}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(j<MilestoneInfo>),
+  programContext: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/program-context`).then((r) =>
+      r.status === 404 ? null : j<ProgramContext>(r)
+    )
 };
 
 /** Derive a per-concept knowledge level from its assessment history (latest estimate). */

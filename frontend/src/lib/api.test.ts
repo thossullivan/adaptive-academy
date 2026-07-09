@@ -124,3 +124,49 @@ describe('anchor api client', () => {
     expect(out[0].key_points).toEqual(['k']);
   });
 });
+
+describe('program api client', () => {
+  it('createProgram posts the body and returns the program', async () => {
+    const program = { id: 1, title: 'PhD prep', goal_statement: 'g', status: 'draft', milestone_count: 0 };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => program }) as any;
+    const out = await api.createProgram({ title: 'PhD prep' });
+    const [url, opts] = (global.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/programs');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toEqual({ title: 'PhD prep' });
+    expect(out.id).toBe(1);
+  });
+
+  it('acceptProgram posts accepted/pruned link ids', async () => {
+    const detail = { program: { id: 1, title: 't', goal_statement: 'g', status: 'active', milestone_count: 1 }, milestones: [] };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => detail }) as any;
+    await api.acceptProgram(1, [2], [3]);
+    const [url, opts] = (global.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/programs/1/accept');
+    expect(JSON.parse(opts.body)).toEqual({ accepted_link_ids: [2], pruned_link_ids: [3] });
+  });
+
+  it('overrideGate posts the reason', async () => {
+    const milestone = { id: 1, title: 't', success_criteria: 'sc', order_index: 0, gate_status: 'overridden', depends_on: [], override_reason: 'time-boxed', links: [] };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => milestone }) as any;
+    const out = await api.overrideGate(1, 2, 'time-boxed');
+    const [url, opts] = (global.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/programs/1/milestones/2/override');
+    expect(JSON.parse(opts.body)).toEqual({ reason: 'time-boxed' });
+    expect(out.gate_status).toBe('overridden');
+  });
+
+  it('programContext returns null on 404 without throwing', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 }) as any;
+    const out = await api.programContext(5);
+    expect((global.fetch as any).mock.calls[0][0]).toBe('/api/topics/5/program-context');
+    expect(out).toBeNull();
+  });
+
+  it('programContext returns the context when present', async () => {
+    const ctx = { program_id: 1, program_title: 'p', milestone_id: 2, milestone_title: 'm', gate_status: 'open', unverified: ['x'] };
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ctx }) as any;
+    const out = await api.programContext(5);
+    expect(out).toEqual(ctx);
+  });
+});
