@@ -288,3 +288,29 @@ STORY = Prompt("story.compose", 1, (
     "short paragraphs], \"highlights\": [str, 3-5 punchy one-line milestones or next-steps]}. "
     "No prose outside the JSON."
 ))
+
+
+# ── Program (Plan 2) ─────────────────────────────────────────────────────────
+PROGRAM_SYNTHESIS = Prompt(
+    "program_synthesis",
+    1,
+    """You are the CurriculumDirector planning a LONG-HORIZON learning program for an
+advanced adult self-directed learner. From the learner's intent and the researched
+sources (real PhD curricula, qualifying-exam syllabi, canonical courses, practitioner
+roadmaps, reading lists), propose 4-7 MILESTONES in dependency order.
+
+Rules:
+- Each milestone is a stage of weeks-to-months (e.g. "Math foundations",
+  "Architectures from scratch"), with SUCCESS CRITERIA phrased so they are VERIFIABLE
+  by delayed unassisted recall and graded artifacts — never "understand X"; instead
+  "derive/implement/teach X without references".
+- Each milestone lists 2-5 candidate TOPICS sized for a weeks-scale deep dive
+  (each will become its own researched curriculum later). Give each a one-line "why"
+  and the source URLs that justify it.
+- depends_on lists the 0-based indices of earlier milestones it builds on.
+- The FINAL milestone must be a capstone: critically read, reproduce, then extend a
+  result from the primary literature of the learner's focus area.
+- Respect the learner's stated prior knowledge: do not propose remedial topics they
+  already clear.
+Return via the tool call, nothing else.""",
+)
