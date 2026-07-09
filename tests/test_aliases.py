@@ -2,8 +2,8 @@ from sqlmodel import select
 
 from adaptive_academy.engine.aliases import apply_program_aliases, normalize_name
 from adaptive_academy.models import (
-    Assessment, Concept, ConceptAlias, KnowledgeEstimate, Milestone, Program,
-    ProgramTopicLink, Topic, Track,
+    AgentEvent, Assessment, Concept, ConceptAlias, KnowledgeEstimate, Milestone,
+    Program, ProgramTopicLink, Topic, Track,
 )
 
 
@@ -12,8 +12,9 @@ def test_normalize_name():
     assert normalize_name("BACKPROP") == "backprop"
 
 
-def _seed_topic(session, program, milestone, names_levels, *, assessed=None):
-    """Create topic+track+concepts(+estimates) and a started program link."""
+def _seed_topic(session, program, milestone, names_levels, *, assessed=None,
+                status="started"):
+    """Create topic+track+concepts(+estimates) and a program link (default started)."""
     topic = Topic(title="T")
     session.add(topic)
     session.commit()
@@ -32,9 +33,21 @@ def _seed_topic(session, program, milestone, names_levels, *, assessed=None):
         session.add(Assessment(concept_id=concepts[cid].id, kind="self_explanation",
                                prompt="p", score=score))
     session.add(ProgramTopicLink(milestone_id=milestone.id, topic_id=topic.id,
-                                 status="started"))
+                                 status=status))
     session.commit()
     return topic, concepts
+
+
+def _assess_and_set_level(session, concept_id, score, level):
+    """Simulate the learner working a concept: log an assessment, update its estimate."""
+    session.add(Assessment(concept_id=concept_id, kind="self_explanation",
+                           prompt="p", score=score))
+    est = session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept_id)
+    ).one()
+    est.level = level
+    session.add(est)
+    session.commit()
 
 
 def _program(session):
@@ -81,3 +94,43 @@ def test_apply_is_idempotent(session):
     r2 = apply_program_aliases(session, topic.id)
     assert r2.registered == 0  # already-aliased concepts are skipped
     assert len(session.exec(select(ConceptAlias)).all()) == 1
+
+
+def test_seeds_from_most_recently_assessed_member_not_newest(session):
+    """With two group members at different levels, the seed must come from the most
+    recently ASSESSED member (older concept A), not the newest member (B)."""
+    p, m = _program(session)
+    topic_a, (concept_a,) = _seed_topic(session, p, m, [("Attention", "low")])
+    apply_program_aliases(session, topic_a.id)
+    topic_b, (concept_b,) = _seed_topic(session, p, m, [("attention", "high")])
+    apply_program_aliases(session, topic_b.id)  # B joins the group (seeded from A)
+
+    # Learner then works both: B assessed first, A assessed MOST RECENTLY.
+    _assess_and_set_level(session, concept_b.id, 0.9, "high")
+    _assess_and_set_level(session, concept_a.id, 0.6, "medium")
+
+    # Topic C re-mentions the concept at the cold default "high".
+    topic_c, (concept_c,) = _seed_topic(session, p, m, [("ATTENTION", "high")])
+    r = apply_program_aliases(session, topic_c.id)
+    # "medium" from A (most recently assessed) — a newest-member (max id) bug would
+    # pick B ("high", equal to C's default, so nothing reported seeded).
+    assert r.seeded == [(concept_c.id, "medium")]
+    est = session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept_c.id)
+    ).one()
+    assert est.level == "medium"
+
+    # A successful apply logs an AgentEvent against the topic.
+    ev = session.exec(
+        select(AgentEvent).where(AgentEvent.topic_id == topic_c.id,
+                                 AgentEvent.kind == "program:alias")
+    ).first()
+    assert ev is not None
+
+
+def test_stub_link_is_noop(session):
+    p, m = _program(session)
+    topic, _ = _seed_topic(session, p, m, [("Attention", "low")], status="stub")
+    result = apply_program_aliases(session, topic.id)
+    assert result.registered == 0 and result.seeded == []
+    assert session.exec(select(ConceptAlias)).all() == []
