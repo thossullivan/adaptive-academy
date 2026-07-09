@@ -159,3 +159,15 @@ def test_gate_endpoint_and_program_context(session):
     # a topic outside any program has no context
     lone = client.post("/api/topics", json={"title": "lone", "goal": "g"}).json()["id"]
     assert client.get(f"/api/topics/{lone}/program-context").status_code == 404
+
+
+def test_program_context_orphaned_link_is_404(session):
+    """A link whose milestone row is missing must 404, not 500."""
+    from adaptive_academy.models import ProgramTopicLink
+
+    client = _client(session)
+    tid = client.post("/api/topics", json={"title": "orphan", "goal": "g"}).json()["id"]
+    session.add(ProgramTopicLink(milestone_id=999, topic_id=tid, status="started",
+                                 proposed_title="orphan"))
+    session.commit()
+    assert client.get(f"/api/topics/{tid}/program-context").status_code == 404

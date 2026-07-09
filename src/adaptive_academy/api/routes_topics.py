@@ -419,7 +419,9 @@ def get_program_context(topic_id: int, session: Session = Depends(get_session)):
     if link is None:
         raise HTTPException(404, "topic is not part of a program")
     milestone = session.get(Milestone, link.milestone_id)
-    program = session.get(Program, milestone.program_id)
+    program = session.get(Program, milestone.program_id) if milestone else None
+    if milestone is None or program is None:
+        raise HTTPException(404, "topic is not part of a program")
     report = milestone_gate(session, milestone)
     return ProgramContextOut(
         program_id=program.id, program_title=program.title,
