@@ -185,9 +185,8 @@ def research_program(
         m = Milestone(program_id=program.id, title=d.title,
                       success_criteria=d.success_criteria, order_index=i)
         session.add(m)
-        session.commit()
-        session.refresh(m)
         milestones.append(m)
+    session.flush()  # assigns autoincrement ids without committing
     # second pass: map draft indices → milestone ids
     for i, d in enumerate(drafts):
         if d.depends_on:
