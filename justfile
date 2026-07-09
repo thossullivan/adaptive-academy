@@ -30,6 +30,7 @@ db-migrate-to-volume force="":
 	#!/usr/bin/env sh
 	set -e
 	snapdir="$(mktemp -d)"
+	trap 'rm -rf "$snapdir"' EXIT
 	sqlite3 adaptive_academy.db ".backup '$snapdir/adaptive_academy.db'"
 	docker volume create adaptive-academy-data >/dev/null
 	docker run --rm -v adaptive-academy-data:/data -v "$snapdir":/host -e FORCE="{{force}}" alpine sh -c '
@@ -40,4 +41,3 @@ db-migrate-to-volume force="":
 		cp /host/adaptive_academy.db /data/adaptive_academy.db
 		echo "copied $(wc -c < /data/adaptive_academy.db) bytes into volume"
 	'
-	rm -rf "$snapdir"
