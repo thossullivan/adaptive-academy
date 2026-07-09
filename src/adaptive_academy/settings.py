@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./adaptive_academy.db"
     # Default Obsidian vault path (env AA_OBSIDIAN_VAULT_PATH); API calls may override per-request.
     obsidian_vault_path: str = ""
+    # Static frontend build to serve at / (env AA_FRONTEND_DIST). The Docker image
+    # points this at the baked-in SvelteKit build; absent in host dev, so no-op there.
+    frontend_dist: str = "frontend/build"
 
 
 settings = Settings()
