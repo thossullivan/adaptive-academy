@@ -111,3 +111,30 @@ export interface ComebackMove {
 export interface Comeback {
   move: ComebackMove | null;
 }
+
+export interface Program {
+  id: number; title: string; goal_statement: string; status: string; milestone_count: number;
+}
+export interface LinkInfo {
+  id: number; status: string; proposed_title: string; why: string;
+  sources: string[]; topic_id: number | null;
+}
+export interface MilestoneInfo {
+  id: number; title: string; success_criteria: string; order_index: number;
+  gate_status: string; depends_on: number[]; override_reason: string; links: LinkInfo[];
+}
+export interface ProgramDetail { program: Program; milestones: MilestoneInfo[]; }
+export interface ConceptEvidence {
+  concept_id: number; name: string; delayed_ok: boolean; artifact_ok: boolean; verdict: string;
+}
+export interface GateReport {
+  milestone_id: number; verdict: string; reason: string; concepts: ConceptEvidence[];
+}
+export interface ProgramContext {
+  program_id: number; program_title: string; milestone_id: number;
+  milestone_title: string; gate_status: string; unverified: string[];
+}
+export interface CreateProgramBody {
+  title: string; goal_statement?: string; target_depth?: string; prior_knowledge?: string;
+  weekly_time_budget?: string; horizon?: string; focus_area?: string;
+}

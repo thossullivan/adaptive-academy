@@ -12,7 +12,10 @@
 
   const voyages: Section = {
     label: 'Voyages',
-    items: [{ label: 'Fleet', icon: 'fleet', href: '/fleet', match: (p) => p === '/fleet' }]
+    items: [
+      { label: 'Fleet', icon: 'fleet', href: '/fleet', match: (p) => p === '/fleet' },
+      { label: 'Programs', icon: 'map', href: '/programs', match: (p) => p.startsWith('/programs') }
+    ]
   };
 
   const sections = $derived<Section[]>(
