@@ -9,6 +9,8 @@ from adaptive_academy.api.schemas import (
     EventOut,
     GateReportOut,
     LinkOut,
+    MapChangeOut,
+    MapRevisionOut,
     MilestoneOut,
     MilestoneUpdateIn,
     OverrideIn,
@@ -18,10 +20,18 @@ from adaptive_academy.api.schemas import (
 )
 from adaptive_academy.engine.gates import milestone_gate
 from adaptive_academy.engine.program_research import research_program
+from adaptive_academy.engine.revision import (
+    apply_change,
+    reject_change,
+    revision_suggested,
+    run_revision,
+)
 from adaptive_academy.llm.researcher_types import ResearcherClient
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
+    MapChange,
+    MapRevision,
     Milestone,
     Program,
     ProgramIntent,
@@ -50,7 +60,8 @@ def _milestone_or_404(session: Session, program_id: int, milestone_id: int) -> M
 
 def _link_out(link: ProgramTopicLink) -> LinkOut:
     return LinkOut(id=link.id, status=link.status, proposed_title=link.proposed_title,
-                   why=link.why, sources=link.sources, topic_id=link.topic_id)
+                   why=link.why, sources=link.sources, topic_id=link.topic_id,
+                   added_by=link.added_by)
 
 
 def _milestone_out(session: Session, m: Milestone) -> MilestoneOut:
@@ -60,7 +71,7 @@ def _milestone_out(session: Session, m: Milestone) -> MilestoneOut:
     return MilestoneOut(id=m.id, title=m.title, success_criteria=m.success_criteria,
                         order_index=m.order_index, gate_status=m.gate_status,
                         depends_on=m.depends_on, override_reason=m.override_reason,
-                        links=[_link_out(link) for link in links])
+                        links=[_link_out(link) for link in links], archived=m.archived)
 
 
 def _program_out(session: Session, p: Program) -> ProgramOut:
@@ -69,12 +80,24 @@ def _program_out(session: Session, p: Program) -> ProgramOut:
                       status=p.status, milestone_count=count)
 
 
+def _open_revision(session: Session, program_id: int) -> MapRevision | None:
+    change = session.exec(
+        select(MapChange).join(MapRevision).where(
+            MapRevision.program_id == program_id, MapChange.status == "proposed")
+    ).first()
+    return session.get(MapRevision, change.revision_id) if change else None
+
+
 def _detail(session: Session, p: Program) -> ProgramDetailOut:
     milestones = session.exec(
         select(Milestone).where(Milestone.program_id == p.id).order_by(Milestone.order_index)
     ).all()
-    return ProgramDetailOut(program=_program_out(session, p),
-                            milestones=[_milestone_out(session, m) for m in milestones])
+    return ProgramDetailOut(
+        program=_program_out(session, p),
+        milestones=[_milestone_out(session, m) for m in milestones],
+        revision_suggested=revision_suggested(session, p),
+        has_open_revision=_open_revision(session, p.id) is not None,
+    )
 
 
 @router.post("", response_model=ProgramOut)
@@ -180,6 +203,8 @@ def start_link(
         raise HTTPException(404, "link not found")
     if link.status == "started" and link.topic_id is not None:
         return StartOut(topic_id=link.topic_id)  # idempotent
+    if milestone.archived:
+        raise HTTPException(400, "milestone archived")
     if link.status != "stub":
         raise HTTPException(400, f"link is {link.status}, not stub")
 
@@ -214,6 +239,8 @@ def get_gate(
 ):
     _program_or_404(session, program_id)
     m = _milestone_or_404(session, program_id, milestone_id)
+    if m.archived:
+        raise HTTPException(400, "milestone archived")
     report = milestone_gate(session, m)
     return GateReportOut(
         milestone_id=report.milestone_id, verdict=report.verdict, reason=report.reason,
@@ -252,3 +279,80 @@ def list_program_events(program_id: int, session: Session = Depends(get_session)
         .order_by(AgentEvent.id)
     ).all()
     return [EventOut(kind=e.kind, detail=e.detail) for e in rows]
+
+
+def _revision_out(session: Session, rev: MapRevision) -> MapRevisionOut:
+    changes = session.exec(
+        select(MapChange).where(MapChange.revision_id == rev.id).order_by(MapChange.id)
+    ).all()
+    return MapRevisionOut(
+        id=rev.id, map_health=rev.map_health,
+        changes=[MapChangeOut(id=c.id, kind=c.kind, payload=c.payload, why=c.why,
+                              source_urls=c.source_urls, status=c.status)
+                 for c in changes])
+
+
+@router.post("/{program_id}/revise", response_model=MapRevisionOut)
+def revise_map(
+    program_id: int,
+    session: Session = Depends(get_session),
+    researcher: ResearcherClient = Depends(get_researcher),
+    llm: LLMClient = Depends(get_llm),
+):
+    program = _program_or_404(session, program_id)
+    intent = session.exec(
+        select(ProgramIntent).where(ProgramIntent.program_id == program_id)
+    ).first()
+    try:
+        result = run_revision(session, program, intent, researcher=researcher, llm=llm)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return _revision_out(session, result.revision)
+
+
+@router.get("/{program_id}/revision", response_model=MapRevisionOut)
+def get_open_revision(program_id: int, session: Session = Depends(get_session)):
+    _program_or_404(session, program_id)
+    rev = _open_revision(session, program_id)
+    if rev is None:
+        raise HTTPException(404, "no open revision")
+    return _revision_out(session, rev)
+
+
+def _change_or_404(session: Session, program_id: int, change_id: int) -> MapChange:
+    change = session.get(MapChange, change_id)
+    if change is None:
+        raise HTTPException(404, "change not found")
+    rev = session.get(MapRevision, change.revision_id)
+    if rev is None or rev.program_id != program_id:
+        raise HTTPException(404, "change not found")
+    return change
+
+
+@router.post("/{program_id}/changes/{change_id}/accept", response_model=ProgramDetailOut)
+def accept_change(
+    program_id: int, change_id: int, session: Session = Depends(get_session),
+):
+    program = _program_or_404(session, program_id)
+    change = _change_or_404(session, program_id, change_id)
+    try:
+        apply_change(session, program, change)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    session.add(AgentEvent(program_id=program_id, kind="program:change_accepted",
+                           detail=f"{change.kind} (change {change.id})"))
+    session.commit()
+    return _detail(session, program)
+
+
+@router.post("/{program_id}/changes/{change_id}/reject", response_model=ProgramDetailOut)
+def reject_change_route(
+    program_id: int, change_id: int, session: Session = Depends(get_session),
+):
+    program = _program_or_404(session, program_id)
+    change = _change_or_404(session, program_id, change_id)
+    try:
+        reject_change(session, change)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return _detail(session, program)

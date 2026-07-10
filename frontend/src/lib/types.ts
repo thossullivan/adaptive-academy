@@ -117,13 +117,22 @@ export interface Program {
 }
 export interface LinkInfo {
   id: number; status: string; proposed_title: string; why: string;
-  sources: string[]; topic_id: number | null;
+  sources: string[]; topic_id: number | null; added_by: string;
 }
 export interface MilestoneInfo {
   id: number; title: string; success_criteria: string; order_index: number;
   gate_status: string; depends_on: number[]; override_reason: string; links: LinkInfo[];
+  archived: boolean;
 }
-export interface ProgramDetail { program: Program; milestones: MilestoneInfo[]; }
+export interface ProgramDetail {
+  program: Program; milestones: MilestoneInfo[];
+  revision_suggested: boolean; has_open_revision: boolean;
+}
+export interface MapChange {
+  id: number; kind: string; payload: Record<string, unknown>;
+  why: string; source_urls: string[]; status: string;
+}
+export interface MapRevisionInfo { id: number; map_health: string; changes: MapChange[]; }
 export interface ConceptEvidence {
   concept_id: number; name: string; delayed_ok: boolean; artifact_ok: boolean; verdict: string;
 }
@@ -133,6 +142,7 @@ export interface GateReport {
 export interface ProgramContext {
   program_id: number; program_title: string; milestone_id: number;
   milestone_title: string; gate_status: string; unverified: string[];
+  revision_suggested: boolean;
 }
 export interface CreateProgramBody {
   title: string; goal_statement?: string; target_depth?: string; prior_knowledge?: string;

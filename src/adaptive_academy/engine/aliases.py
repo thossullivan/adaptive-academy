@@ -47,7 +47,7 @@ def _program_for_topic(session: Session, topic_id: int) -> int | None:
     return milestone.program_id if milestone else None
 
 
-def _group_level(session: Session, member_ids: list[int]) -> str | None:
+def group_level(session: Session, member_ids: list[int]) -> str | None:
     """Level of the group's most recently assessed member; falls back to the
     newest member's estimate when nothing was ever assessed."""
     if not member_ids:
@@ -90,7 +90,7 @@ def apply_program_aliases(session: Session, topic_id: int) -> AliasResult:
             )
         ).all()
         if group:
-            level = _group_level(session, [g.concept_id for g in group])
+            level = group_level(session, [g.concept_id for g in group])
             est = session.exec(
                 select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == c.id)
             ).first()

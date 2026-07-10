@@ -295,6 +295,7 @@ class Milestone(SQLModel, table=True):
     gate_status: str = "open"  # open | passed | overridden
     depends_on: list[int] = Field(default_factory=list, sa_column=Column(JSON))
     override_reason: str = ""
+    archived: bool = False
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -308,6 +309,7 @@ class ProgramTopicLink(SQLModel, table=True):
     proposed_title: str = ""
     why: str = ""
     sources: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    added_by: str = "research"  # "research" | "revision"
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -318,4 +320,26 @@ class ConceptAlias(SQLModel, table=True):
     program_id: int = Field(foreign_key="program.id")
     canonical_name: str
     concept_id: int = Field(foreign_key="concept.id", unique=True)
+    created_at: datetime = Field(default_factory=_now)
+
+
+class MapRevision(SQLModel, table=True):
+    """One learnings-aware map-revision pass (spec 2026-07-10-map-revision §3)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: int = Field(foreign_key="program.id")
+    map_health: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class MapChange(SQLModel, table=True):
+    """A single proposed map change awaiting per-change accept/reject."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    revision_id: int = Field(foreign_key="maprevision.id")
+    kind: str  # add_topic | add_milestone | revise_milestone | prune_topic | prune_milestone
+    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    why: str = ""
+    source_urls: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    status: str = "proposed"  # proposed | accepted | rejected
     created_at: datetime = Field(default_factory=_now)
