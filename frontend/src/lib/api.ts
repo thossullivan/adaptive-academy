@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext, MapRevisionInfo } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -173,7 +173,17 @@ export const api = {
   programContext: (topicId: number) =>
     fetch(`/api/topics/${topicId}/program-context`).then((r) =>
       r.status === 404 ? null : j<ProgramContext>(r)
-    )
+    ),
+  reviseMap: (id: number) =>
+    fetch(`/api/programs/${id}/revise`, { method: 'POST' }).then(j<MapRevisionInfo>),
+  getOpenRevision: (id: number) =>
+    fetch(`/api/programs/${id}/revision`).then((r) =>
+      r.status === 404 ? null : j<MapRevisionInfo>(r)
+    ),
+  acceptChange: (pid: number, changeId: number) =>
+    fetch(`/api/programs/${pid}/changes/${changeId}/accept`, { method: 'POST' }).then(j<ProgramDetail>),
+  rejectChange: (pid: number, changeId: number) =>
+    fetch(`/api/programs/${pid}/changes/${changeId}/reject`, { method: 'POST' }).then(j<ProgramDetail>)
 };
 
 /** Derive a per-concept knowledge level from its assessment history (latest estimate). */
