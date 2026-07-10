@@ -96,13 +96,8 @@ def milestone_load_bearing(session: Session, milestone: Milestone) -> list[Conce
     ).all()
 
 
-def milestone_gate(session: Session, milestone: Milestone) -> GateReport:
-    """Compute the gate report and sync `milestone.gate_status`.
-
-    Evidence-passed always wins (supersedes an override, spec §4.3). A stored 'passed'
-    that no longer holds is honestly downgraded to 'open'. 'overridden' is sticky
-    unless evidence passes.
-    """
+def _evaluate_evidence(session: Session, milestone: Milestone) -> tuple[list[ConceptEvidence], bool, str]:
+    """Pure evidence pass over a milestone's load-bearing concepts. Never writes."""
     concepts = milestone_load_bearing(session, milestone)
     evidences: list[ConceptEvidence] = []
     for c in concepts:
@@ -121,6 +116,31 @@ def milestone_gate(session: Session, milestone: Milestone) -> GateReport:
             if passed
             else f"{len(unverified)} of {len(evidences)} load-bearing concepts unverified"
         )
+    return evidences, passed, reason
+
+
+def evaluate_milestone_readonly(session: Session, milestone: Milestone) -> GateReport:
+    """Evidence report for a milestone, WITHOUT syncing `gate_status` or emitting events.
+
+    Archived milestones are excluded from gates entirely (spec §4.3): they must never
+    transition and fire `program:gate_passed`. Callers that only need to *display*
+    evidence for an archived milestone (e.g. a topic's program-context) use this
+    instead of `milestone_gate` — the reported verdict is the milestone's last stored
+    `gate_status`, frozen at archive time, never recomputed.
+    """
+    evidences, _passed, reason = _evaluate_evidence(session, milestone)
+    return GateReport(milestone_id=milestone.id, verdict=milestone.gate_status,
+                      reason=reason, concepts=evidences)
+
+
+def milestone_gate(session: Session, milestone: Milestone) -> GateReport:
+    """Compute the gate report and sync `milestone.gate_status`.
+
+    Evidence-passed always wins (supersedes an override, spec §4.3). A stored 'passed'
+    that no longer holds is honestly downgraded to 'open'. 'overridden' is sticky
+    unless evidence passes.
+    """
+    evidences, passed, reason = _evaluate_evidence(session, milestone)
 
     if passed:
         new_status = "passed"

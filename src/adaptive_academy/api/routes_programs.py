@@ -203,6 +203,8 @@ def start_link(
         raise HTTPException(404, "link not found")
     if link.status == "started" and link.topic_id is not None:
         return StartOut(topic_id=link.topic_id)  # idempotent
+    if milestone.archived:
+        raise HTTPException(400, "milestone archived")
     if link.status != "stub":
         raise HTTPException(400, f"link is {link.status}, not stub")
 
