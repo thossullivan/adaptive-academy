@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session
@@ -10,7 +11,8 @@ from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.scripted_researcher import ScriptedResearcherClient
 from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
-    Milestone, Program, ProgramIntent, ProgramTopicLink,
+    AgentEvent, MapRevision, Milestone, Program, ProgramIntent, ProgramTopicLink,
+    Topic, now_utc,
 )
 
 
@@ -95,6 +97,34 @@ def test_reject_and_cross_program_guards(session):
     r = client.post(f"/api/programs/{p.id}/changes/{change_id}/reject")
     assert r.status_code == 200
     assert r.json()["has_open_revision"] is False
+
+
+def test_revision_suggested_true_at_both_wiring_sites(session):
+    p, m1, m2, link = _seed_program(session)
+    topic = Topic(title="Foundations")
+    session.add(topic)
+    session.commit()
+    session.add(ProgramTopicLink(milestone_id=m1.id, topic_id=topic.id,
+                                 proposed_title="Foundations", status="started"))
+    # gate_passed event an hour in the past: a later MapRevision must
+    # unambiguously postdate it (revision_suggested treats ties as True).
+    # No assessments seeded, so milestone_gate stays open and emits nothing.
+    session.add(AgentEvent(program_id=p.id, kind="program:gate_passed", detail="x",
+                           created_at=now_utc() - timedelta(hours=1)))
+    session.commit()
+    client = _client(session, _synth(m2.id))
+
+    detail = client.get(f"/api/programs/{p.id}").json()
+    assert detail["revision_suggested"] is True
+    ctx = client.get(f"/api/topics/{topic.id}/program-context").json()
+    assert ctx["revision_suggested"] is True
+
+    # a revision after the gate pass clears the nudge at both sites
+    session.add(MapRevision(program_id=p.id))
+    session.commit()
+    assert client.get(f"/api/programs/{p.id}").json()["revision_suggested"] is False
+    ctx = client.get(f"/api/topics/{topic.id}/program-context").json()
+    assert ctx["revision_suggested"] is False
 
 
 def test_archived_milestone_gate_is_400(session):
