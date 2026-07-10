@@ -397,6 +397,7 @@ class LinkOut(BaseModel):
     why: str
     sources: list[str] = []
     topic_id: Optional[int] = None
+    added_by: str = "research"
 
 
 class MilestoneOut(BaseModel):
@@ -408,11 +409,14 @@ class MilestoneOut(BaseModel):
     depends_on: list[int] = []
     override_reason: str = ""
     links: list[LinkOut] = []
+    archived: bool = False
 
 
 class ProgramDetailOut(BaseModel):
     program: ProgramOut
     milestones: list[MilestoneOut]
+    revision_suggested: bool = False
+    has_open_revision: bool = False
 
 
 class MilestoneUpdateIn(BaseModel):
@@ -457,3 +461,19 @@ class ProgramContextOut(BaseModel):
     milestone_title: str
     gate_status: str
     unverified: list[str] = []
+    revision_suggested: bool = False
+
+
+class MapChangeOut(BaseModel):
+    id: int
+    kind: str
+    payload: dict = {}
+    why: str = ""
+    source_urls: list[str] = []
+    status: str
+
+
+class MapRevisionOut(BaseModel):
+    id: int
+    map_health: str
+    changes: list[MapChangeOut]
