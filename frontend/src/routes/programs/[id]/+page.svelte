@@ -173,7 +173,9 @@
 >
   {#snippet actions()}
     {#if detail && detail.milestones.length > 0}
-      <Button onclick={revise} disabled={busy || detail.has_open_revision}>Revise map</Button>
+      <Button onclick={revise} disabled={busy || inReview || detail.has_open_revision}
+        >Revise map</Button
+      >
     {/if}
   {/snippet}
 
