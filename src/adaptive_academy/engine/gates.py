@@ -79,7 +79,7 @@ def evaluate_concept(concept_id: int, name: str, assessments: list[Assessment]) 
                            delayed_ok=delayed_ok, artifact_ok=artifact_ok, verdict=verdict)
 
 
-def _milestone_load_bearing(session: Session, milestone: Milestone) -> list[Concept]:
+def milestone_load_bearing(session: Session, milestone: Milestone) -> list[Concept]:
     links = session.exec(
         select(ProgramTopicLink).where(
             ProgramTopicLink.milestone_id == milestone.id,
@@ -103,7 +103,7 @@ def milestone_gate(session: Session, milestone: Milestone) -> GateReport:
     that no longer holds is honestly downgraded to 'open'. 'overridden' is sticky
     unless evidence passes.
     """
-    concepts = _milestone_load_bearing(session, milestone)
+    concepts = milestone_load_bearing(session, milestone)
     evidences: list[ConceptEvidence] = []
     for c in concepts:
         rows = session.exec(
