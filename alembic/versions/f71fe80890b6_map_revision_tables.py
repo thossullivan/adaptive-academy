@@ -37,18 +37,22 @@ def upgrade() -> None:
         sa.Column("status", sa.String(), nullable=False, server_default="proposed"),
         sa.Column("created_at", sa.DateTime(), nullable=False),
     )
-    with op.batch_alter_table("milestone") as batch:
-        batch.add_column(sa.Column("archived", sa.Boolean(), nullable=False,
-                                   server_default=sa.false()))
-    with op.batch_alter_table("programtopiclink") as batch:
-        batch.add_column(sa.Column("added_by", sa.String(), nullable=False,
-                                   server_default="research"))
+    # Plain ADD COLUMN, NOT batch_alter_table. Batch mode recreates the table
+    # (copy -> DROP old -> rename); dropping a POPULATED `milestone` while
+    # `PRAGMA foreign_keys=ON` fails because live `programtopiclink` rows
+    # reference it. A direct ADD COLUMN with a server_default needs no
+    # recreation and works on populated, referenced tables. (Empty test DBs
+    # never surfaced this — see tests/test_migration_populated.py.)
+    op.add_column("milestone", sa.Column("archived", sa.Boolean(), nullable=False,
+                                         server_default=sa.false()))
+    op.add_column("programtopiclink", sa.Column("added_by", sa.String(), nullable=False,
+                                                server_default="research"))
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("programtopiclink") as batch:
-        batch.drop_column("added_by")
-    with op.batch_alter_table("milestone") as batch:
-        batch.drop_column("archived")
+    # Native ALTER TABLE ... DROP COLUMN (SQLite >= 3.35); no table recreation,
+    # so no inbound-FK hazard on populated tables.
+    op.drop_column("programtopiclink", "added_by")
+    op.drop_column("milestone", "archived")
     op.drop_table("mapchange")
     op.drop_table("maprevision")
