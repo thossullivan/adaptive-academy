@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 from sqlmodel import select
 
@@ -120,6 +122,35 @@ def test_revision_suggested_truth_table(session):
     session.add(AgentEvent(program_id=p.id, kind="program:gate_passed", detail="y"))
     session.commit()
     assert revision_suggested(session, p) is True
+
+
+def test_revision_suggested_tie_fails_open(session):
+    """Identical created_at on the latest revision and gate-pass event must nudge:
+    the nudge is advisory, so a tie fails open rather than hiding it."""
+    p = Program(title="P3", goal_statement="g")
+    session.add(p)
+    session.commit()
+    tie = datetime(2026, 7, 10, 12, 0, 0)
+    session.add(MapRevision(program_id=p.id, created_at=tie))
+    session.add(AgentEvent(program_id=p.id, kind="program:gate_passed", detail="x",
+                           created_at=tie))
+    session.commit()
+    assert revision_suggested(session, p) is True
+
+
+def test_apply_add_milestone_refuses_archived_anchor(session):
+    """The after_milestone_id anchor got archived between the pass and the accept:
+    apply_change must refuse (ValueError) and leave the change proposed."""
+    p, m1, m2, link, rev = _program(session)
+    c = _change(session, rev, "add_milestone",
+                {"after_milestone_id": m1.id, "title": "Math refresh"})
+    m1.archived = True
+    session.add(m1)
+    session.commit()
+    with pytest.raises(ValueError, match="after_milestone_id"):
+        apply_change(session, p, c)
+    session.refresh(c)
+    assert c.status == "proposed"
 
 
 def test_untouchable_started_link_half(session):

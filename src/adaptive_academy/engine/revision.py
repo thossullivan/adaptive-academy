@@ -402,4 +402,5 @@ def revision_suggested(session: Session, program: Program) -> bool:
     ).first()
     if latest_rev is None:
         return True
-    return latest_pass.created_at > latest_rev.created_at
+    # ties fail open: a missed nudge costs more than a spurious banner (advisory only)
+    return latest_pass.created_at >= latest_rev.created_at
