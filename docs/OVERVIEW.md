@@ -44,7 +44,8 @@ On top of that loop sit the research-grounded mechanics that make learning *stic
 ┌──────────────────────────────────────────────────────────────┐
 │  SvelteKit frontend (Svelte 5 / Tailwind 4)                  │
 │  Dashboard · Today loop · Tutor · Practice · Teach ·         │
-│  Retention · Map · Story · Fleet/Wayfinder (the Voyage)      │
+│  Retention · Map · Story · Fleet/Wayfinder (the Voyage) ·    │
+│  Programs (multi-topic milestones + gates)                   │
 └───────────────────────────┬──────────────────────────────────┘
                             │  REST (/api)
 ┌───────────────────────────┴──────────────────────────────────┐
