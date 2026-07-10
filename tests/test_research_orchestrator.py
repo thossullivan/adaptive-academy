@@ -110,3 +110,58 @@ def test_research_topic_caps_reading_list_and_logs_drop(session: Session):
     assert len(sources) == 12  # capped
     events = session.exec(select(AgentEvent).where(AgentEvent.topic_id == topic.id)).all()
     assert any(e.kind == "research:capped" for e in events)
+
+
+class _FailFirstCallResearcher:
+    """Fails an angle's FIRST call, succeeds on the retry sweep. Thread-safe."""
+
+    def __init__(self, flaky_angle: str):
+        import threading
+
+        self._flaky_angle = flaky_angle
+        self._seen: set[str] = set()
+        self._lock = threading.Lock()
+
+    def search(self, brief):
+        with self._lock:
+            first_call = brief.angle not in self._seen
+            self._seen.add(brief.angle)
+        if first_call and brief.angle == self._flaky_angle:
+            raise RuntimeError("connection reset by transient blip")
+        return [RawSource(title=f"{brief.angle} source",
+                          url=f"https://e.com/{brief.angle}", tier=2)]
+
+
+def test_topic_transient_angle_recovers_on_second_chance_sweep(session: Session):
+    topic, intent = _topic_with_intent(session)
+    result = research_topic(
+        session, topic, intent,
+        researcher=_FailFirstCallResearcher("foundational_papers"),
+        llm=_foundation_llm(), max_subagents=5)
+
+    kinds = [e.kind for e in result.events]
+    assert "research:subagent_error" not in kinds
+    retries = [e for e in result.events if e.kind == "research:subagent_retry"]
+    assert len(retries) == 1
+    assert retries[0].detail == "foundational_papers: recovered 1 sources"
+    # the recovered angle's source made it into the persisted set
+    sources = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic.id)).all()
+    assert any(s.angle == "foundational_papers" for s in sources)
+
+
+def test_topic_subagent_error_detail_includes_exception_message(session: Session):
+    topic, intent = _topic_with_intent(session)
+
+    class PersistentFailResearcher:
+        def search(self, brief):
+            if brief.angle == "critiques":
+                raise RuntimeError("529 overloaded upstream")
+            return [RawSource(title=f"{brief.angle} source",
+                              url=f"https://e.com/{brief.angle}", tier=2)]
+
+    result = research_topic(session, topic, intent,
+                            researcher=PersistentFailResearcher(),
+                            llm=_foundation_llm(), max_subagents=5)
+    errs = [e for e in result.events if e.kind == "research:subagent_error"]
+    assert len(errs) == 1
+    assert "RuntimeError: 529 overloaded upstream" in errs[0].detail
