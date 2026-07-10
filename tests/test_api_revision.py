@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from adaptive_academy.api.app import create_app
 from adaptive_academy.api.deps import get_llm, get_researcher, get_session
@@ -136,3 +136,48 @@ def test_archived_milestone_gate_is_400(session):
     r = client.get(f"/api/programs/{p.id}/milestones/{m2.id}/gate")
     assert r.status_code == 400
     assert "archived" in r.json()["detail"]
+
+
+def test_start_link_on_archived_milestone_is_400(session):
+    # A stub link survives its milestone's archival (prune_milestone only blocks on
+    # *started* links) — starting it must stay blocked so no work resumes under an
+    # archived leg (spec §4.3).
+    p, m1, m2, link = _seed_program(session)
+    m2.archived = True
+    session.add(m2)
+    session.commit()
+    client = _client(session, _synth(m2.id))
+
+    r = client.post(f"/api/programs/{p.id}/links/{link.id}/start")
+    assert r.status_code == 400
+    assert "archived" in r.json()["detail"]
+
+
+def test_program_context_for_archived_milestone_skips_gate_write(session):
+    # A topic started before its milestone was later archived is an edge state that
+    # can still exist. get_program_context must never route it through milestone_gate
+    # (which writes gate_status and can emit program:gate_passed) — archived
+    # milestones are excluded from gates entirely (spec §4.3).
+    p, m1, m2, link = _seed_program(session)
+    topic = Topic(title="Attention")
+    session.add(topic)
+    session.commit()
+    link.topic_id = topic.id
+    link.status = "started"
+    session.add(link)
+    m2.archived = True
+    session.add(m2)
+    session.commit()
+    client = _client(session, _synth(m2.id))
+
+    events_before = len(
+        session.exec(select(AgentEvent).where(AgentEvent.program_id == p.id)).all())
+
+    r = client.get(f"/api/topics/{topic.id}/program-context")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["gate_status"] == m2.gate_status
+
+    events_after = len(
+        session.exec(select(AgentEvent).where(AgentEvent.program_id == p.id)).all())
+    assert events_after == events_before

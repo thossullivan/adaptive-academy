@@ -26,7 +26,7 @@ from adaptive_academy.api.schemas import (
 )
 from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
-from adaptive_academy.engine.gates import milestone_gate
+from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone_gate
 from adaptive_academy.engine.research import research_topic
 from adaptive_academy.engine.revision import revision_suggested
 from adaptive_academy.engine.track_markdown import (
@@ -436,7 +436,15 @@ def get_program_context(topic_id: int, session: Session = Depends(get_session)):
     program = session.get(Program, milestone.program_id) if milestone else None
     if milestone is None or program is None:
         raise HTTPException(404, "topic is not part of a program")
-    report = milestone_gate(session, milestone)
+    # Archived milestones are excluded from gates (spec §4.3): milestone_gate WRITES
+    # gate_status and can emit program:gate_passed on a transition, so an archived
+    # milestone must never reach it — use the read-only evidence view instead, which
+    # reports the milestone's stored gate_status as of archive time.
+    report = (
+        evaluate_milestone_readonly(session, milestone)
+        if milestone.archived
+        else milestone_gate(session, milestone)
+    )
     return ProgramContextOut(
         program_id=program.id, program_title=program.title,
         milestone_id=milestone.id, milestone_title=milestone.title,
