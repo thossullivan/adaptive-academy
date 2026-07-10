@@ -28,6 +28,7 @@ from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.gates import milestone_gate
 from adaptive_academy.engine.research import research_topic
+from adaptive_academy.engine.revision import revision_suggested
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
     ItemView,
@@ -440,4 +441,5 @@ def get_program_context(topic_id: int, session: Session = Depends(get_session)):
         program_id=program.id, program_title=program.title,
         milestone_id=milestone.id, milestone_title=milestone.title,
         gate_status=report.verdict,
-        unverified=[e.name for e in report.concepts if e.verdict != "verified"])
+        unverified=[e.name for e in report.concepts if e.verdict != "verified"],
+        revision_suggested=revision_suggested(session, program))
