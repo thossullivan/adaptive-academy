@@ -161,13 +161,93 @@ def test_gate_endpoint_and_program_context(session):
     assert client.get(f"/api/topics/{lone}/program-context").status_code == 404
 
 
+def test_curriculum_import_survives_program_aliases(session):
+    """Regression (finding 1): a program topic's curriculum generation registers a
+    ConceptAlias row per concept (apply_program_aliases). Re-importing markdown deletes
+    and recreates the topic's Track/Concepts — under foreign_keys=ON that used to raise
+    IntegrityError because the old ConceptAlias rows were never deleted first."""
+    from adaptive_academy.models import Concept, ConceptAlias, Track
+
+    curriculum_payload = {
+        "overview": "o",
+        "phases": [
+            {"title": "P1", "items": [{"type": "build", "text": "implement backprop",
+                                       "concept_refs": ["Backprop"]}],
+             "deliverable": {"kind": "repo", "text": "backprop from scratch"}},
+        ],
+    }
+    foundation_payload = {"overview": "o", "key_concepts": ["Backprop"],
+                          "prerequisite_map": {}}
+    synth_payload = {"milestones": [
+        {"title": "Foundations", "success_criteria": "derive backprop cold",
+         "depends_on": [], "topics": [{"title": "Backprop", "why": "core"}]},
+    ]}
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    llm = ScriptedLLMClient([
+        LLMResponse(text=json.dumps(synth_payload)),
+        LLMResponse(text=json.dumps(foundation_payload)),
+        LLMResponse(text=json.dumps(curriculum_payload)),
+    ])
+    app.dependency_overrides[get_llm] = lambda: llm
+    src = [RawSource(title="s", url="https://e.com/1", tier=1, relevance=0.9, summary="s")]
+    app.dependency_overrides[get_researcher] = lambda: ScriptedResearcherClient({
+        "phd_curricula": list(src), "foundational_papers": list(src),
+    })
+    client = TestClient(app)
+
+    pid = client.post("/api/programs", json={
+        "title": "PhD prep", "goal_statement": "research-ready",
+        "focus_area": "custom LLMs"}).json()["id"]
+    client.post(f"/api/programs/{pid}/research")
+    detail = client.get(f"/api/programs/{pid}").json()
+    link_id = detail["milestones"][0]["links"][0]["id"]
+    client.post(f"/api/programs/{pid}/accept",
+                json={"accepted_link_ids": [link_id], "pruned_link_ids": []})
+    topic_id = client.post(f"/api/programs/{pid}/links/{link_id}/start").json()["topic_id"]
+
+    assert client.post(f"/api/topics/{topic_id}/research").status_code == 200
+    proposed = client.get(f"/api/topics/{topic_id}/sources?status=proposed").json()
+    client.post(f"/api/topics/{topic_id}/sources/review",
+                json={"accepted_ids": [s["id"] for s in proposed], "pruned_ids": []})
+    assert client.post(f"/api/topics/{topic_id}/curriculum").status_code == 200
+
+    # Curriculum generation on a program topic registered a ConceptAlias per concept.
+    old_concepts = session.exec(
+        select(Concept).join(Track).where(Track.topic_id == topic_id)
+    ).all()
+    assert old_concepts  # sanity: the pipeline actually produced concepts
+    old_concept_ids = [c.id for c in old_concepts]
+    assert session.exec(
+        select(ConceptAlias).where(ConceptAlias.concept_id.in_(old_concept_ids))
+    ).all()
+
+    md = "# Backprop\n\n## Phase 1 — Rebuilt\n- [ ] (read) reread the paper\n"
+    r = client.post(f"/api/topics/{topic_id}/curriculum/import", json={"markdown": md})
+    assert r.status_code == 200
+
+    # Old concepts (and their aliases) are gone; no IntegrityError was raised.
+    assert session.exec(
+        select(ConceptAlias).where(ConceptAlias.concept_id.in_(old_concept_ids))
+    ).all() == []
+    assert session.exec(select(Concept).where(Concept.id.in_(old_concept_ids))).all() == []
+
+
 def test_program_context_orphaned_link_is_404(session):
-    """A link whose milestone row is missing must 404, not 500."""
+    """A link whose milestone row is missing must 404, not 500. This state can't arise
+    through normal ORM writes under foreign_keys=ON (milestone_id is FK-protected), but
+    the defensive check still earns its keep against out-of-band data — toggle the
+    pragma off just long enough to construct the orphaned fixture row."""
+    from sqlalchemy import text
+
     from adaptive_academy.models import ProgramTopicLink
 
     client = _client(session)
     tid = client.post("/api/topics", json={"title": "orphan", "goal": "g"}).json()["id"]
+    session.execute(text("PRAGMA foreign_keys=OFF"))
     session.add(ProgramTopicLink(milestone_id=999, topic_id=tid, status="started",
                                  proposed_title="orphan"))
     session.commit()
+    session.execute(text("PRAGMA foreign_keys=ON"))
     assert client.get(f"/api/topics/{tid}/program-context").status_code == 404

@@ -171,6 +171,18 @@ def research_program(
             emit("program_research:subagent", f"{brief.angle}: {len(per_brief[i])} sources")
         raw.extend(per_brief[i])
 
+    if briefs and len(failures) == len(briefs):
+        # Every angle failed (as opposed to some angles merely returning zero results) —
+        # there is nothing to ground a synthesis in. Persist the trace (subagent_error
+        # events) so the failure is observable, but do not run synthesis or persist any
+        # proposal: the LLM would otherwise fabricate milestones from zero sources, and
+        # a persisted proposal blocks re-research.
+        session.commit()
+        raise ValueError(
+            "research found no sources (all angles failed); "
+            "retry when connectivity is restored"
+        )
+
     emit("prompt", PROGRAM_SYNTHESIS.tag)
     data = structured_json(
         llm, PROGRAM_SYNTHESIS,

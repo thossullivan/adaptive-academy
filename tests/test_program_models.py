@@ -1,3 +1,5 @@
+from sqlmodel import select
+
 from adaptive_academy.models import (
     AgentEvent,
     Concept,
@@ -64,5 +66,7 @@ def test_concept_alias_and_program_event(session):
     session.add(AgentEvent(program_id=program.id, kind="program_research:plan", detail="5 briefs"))
     session.commit()
 
-    ev = session.query(AgentEvent).filter(AgentEvent.program_id == program.id).one()
+    ev = session.exec(
+        select(AgentEvent).where(AgentEvent.program_id == program.id)
+    ).one()
     assert ev.kind == "program_research:plan"

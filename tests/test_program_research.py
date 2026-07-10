@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from sqlmodel import select
 
 from adaptive_academy.engine.program_research import (
     PROGRAM_ANGLES,
@@ -12,7 +13,7 @@ from adaptive_academy.llm.researcher_types import RawSource
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.scripted_researcher import ScriptedResearcherClient
 from adaptive_academy.llm.types import LLMResponse
-from adaptive_academy.models import Milestone, Program, ProgramIntent
+from adaptive_academy.models import AgentEvent, Milestone, Program, ProgramIntent
 
 SYNTH = {
     "milestones": [
@@ -89,6 +90,46 @@ def test_research_program_survives_single_angle_failure(session):
     kinds = [e.kind for e in result.events]
     assert "program_research:subagent_error" in kinds
     assert len(result.milestones) == 2  # synthesis still ran
+
+
+def test_research_program_all_angles_failed_raises_and_persists_trace(session):
+    """Regression (finding 2): if every angle errors, synthesis must not run (it would
+    fabricate milestones from zero sources) and the ungrounded proposal must not be
+    persisted — otherwise a subsequent research run is refused forever."""
+    p, intent = _program(session)
+
+    class AllFailResearcher:
+        def search(self, brief):
+            raise RuntimeError("529")
+
+    llm = ScriptedLLMClient([LLMResponse(text=json.dumps(SYNTH))])
+    with pytest.raises(ValueError, match="no sources"):
+        research_program(session, p, intent, researcher=AllFailResearcher(), llm=llm)
+
+    # The LLM's synthesis payload was never consumed.
+    assert llm.calls == []
+
+    milestones_after = session.exec(
+        select(Milestone).where(Milestone.program_id == p.id)
+    ).all()
+    assert milestones_after == []  # zero milestones persisted
+
+    kinds = [e.kind for e in session.exec(
+        select(AgentEvent).where(AgentEvent.program_id == p.id)
+    ).all()]
+    assert kinds.count("program_research:subagent_error") == len(PROGRAM_ANGLES)
+    assert "program_research:synth" not in kinds
+    assert "program_research:done" not in kinds
+
+    # A subsequent research run is NOT blocked (no proposal was persisted).
+    result = research_program(session, p, intent,
+                              researcher=ScriptedResearcherClient({
+                                  "phd_curricula": [RawSource(title="MIT quals",
+                                                              url="https://mit.edu/q",
+                                                              tier=1)],
+                              }),
+                              llm=ScriptedLLMClient([LLMResponse(text=json.dumps(SYNTH))]))
+    assert len(result.milestones) == 2
 
 
 def test_research_program_refuses_second_run(session):
