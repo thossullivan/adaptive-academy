@@ -17,6 +17,7 @@
   let gates = $state<Record<number, GateReport>>({});
   let overrideFor = $state<number | null>(null);
   let overrideReason = $state('');
+  let pendingSave: Promise<unknown> | null = null;
 
   const inReview = $derived(
     detail?.milestones.some((m) => m.links.some((l) => l.status === 'proposed')) ?? false
@@ -54,6 +55,14 @@
     if (!detail) return;
     busy = true;
     error = '';
+    if (pendingSave) {
+      try {
+        await pendingSave;
+      } catch {
+        /* already surfaced by saveMilestone */
+      }
+      pendingSave = null;
+    }
     const all = detail.milestones.flatMap((m) => m.links.filter((l) => l.status === 'proposed'));
     const prunedIds = all.filter((l) => pruned.has(l.id)).map((l) => l.id);
     const keptIds = all.filter((l) => !pruned.has(l.id)).map((l) => l.id);
@@ -67,11 +76,14 @@
 
   async function saveMilestone(m: MilestoneInfo) {
     error = '';
+    const save = api.updateMilestone(programId, m.id, {
+      title: m.title,
+      success_criteria: m.success_criteria
+    });
+    // Chain onto any in-flight save so accept() can await them all.
+    pendingSave = pendingSave ? Promise.allSettled([pendingSave, save]) : save;
     try {
-      await api.updateMilestone(programId, m.id, {
-        title: m.title,
-        success_criteria: m.success_criteria
-      });
+      await save;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -90,6 +102,7 @@
   }
 
   async function loadGate(m: MilestoneInfo) {
+    busy = true;
     error = '';
     try {
       gates = { ...gates, [m.id]: await api.milestoneGate(programId, m.id) };
@@ -97,6 +110,7 @@
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
+    busy = false;
   }
 
   async function confirmOverride(mid: number) {
@@ -224,7 +238,7 @@
 
           {#if !inReview}
             <div class="mt-4 flex items-center gap-3">
-              <Button size="sm" onclick={() => loadGate(m)}>Check gate</Button>
+              <Button size="sm" onclick={() => loadGate(m)} disabled={busy}>Check gate</Button>
               {#if m.gate_status !== 'passed' && overrideFor !== m.id}
                 <button
                   class="text-sm text-muted hover:text-fg"
