@@ -256,15 +256,15 @@
     {@const archivedCount = milestones.filter((m) => m.archived).length}
     <div class="mt-4 grid gap-4">
       {#each visibleMilestones as m, i (m.id)}
+        {@const depRefs = m.depends_on
+          .map((d) => visibleMilestones.findIndex((x) => x.id === d))
+          .filter((pos) => pos >= 0)
+          .map((pos) => `#${pos + 1}`)}
         <Card class={m.archived ? 'opacity-60' : ''}>
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <div class="eyebrow">
-                Leg {i + 1}{m.depends_on.length
-                  ? ` · after ${m.depends_on
-                      .map((d) => `#${milestones.findIndex((x) => x.id === d) + 1}`)
-                      .join(', ')}`
-                  : ''}
+                Leg {i + 1}{depRefs.length ? ` · after ${depRefs.join(', ')}` : ''}
               </div>
               {#if inReview}
                 <div class="mt-2 grid max-w-xl gap-2">
