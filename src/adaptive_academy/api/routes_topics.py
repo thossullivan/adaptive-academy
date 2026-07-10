@@ -43,6 +43,7 @@ from adaptive_academy.models import (
     AgentEvent,
     Assessment,
     Concept,
+    ConceptAlias,
     Deliverable,
     Item,
     KnowledgeEstimate,
@@ -374,14 +375,21 @@ def import_curriculum(
             session.delete(p)
         for s in session.exec(select(Sidebar).where(Sidebar.track_id == t.id)).all():
             session.delete(s)
-        # Concepts (and their estimates) belong to the track too — delete them before the
-        # track, or the default cascade NULLs concept.track_id and violates NOT NULL.
+        # Concepts (and their estimates + program aliases) belong to the track too —
+        # delete them before the track, or the default cascade NULLs concept.track_id
+        # and violates NOT NULL. ConceptAlias.concept_id is also a NOT NULL FK (program
+        # topics get one alias row per concept via apply_program_aliases after curriculum
+        # generation), so it must go before the concept too or foreign_keys=ON raises.
         for c in session.exec(select(Concept).where(Concept.track_id == t.id)).all():
             est = session.exec(
                 select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == c.id)
             ).first()
             if est:
                 session.delete(est)
+            for alias in session.exec(
+                select(ConceptAlias).where(ConceptAlias.concept_id == c.id)
+            ).all():
+                session.delete(alias)
             session.delete(c)
         session.delete(t)
     session.commit()
@@ -408,6 +416,11 @@ def import_curriculum(
                             body=sv.body, position=si))
     session.commit()
     session.refresh(track)
+    # Markdown import creates no Concept rows (the format carries phases/items/sidebars
+    # only, never concepts), so this is a no-op today. Called anyway for correctness and
+    # so a program topic re-joins its alias groups the moment concepts do come from
+    # import — it's a cheap no-op over zero concepts, not dead code.
+    apply_program_aliases(session, topic_id)
     return _curriculum_out(session, track)
 
 
