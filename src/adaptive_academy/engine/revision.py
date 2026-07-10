@@ -313,3 +313,93 @@ def run_revision(
     for c in changes:
         session.refresh(c)
     return RevisionResult(revision=revision, changes=changes, events=events)
+
+
+def apply_change(session: Session, program: Program, change: MapChange) -> None:
+    """Apply an accepted change atomically. Re-validates against CURRENT state —
+    the map may have moved between the revision pass and this accept."""
+    if change.status != "proposed":
+        raise ValueError(f"change already {change.status}")
+    reason = validate_change(session, program, change.kind, change.payload)
+    if reason is not None:
+        raise ValueError(f"change no longer applies: {reason}")
+
+    payload = change.payload
+    if change.kind == "add_topic":
+        session.add(ProgramTopicLink(
+            milestone_id=payload["milestone_id"], status="stub",
+            proposed_title=str(payload["title"]).strip(),
+            why=change.why, sources=change.source_urls, added_by="revision"))
+    elif change.kind == "add_milestone":
+        after = payload.get("after_milestone_id")
+        siblings = session.exec(
+            select(Milestone).where(Milestone.program_id == program.id)
+            .order_by(Milestone.order_index)
+        ).all()
+        new_index = 0
+        if after is not None:
+            after_m = session.get(Milestone, after)
+            new_index = after_m.order_index + 1
+        for s in siblings:
+            if s.order_index >= new_index:
+                s.order_index += 1
+                session.add(s)
+        m = Milestone(program_id=program.id, title=str(payload["title"]).strip(),
+                      success_criteria=str(payload.get("success_criteria", "")),
+                      order_index=new_index,
+                      depends_on=[after] if after is not None else [])
+        session.add(m)
+        session.flush()
+        for t in payload.get("topics", []) or []:
+            if t.get("title"):
+                session.add(ProgramTopicLink(
+                    milestone_id=m.id, status="stub", proposed_title=str(t["title"]),
+                    why=str(t.get("why", "")), added_by="revision"))
+    elif change.kind == "revise_milestone":
+        m = session.get(Milestone, payload["milestone_id"])
+        if payload.get("title") is not None:
+            m.title = str(payload["title"])
+        if payload.get("success_criteria") is not None:
+            m.success_criteria = str(payload["success_criteria"])
+        session.add(m)
+    elif change.kind == "prune_topic":
+        link = session.get(ProgramTopicLink, payload["link_id"])
+        link.status = "pruned"
+        session.add(link)
+    elif change.kind == "prune_milestone":
+        m = session.get(Milestone, payload["milestone_id"])
+        m.archived = True
+        session.add(m)
+
+    change.status = "accepted"
+    session.add(change)
+    session.commit()
+    session.refresh(change)
+
+
+def reject_change(session: Session, change: MapChange) -> None:
+    if change.status != "proposed":
+        raise ValueError(f"change already {change.status}")
+    change.status = "rejected"
+    session.add(change)
+    session.commit()
+    session.refresh(change)
+
+
+def revision_suggested(session: Session, program: Program) -> bool:
+    """True when a gate has passed since the map was last revised (spec §4.4)."""
+    latest_pass = session.exec(
+        select(AgentEvent).where(
+            AgentEvent.program_id == program.id,
+            AgentEvent.kind == "program:gate_passed",
+        ).order_by(AgentEvent.id.desc())
+    ).first()
+    if latest_pass is None:
+        return False
+    latest_rev = session.exec(
+        select(MapRevision).where(MapRevision.program_id == program.id)
+        .order_by(MapRevision.id.desc())
+    ).first()
+    if latest_rev is None:
+        return True
+    return latest_pass.created_at > latest_rev.created_at

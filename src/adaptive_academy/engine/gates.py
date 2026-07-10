@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
-from adaptive_academy.models import Assessment, Concept, Milestone, ProgramTopicLink, Track
+from adaptive_academy.models import AgentEvent, Assessment, Concept, Milestone, ProgramTopicLink, Track
 
 DELAY_DAYS = 7          # recall must be >= this many days after the prior engagement
 HELD_RATIO = 0.85       # mirrors engine/decay.py: recall keeps >=85% of prior score
@@ -129,6 +129,12 @@ def milestone_gate(session: Session, milestone: Milestone) -> GateReport:
     else:
         new_status = "open"
     if new_status != milestone.gate_status:
+        if new_status == "passed":
+            # Timestamped signal for the revision nudge (spec §4.4): emitted only
+            # on the transition, never on a re-evaluation that stays passed.
+            session.add(AgentEvent(program_id=milestone.program_id,
+                                   kind="program:gate_passed",
+                                   detail=f"milestone {milestone.id}"))
         milestone.gate_status = new_status
         session.add(milestone)
         session.commit()
