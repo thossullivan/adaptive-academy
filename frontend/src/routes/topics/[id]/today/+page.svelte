@@ -88,6 +88,13 @@
           — run a Decay Check or ship an artifact.
         </p>
       {/if}
+      {#if programCtx.revision_suggested}
+        <p class="mt-2 text-sm text-muted">
+          Leg verified —
+          <a class="text-accent hover:underline" href={`/programs/${programCtx.program_id}`}>
+            revise the map</a> with what you've learned?
+        </p>
+      {/if}
     </Card>
   {/if}
   {#if wind && comeback}

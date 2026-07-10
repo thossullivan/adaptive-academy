@@ -3,8 +3,8 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import { gateBadge } from '$lib/programs';
-  import type { GateReport, MilestoneInfo, ProgramDetail } from '$lib/types';
+  import { changeSummary, gateBadge } from '$lib/programs';
+  import type { GateReport, MapRevisionInfo, MilestoneInfo, ProgramDetail } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Input, Textarea } from '$lib/ui';
 
@@ -18,6 +18,8 @@
   let overrideFor = $state<number | null>(null);
   let overrideReason = $state('');
   let pendingSave: Promise<unknown> | null = null;
+  let revision = $state<MapRevisionInfo | null>(null);
+  let showArchived = $state(false);
 
   const inReview = $derived(
     detail?.milestones.some((m) => m.links.some((l) => l.status === 'proposed')) ?? false
@@ -26,6 +28,7 @@
   async function load() {
     try {
       detail = await api.getProgram(programId);
+      revision = detail?.has_open_revision ? await api.getOpenRevision(programId).catch(() => null) : null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -33,6 +36,34 @@
     }
   }
   onMount(load);
+
+  async function revise() {
+    busy = true;
+    error = '';
+    try {
+      revision = await api.reviseMap(programId);
+      await load();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    busy = false;
+  }
+
+  async function resolveChange(changeId: number, accept: boolean) {
+    busy = true;
+    error = '';
+    try {
+      detail = accept
+        ? await api.acceptChange(programId, changeId)
+        : await api.rejectChange(programId, changeId);
+      revision = detail.has_open_revision
+        ? await api.getOpenRevision(programId).catch(() => null)
+        : null;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    busy = false;
+  }
 
   async function runResearch() {
     busy = true;
@@ -140,6 +171,12 @@
   width="wide"
   lead={detail?.program.goal_statement ?? ''}
 >
+  {#snippet actions()}
+    {#if detail && detail.milestones.length > 0}
+      <Button onclick={revise} disabled={busy || detail.has_open_revision}>Revise map</Button>
+    {/if}
+  {/snippet}
+
   {#if loading}
     <p class="text-sm text-muted">Loading…</p>
   {:else if !detail}
@@ -168,10 +205,58 @@
       </Card>
     {/if}
     {#if !inReview && error}<p class="mt-3 text-sm text-danger">{error}</p>{/if}
+
+    {#if detail.revision_suggested && !detail.has_open_revision}
+      <Card class="mt-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-sm text-muted">Leg verified — revise the map with what you've learned?</p>
+          <Button onclick={revise} disabled={busy}>Revise map</Button>
+        </div>
+      </Card>
+    {/if}
+
+    {#if revision}
+      <Card class="mt-4">
+        <div class="eyebrow mb-2">Map revision</div>
+        <p class="mb-4 text-sm text-muted">{revision.map_health}</p>
+        <ul class="grid gap-3">
+          {#each revision.changes.filter((c) => c.status === 'proposed') as c (c.id)}
+            <li class="flex flex-wrap items-start justify-between gap-3 text-sm">
+              <div class="min-w-0">
+                <div class="text-fg">{changeSummary(c)}</div>
+                <p class="mt-1 text-muted">{c.why}</p>
+                {#if c.source_urls.length > 0}
+                  <p class="mt-1 truncate text-xs text-muted">
+                    {#each c.source_urls.slice(0, 2) as u (u)}
+                      <a class="text-accent hover:underline" href={u} target="_blank" rel="noreferrer"
+                        >{u}</a
+                      >&nbsp;
+                    {/each}
+                  </p>
+                {/if}
+              </div>
+              <div class="flex shrink-0 gap-2">
+                <Button onclick={() => resolveChange(c.id, true)} disabled={busy}>Accept</Button>
+                <button
+                  class="text-sm text-muted hover:text-fg"
+                  onclick={() => resolveChange(c.id, false)}
+                  disabled={busy}
+                >
+                  Reject
+                </button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      </Card>
+    {/if}
+
     {@const milestones = detail.milestones}
+    {@const visibleMilestones = milestones.filter((m) => showArchived || !m.archived)}
+    {@const archivedCount = milestones.filter((m) => m.archived).length}
     <div class="mt-4 grid gap-4">
-      {#each milestones as m, i (m.id)}
-        <Card>
+      {#each visibleMilestones as m, i (m.id)}
+        <Card class={m.archived ? 'opacity-60' : ''}>
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
               <div class="eyebrow">
@@ -198,7 +283,10 @@
                 <p class="mt-1 text-xs text-muted">Override reason: {m.override_reason}</p>
               {/if}
             </div>
-            <Badge tone={gateBadge(m.gate_status).tone}>{gateBadge(m.gate_status).label}</Badge>
+            <div class="flex shrink-0 items-center gap-2">
+              {#if m.archived}<Badge>Archived</Badge>{/if}
+              <Badge tone={gateBadge(m.gate_status).tone}>{gateBadge(m.gate_status).label}</Badge>
+            </div>
           </div>
 
           <ul class="mt-4 grid gap-2">
@@ -219,6 +307,7 @@
                   >
                     {l.proposed_title}
                   </span>
+                  {#if l.added_by === 'revision'}<Badge tone="accent">revision</Badge>{/if}
                   {#if l.why}<span class="truncate text-muted">— {l.why}</span>{/if}
                 </div>
                 <div class="flex shrink-0 items-center gap-2">
@@ -303,5 +392,13 @@
         </Card>
       {/each}
     </div>
+    {#if archivedCount > 0}
+      <button
+        class="mt-3 text-xs text-muted hover:text-fg"
+        onclick={() => (showArchived = !showArchived)}
+      >
+        {showArchived ? 'Hide archived' : `Show ${archivedCount} archived`}
+      </button>
+    {/if}
   {/if}
 </Page>
