@@ -75,6 +75,80 @@ def test_validate_change_rules(session):
     assert validate_change(session, p, "explode", {}) is not None
 
 
+def test_validate_add_topic_requires_title(session):
+    p, m1, m2, l1, l2 = _program(session)
+    assert validate_change(session, p, "add_topic",
+                           {"milestone_id": m2.id}) is not None  # missing
+    assert validate_change(session, p, "add_topic",
+                           {"milestone_id": m2.id, "title": "   "}) is not None  # blank
+
+
+def test_validate_add_milestone_branches(session):
+    p, m1, m2, l1, l2 = _program(session)
+    # success: first leg (after_milestone_id=None) and after a valid milestone
+    assert validate_change(session, p, "add_milestone",
+                           {"after_milestone_id": None, "title": "Systems"}) is None
+    assert validate_change(session, p, "add_milestone",
+                           {"after_milestone_id": m2.id, "title": "Systems"}) is None
+    # refusals: unresolvable anchor, missing title
+    assert validate_change(session, p, "add_milestone",
+                           {"after_milestone_id": 999, "title": "Systems"}) is not None
+    assert validate_change(session, p, "add_milestone",
+                           {"after_milestone_id": None, "title": ""}) is not None
+
+
+def test_validate_revise_milestone_branches(session):
+    p, m1, m2, l1, l2 = _program(session)
+    assert validate_change(session, p, "revise_milestone",
+                           {"milestone_id": 999, "title": "x"}) is not None
+    # neither title nor success_criteria → nothing to revise
+    assert validate_change(session, p, "revise_milestone",
+                           {"milestone_id": m2.id}) is not None
+    # success_criteria alone is enough
+    assert validate_change(session, p, "revise_milestone",
+                           {"milestone_id": m2.id, "success_criteria": "derive X"}) is None
+
+
+def test_validate_prune_milestone_branches(session):
+    p, m1, m2, l1, l2 = _program(session)
+    # success: un-started leg with an open gate
+    assert validate_change(session, p, "prune_milestone", {"milestone_id": m2.id}) is None
+    assert validate_change(session, p, "prune_milestone",
+                           {"milestone_id": 999}) is not None
+
+
+def test_validate_prune_topic_branches(session):
+    p, m1, m2, l1, l2 = _program(session)
+    # already pruned
+    pruned = ProgramTopicLink(milestone_id=m2.id, proposed_title="Old", status="pruned")
+    session.add(pruned)
+    session.commit()
+    assert validate_change(session, p, "prune_topic", {"link_id": pruned.id}) is not None
+    # unresolvable link id (missing row, and a non-int id)
+    assert validate_change(session, p, "prune_topic", {"link_id": 999}) is not None
+    assert validate_change(session, p, "prune_topic", {"link_id": "1"}) is not None
+    # link whose milestone belongs to a DIFFERENT program
+    other = Program(title="Other")
+    session.add(other)
+    session.commit()
+    om = Milestone(program_id=other.id, title="Elsewhere", order_index=0)
+    session.add(om)
+    session.commit()
+    ol = ProgramTopicLink(milestone_id=om.id, proposed_title="Foreign", status="stub")
+    session.add(ol)
+    session.commit()
+    assert validate_change(session, p, "prune_topic", {"link_id": ol.id}) is not None
+
+
+def test_validate_archived_milestone_is_unresolvable(session):
+    p, m1, m2, l1, l2 = _program(session)
+    archived = Milestone(program_id=p.id, title="Retired", order_index=2, archived=True)
+    session.add(archived)
+    session.commit()
+    assert validate_change(session, p, "add_topic",
+                           {"milestone_id": archived.id, "title": "x"}) is not None
+
+
 SYNTH = {
     "map_health": "solid but MoE is missing",
     "changes": [
