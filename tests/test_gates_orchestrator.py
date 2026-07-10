@@ -2,8 +2,9 @@ from datetime import datetime, timedelta
 
 from adaptive_academy.engine.gates import milestone_gate
 from adaptive_academy.models import (
-    Assessment, Concept, Milestone, Program, ProgramTopicLink, Topic, Track,
+    AgentEvent, Assessment, Concept, Milestone, Program, ProgramTopicLink, Topic, Track,
 )
+from sqlmodel import select as _select
 
 T0 = datetime(2026, 7, 1, 12, 0, 0)
 
@@ -82,3 +83,19 @@ def test_override_is_sticky_until_evidence_passes(session):
                            created_at=T0 + timedelta(days=8)))
     session.commit()
     assert milestone_gate(session, m).verdict == "passed"
+
+
+def test_gate_pass_transition_emits_event_once(session):
+    m, lb = _seed_milestone(session)
+    session.add(Assessment(concept_id=lb.id, kind="teach", prompt="p", score=0.9,
+                           created_at=T0))
+    session.add(Assessment(concept_id=lb.id, kind="recall", prompt="p", score=0.85,
+                           created_at=T0 + timedelta(days=8)))
+    session.commit()
+    milestone_gate(session, m)  # open -> passed: emits
+    milestone_gate(session, m)  # stays passed: must NOT emit again
+    events = session.exec(_select(AgentEvent).where(
+        AgentEvent.kind == "program:gate_passed")).all()
+    assert len(events) == 1
+    assert events[0].detail == f"milestone {m.id}"
+    assert events[0].program_id is not None
