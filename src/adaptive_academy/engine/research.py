@@ -1,10 +1,10 @@
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from sqlmodel import Session
 
+from adaptive_academy.engine.fanout import fan_out_with_retry
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
@@ -153,20 +153,9 @@ def research_topic(
     briefs = build_briefs(topic.title, intent.goal, max_subagents)
     emit("research:plan", f"{len(briefs)} briefs")
 
-    # Fan out concurrently; collect per-brief results in brief order for deterministic tracing.
-    per_brief: list[list[RawSource]] = [[] for _ in briefs]
-    failures: dict[int, str] = {}
-    if briefs:
-        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(briefs)))) as ex:
-            futures = {ex.submit(researcher.search, b): i for i, b in enumerate(briefs)}
-            for fut in as_completed(futures):
-                idx = futures[fut]
-                try:
-                    per_brief[idx] = fut.result()
-                except Exception as e:  # noqa: BLE001
-                    # One angle failing (transient 529, parse error, …) must not abort the
-                    # whole fan-out — record it and keep the other angles' sources.
-                    failures[idx] = type(e).__name__
+    # Fan out concurrently (results kept in brief order for deterministic tracing);
+    # a failed angle must not abort the run and gets one second-chance pass.
+    per_brief, failures, recovered = fan_out_with_retry(briefs, researcher, max_workers)
 
     raw: list[RawSource] = []
     for i, brief in enumerate(briefs):
@@ -175,6 +164,8 @@ def research_topic(
             s.angle = brief.angle
         if i in failures:
             emit("research:subagent_error", f"{brief.angle}: {failures[i]}")
+        elif i in recovered:
+            emit("research:subagent_retry", f"{brief.angle}: recovered {recovered[i]} sources")
         else:
             emit("research:subagent", f"{brief.angle}: {len(found)} sources")
         raw.extend(found)

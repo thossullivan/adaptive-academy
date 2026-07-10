@@ -6,11 +6,11 @@ lists, prerequisite structures), then one structured synthesis call drafts miles
 rows (Milestone + ProgramTopicLink status=proposed).
 """
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine.fanout import fan_out_with_retry
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
 from adaptive_academy.llm.structured import structured_json
 from adaptive_academy.llm.types import LLMClient
@@ -149,17 +149,7 @@ def research_program(
                                   intent.focus_area, max_subagents)
     emit("program_research:plan", f"{len(briefs)} briefs")
 
-    per_brief: list[list[RawSource]] = [[] for _ in briefs]
-    failures: dict[int, str] = {}
-    if briefs:
-        with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(briefs)))) as ex:
-            futures = {ex.submit(researcher.search, b): i for i, b in enumerate(briefs)}
-            for fut in as_completed(futures):
-                idx = futures[fut]
-                try:
-                    per_brief[idx] = fut.result()
-                except Exception as e:  # noqa: BLE001
-                    failures[idx] = type(e).__name__
+    per_brief, failures, recovered = fan_out_with_retry(briefs, researcher, max_workers)
 
     raw: list[RawSource] = []
     for i, brief in enumerate(briefs):
@@ -167,6 +157,9 @@ def research_program(
             s.angle = brief.angle
         if i in failures:
             emit("program_research:subagent_error", f"{brief.angle}: {failures[i]}")
+        elif i in recovered:
+            emit("program_research:subagent_retry",
+                 f"{brief.angle}: recovered {recovered[i]} sources")
         else:
             emit("program_research:subagent", f"{brief.angle}: {len(per_brief[i])} sources")
         raw.extend(per_brief[i])
