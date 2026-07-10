@@ -2,8 +2,9 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api, conceptLevels } from '$lib/api';
-  import type { Concept, Item, WindState, Comeback } from '$lib/types';
+  import type { Concept, Item, WindState, Comeback, ProgramContext } from '$lib/types';
   import { LEVEL_FILL, LEVEL_LABEL, levelColor } from '$lib/utils';
+  import { gateBadge } from '$lib/programs';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Markdown, ComebackCard } from '$lib/ui';
 
@@ -17,6 +18,7 @@
   let allDone = $state(false);
   let wind = $state<WindState | null>(null);
   let comeback = $state<Comeback | null>(null);
+  let programCtx = $state<ProgramContext | null>(null);
 
   onMount(async () => {
     let concepts: Concept[] = [];
@@ -50,6 +52,7 @@
     }
     wind = await api.getWind(topicId).catch(() => null);
     comeback = await api.getComeback(topicId).catch(() => null);
+    programCtx = await api.programContext(topicId).catch(() => null);
 
     // Shakiest load-bearing concept (unmeasured counts as a priority to probe).
     if (concepts.length) {
@@ -67,6 +70,26 @@
 </script>
 
 <Page eyebrow="Today's session" title="What to do right now" lead="A focused loop assembled from where you actually are — warm up, build, probe, teach back." width="normal">
+  {#if programCtx}
+    <Card class="mb-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0 text-sm">
+          <a class="text-accent hover:underline" href={`/programs/${programCtx.program_id}`}>
+            {programCtx.program_title}</a>
+          <span class="text-muted"> / {programCtx.milestone_title}</span>
+        </div>
+        <Badge tone={gateBadge(programCtx.gate_status).tone}>{gateBadge(programCtx.gate_status).label}</Badge>
+      </div>
+      {#if programCtx.unverified.length > 0}
+        <p class="mt-2 text-sm text-muted">
+          Gate needs cold verification of:
+          <span class="text-fg">{programCtx.unverified.slice(0, 3).join(', ')}</span>
+          {#if programCtx.unverified.length > 3}&nbsp;+{programCtx.unverified.length - 3} more{/if}
+          — run a Decay Check or ship an artifact.
+        </p>
+      {/if}
+    </Card>
+  {/if}
   {#if wind && comeback}
     <div class="mb-5"><ComebackCard {wind} {comeback} /></div>
   {/if}

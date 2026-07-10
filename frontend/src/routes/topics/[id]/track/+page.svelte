@@ -3,13 +3,14 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import { canShip } from '$lib/ship';
-  import type { Curriculum, ShipResult } from '$lib/types';
+  import type { Curriculum, ShipResult, ProgramContext } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Markdown, Input, Textarea } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let cur = $state<Curriculum | null>(null);
   let loading = $state(true);
+  let programCtx = $state<ProgramContext | null>(null);
   const cycle: Record<string, string> = { todo: 'doing', doing: 'done', done: 'todo' };
 
   // Ship-it (per deliverable) state.
@@ -54,6 +55,7 @@
     } catch {
       cur = null;
     }
+    programCtx = await api.programContext(topicId).catch(() => null);
     loading = false;
   });
 
@@ -86,6 +88,13 @@
     <Button variant="outline" href="/topics/{topicId}/assess">Assess</Button>
     <Button variant="ghost" onclick={exportMd}>Export .md</Button>
   {/snippet}
+
+  {#if programCtx}
+    <p class="mb-4 text-xs text-muted">
+      Part of <a class="text-accent hover:underline" href={`/programs/${programCtx.program_id}`}>{programCtx.program_title}</a>
+      / {programCtx.milestone_title}
+    </p>
+  {/if}
 
   {#if loading}
     <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">loading track…</span></div>
