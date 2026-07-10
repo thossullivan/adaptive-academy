@@ -77,13 +77,16 @@ def test_research_program_persists_milestones_and_links(session):
 
 
 def test_research_program_survives_single_angle_failure(session):
+    """Resilience: one angle errors but the others still return sources — synthesis
+    proceeds grounded in the surviving angles' sources."""
     p, intent = _program(session)
 
     class FlakyResearcher:
         def search(self, brief):
             if brief.angle == "phd_curricula":
                 raise RuntimeError("529")
-            return []
+            return [RawSource(title=f"{brief.angle} source",
+                              url=f"https://e.com/{brief.angle}", tier=2)]
 
     llm = ScriptedLLMClient([LLMResponse(text=json.dumps(SYNTH))])
     result = research_program(session, p, intent, researcher=FlakyResearcher(), llm=llm)
@@ -122,6 +125,34 @@ def test_research_program_all_angles_failed_raises_and_persists_trace(session):
     assert "program_research:done" not in kinds
 
     # A subsequent research run is NOT blocked (no proposal was persisted).
+    result = research_program(session, p, intent,
+                              researcher=ScriptedResearcherClient({
+                                  "phd_curricula": [RawSource(title="MIT quals",
+                                                              url="https://mit.edu/q",
+                                                              tier=1)],
+                              }),
+                              llm=ScriptedLLMClient([LLMResponse(text=json.dumps(SYNTH))]))
+    assert len(result.milestones) == 2
+
+
+def test_research_program_all_angles_empty_raises_and_allows_retry(session):
+    """All angles "succeed" but return zero sources (the historical silent-failure
+    signature — e.g. truncated JSON from web-search fan-outs): synthesis must not run
+    and no proposal is persisted, so a retry is not blocked."""
+    p, intent = _program(session)
+
+    llm = ScriptedLLMClient([LLMResponse(text=json.dumps(SYNTH))])
+    with pytest.raises(ValueError, match="no sources"):
+        research_program(session, p, intent,
+                         researcher=ScriptedResearcherClient({}),  # every angle → []
+                         llm=llm)
+    assert llm.calls == []  # synthesis never ran
+
+    assert session.exec(
+        select(Milestone).where(Milestone.program_id == p.id)
+    ).all() == []  # zero milestones persisted
+
+    # A subsequent research run is NOT blocked.
     result = research_program(session, p, intent,
                               researcher=ScriptedResearcherClient({
                                   "phd_curricula": [RawSource(title="MIT quals",
