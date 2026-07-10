@@ -171,3 +171,65 @@ def test_research_program_refuses_second_run(session):
         research_program(session, p, intent,
                          researcher=ScriptedResearcherClient({}),
                          llm=ScriptedLLMClient([]))
+
+
+class _FailFirstCallResearcher:
+    """Fails an angle's FIRST call, succeeds on the retry sweep. Thread-safe."""
+
+    def __init__(self, flaky_angle: str):
+        import threading
+
+        self._flaky_angle = flaky_angle
+        self._seen: set[str] = set()
+        self._lock = threading.Lock()
+
+    def search(self, brief):
+        with self._lock:
+            first_call = brief.angle not in self._seen
+            self._seen.add(brief.angle)
+        if first_call and brief.angle == self._flaky_angle:
+            raise RuntimeError("connection reset by transient blip")
+        return [RawSource(title=f"{brief.angle} source",
+                          url=f"https://e.com/{brief.angle}", tier=2)]
+
+
+def test_transient_angle_failure_recovers_on_second_chance_sweep(session):
+    """A transient first-pass failure is retried once after the pool completes;
+    the recovered angle contributes sources and emits no error event."""
+    p, intent = _program(session)
+    llm = ScriptedLLMClient([LLMResponse(text=json.dumps(SYNTH))])
+    result = research_program(
+        session, p, intent,
+        researcher=_FailFirstCallResearcher("phd_curricula"), llm=llm)
+
+    kinds = [e.kind for e in result.events]
+    assert "program_research:subagent_error" not in kinds
+    retries = [e for e in result.events if e.kind == "program_research:subagent_retry"]
+    assert len(retries) == 1
+    assert retries[0].detail == "phd_curricula: recovered 1 sources"
+    assert len(result.milestones) == 2  # run succeeded end-to-end
+
+
+def test_subagent_error_detail_includes_exception_message(session, caplog):
+    """Persistent failures must be diagnosable: the trace event carries the
+    exception message (not just the class name) and the traceback is logged."""
+    import logging
+
+    p, intent = _program(session)
+
+    class PersistentFailResearcher:
+        def search(self, brief):
+            if brief.angle == "phd_curricula":
+                raise RuntimeError("529 overloaded upstream")
+            return [RawSource(title=f"{brief.angle} source",
+                              url=f"https://e.com/{brief.angle}", tier=2)]
+
+    llm = ScriptedLLMClient([LLMResponse(text=json.dumps(SYNTH))])
+    with caplog.at_level(logging.ERROR):
+        result = research_program(
+            session, p, intent, researcher=PersistentFailResearcher(), llm=llm)
+
+    errs = [e for e in result.events if e.kind == "program_research:subagent_error"]
+    assert len(errs) == 1
+    assert "RuntimeError: 529 overloaded upstream" in errs[0].detail
+    assert any(r.exc_info for r in caplog.records)  # traceback logged server-side
