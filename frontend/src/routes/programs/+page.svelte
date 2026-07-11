@@ -41,14 +41,14 @@
       </p>
     </Card>
   {:else}
-    <div class="grid gap-3">
+    <div class="flex flex-col gap-3">
       {#each programs as p (p.id)}
-        <a href={`/programs/${p.id}`} class="block">
+        <a href={`/programs/${p.id}`} class="block min-w-0">
           <Card>
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0 flex-1">
                 <div class="truncate text-fg">{p.title}</div>
-                <div class="mt-1 truncate text-sm text-muted">{p.goal_statement}</div>
+                <div class="mt-1 line-clamp-2 text-sm text-muted">{p.goal_statement}</div>
               </div>
               <div class="shrink-0"><Badge>{p.milestone_count} milestones</Badge></div>
             </div>
