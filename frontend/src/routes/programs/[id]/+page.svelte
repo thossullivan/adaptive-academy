@@ -293,24 +293,25 @@
 
           <ul class="mt-4 grid gap-2">
             {#each m.links as l (l.id)}
-              <li class="flex items-center justify-between gap-3 text-sm">
-                <div class="flex min-w-0 items-center gap-2">
+              <li class="flex items-start justify-between gap-3 text-sm">
+                <div class="flex min-w-0 flex-1 items-start gap-2">
                   {#if l.status === 'proposed'}
                     <input
                       type="checkbox"
+                      class="mt-1 shrink-0"
                       checked={!pruned.has(l.id)}
                       onchange={() => togglePrune(l.id)}
                     />
                   {/if}
-                  <span
-                    class="truncate {l.status === 'pruned'
-                      ? 'text-muted line-through'
-                      : 'text-fg'}"
-                  >
-                    {l.proposed_title}
-                  </span>
-                  {#if l.added_by === 'revision'}<Badge tone="accent">revision</Badge>{/if}
-                  {#if l.why}<span class="truncate text-muted">— {l.why}</span>{/if}
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span class={l.status === 'pruned' ? 'text-muted line-through' : 'text-fg'}>
+                        {l.proposed_title}
+                      </span>
+                      {#if l.added_by === 'revision'}<Badge tone="accent">revision</Badge>{/if}
+                    </div>
+                    {#if l.why}<p class="mt-0.5 text-muted">{l.why}</p>{/if}
+                  </div>
                 </div>
                 <div class="flex shrink-0 items-center gap-2">
                   {#if l.status === 'stub'}
