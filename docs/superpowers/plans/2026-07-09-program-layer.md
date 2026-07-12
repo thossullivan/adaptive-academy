@@ -292,7 +292,7 @@ def downgrade() -> None:
 Run (against a scratch copy so the live db is untouched):
 
 ```bash
-cd /Users/tomsullivan/Projects/adaptive-academy
+cd /path/to/adaptive-academy
 cp adaptive_academy.db /tmp/aa-mig-test.db 2>/dev/null || true
 uv run alembic upgrade head && uv run alembic downgrade -1 && uv run alembic upgrade head
 ```
