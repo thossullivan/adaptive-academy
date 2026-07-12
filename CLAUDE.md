@@ -1,213 +1,95 @@
-# Adaptive Academy Design Principles
+# Adaptive Academy — Working Notes
+
+Guidance for anyone (human or agent) working in this repo. For the product overview and the
+architecture diagram, read [`docs/OVERVIEW.md`](docs/OVERVIEW.md); for setup and run instructions,
+[`README.md`](README.md). This file captures the *how we build it* conventions.
 
 ## Core Philosophy
 
-**Local-First, Agent-Orchestrated Learning System**
+**Local-first, agent-orchestrated, generation-first learning.** A personal, private learning
+environment where specialized agents coordinate through shared state, the competence model is kept
+honest by triangulating independent signals, and the tutor withholds answers until you've generated
+an attempt — enforced in code, not just asked for in a prompt.
 
-- Personal, private learning environment
-- Specialized agents with clear responsibilities
-- State-driven coordination between agents
-- Type-safe, prompt-managed interactions
+## Stack
 
-## Dual-Framework Development Strategy
+- **Backend:** Python 3.12 · FastAPI · SQLModel · SQLite (WAL) · Alembic · Anthropic SDK
+- **Frontend:** SvelteKit 2 / Svelte 5 (runes) / Tailwind 4
+- **Tooling:** `uv` (Python deps), `just` (task runner), `pytest` + `vitest` (tests), `ruff` +
+  pre-commit. Runs locally or as a Docker/OrbStack compose service.
 
-To ensure a robust and reliable development process, this project employs two distinct, parallel AI agent frameworks. This separation of concerns is a foundational guardrail to reduce risk and optimize development.
+## Layout
 
-### 1. The Application Crew (The "Product")
-
-This is the user-facing agent system that delivers the learning experience.
-
-- **Purpose**: To provide personalized education to the end-user.
-- **Agents**: `CurriculumDirector`, `TutorAgent`, `AssessmentCoach`.
-- **Environment**: The deployed, long-running Python/FastAPI service. It is the core product.
-
-### 2. The Developer Crew (The "Process")
-
-This is an internal-facing agent system used to build and maintain the application.
-
-- **Purpose**: To automate the software development lifecycle for the `adaptive-academy` project itself.
-- **Agents**: `Architect`, `Coder`, `CodeReviewer`, `QA_Tester`, `Integrator`.
-- **Environment**: An on-demand, local tool run by developers to write, test, and review code. It is not part of the deployed product.
-
-This strategy ensures that the AI used for development is completely separate from the AI delivered to users, creating a powerful and safe workflow.
+```
+src/adaptive_academy/
+  models.py      SQLModel tables — the single source of truth
+  prompts.py     version-tagged prompt registry (every tag traced into AgentEvent)
+  db.py          engine/session, WAL + PRAGMA foreign_keys=ON
+  api/           FastAPI routers (REST under /api)
+  engine/        one module per capability: research, curriculum, tutor, assess,
+                 decay, productive_failure, teach, momentum, gates, revision, vault, …
+  llm/           pluggable client registry (Anthropic SDK / agent-SDK / scripted-for-tests)
+alembic/         migrations
+frontend/        SvelteKit app
+docs/            OVERVIEW, research (evidence base), superpowers/specs + plans (the build log)
+tests/           pytest suite (runs with no live API calls)
+```
 
 ## Design Principles
 
-### 1. Agent Specialization & Autonomy
+### 1. State-driven, not call-driven
+- **SQLite is the single source of truth.** Agents coordinate through shared, typed SQLModel state —
+  never direct agent-to-agent calls.
+- **The `Assessment` table is the spine.** Every competence signal (self-explanation, decay/recall,
+  calibration, teach-back, artifacts) derives from real, logged actions. Don't invent competence
+  from anything that isn't a logged `Assessment` row.
+- **`AgentEvent` is the observability trace,** not a debug log — "What the agents did" is a
+  first-class UI surface. New agent actions should emit events.
+- **Migrations for every schema change.** Use plain `op.add_column` on populated,
+  FK-referenced tables — `batch_alter_table` recreates the table and breaks foreign keys on real
+  data. Tests run with `PRAGMA foreign_keys=ON` for prod parity.
 
-- **Single Responsibility**: Each agent has one clear domain of expertise
-- **Stateful Agents**: Agents maintain their own context and memory
-- **Minimal Coupling**: Agents communicate through shared state, not direct calls
-- **Composable**: New agents can be added without changing existing ones
+### 2. Agent specialization
+- Each agent (Researcher, CurriculumDirector, Tutor, Assessor, and the engine capabilities above)
+  has one clear responsibility and its own prompt(s) in `prompts.py`.
+- New capabilities are added as new `engine/` modules without changing existing ones.
 
-### 2. State Management First
+### 3. Enforcement in code, not vibes
+- Behaviors that matter for pedagogy or safety live in code paths, so they hold even when a prompt
+  is coaxed: the gated `reveal_solution` tool (withhold solutions until an attempt is logged),
+  SSRF-guarded artifact fetch, forced structured output. Don't move these into prompt text.
 
-- **Single Source of Truth**: SQLite database holds all canonical state
-- **Event-Driven Updates**: State changes trigger agent notifications
-- **Immutable History**: All learning events are logged for analysis
-- **Context Propagation**: Shared LearningContext passed between agents
+### 4. Pluggable, deterministically testable LLM layer
+- The `llm/` client registry swaps the real Anthropic SDK for a **scripted** client. The whole
+  agent crew is testable with **no live API calls** — keep it that way. New LLM-backed code goes
+  through the registry, never a direct SDK import in `engine/`.
 
-### 3. Type-Safe Prompt Engineering
+### 5. Progressive enhancement
+- MVP first, add complexity incrementally. Backward compatibility and data migrations for anything
+  that touches persisted state.
 
-- **BAML for Structure**: All agent prompts defined in BAML with schemas
-- **Versioned Prompts**: Track prompt changes for reproducibility
-- **Validated Outputs**: Type-safe responses prevent runtime errors
-- **Testable Prompts**: BAML allows isolated testing of agent behaviors
+## Development Workflow
 
-### 4. Progressive Enhancement
+**Spec-first, built in public.** Each capability starts as a design spec in
+`docs/superpowers/specs/`, becomes a bite-sized plan in `docs/superpowers/plans/`, then ships via
+subagent-driven development with adversarial code review. Those documents *are* the build log.
 
-- **MVP First**: Start simple, add complexity incrementally
-- **Feature Flags**: New capabilities can be toggled on/off
-- **Backward Compatibility**: Changes don't break existing workflows
-- **Data Migration**: Schema changes include migration scripts
+- **TDD:** write the failing test, watch it fail, then implement. Backend `just test`; frontend
+  `cd frontend && npx vitest run`.
+- **Feature branches**, clear commit messages, review before merge, tests green before merge.
+- **Prompts are versioned** (`prompts.py` tags) so a behavior can be traced to the exact prompt.
 
-### 5. Observable & Debuggable
+## Quality & Privacy
 
-- **Event Logging**: All agent actions logged with context
-- **State Inspection**: Current system state always visible
-- **Performance Metrics**: Track learning progress and system health
-- **Error Recovery**: Graceful handling of failures with rollback
+- **Type-safe outputs:** all LLM interactions return validated structured output.
+- **Local & private:** all learning records stay on the local machine; no telemetry. (Be honest that
+  each AI call still ships its content to Anthropic's API — "local-first" refers to *records*, not
+  offline inference.)
+- **BYOK:** the app runs on the user's `ANTHROPIC_API_KEY`. Secrets live in `.env` (gitignored) —
+  never commit keys or real user data.
+- **Graceful degradation:** an agent failure should reduce functionality, not corrupt learning
+  state.
 
-## Architecture Patterns
+## Performance Targets
 
-### Agent Communication Pattern
-
-```typescript
-// Shared context object - single source of truth
-interface LearningContext {
-  sessionId: string;
-  userId: string;
-  currentModule: Module;
-  learningGoals: Goal[];
-  performanceData: PerformanceMetrics;
-  agentStates: Record<AgentType, AgentState>;
-  eventHistory: LearningEvent[];
-}
-
-// Agents receive context, return actions
-interface Agent {
-  processContext(context: LearningContext): Promise<AgentAction[]>;
-  updateState(event: LearningEvent): void;
-}
-```
-
-### State Update Flow
-
-```
-Trigger Event → Update Context → Notify Agents → Collect Actions → Execute Actions → Update State
-```
-
-### BAML Integration Pattern
-
-```baml
-// Shared schemas across all agents
-class LearningContext { ... }
-class AgentAction { ... }
-
-// Agent-specific functions with shared context
-function CurriculumDirector_GeneratePlan(context: LearningContext) -> CurriculumPlan
-function TutorAgent_ExplainConcept(context: LearningContext, concept: string) -> Explanation
-function AssessmentCoach_CreateQuiz(context: LearningContext, topic: string) -> Quiz
-```
-
-## Quality Standards
-
-### Code Quality
-
-- **TypeScript First**: All application code in TypeScript
-- **BAML Schemas**: All LLM interactions through BAML
-- **Test Coverage**: Unit tests for core logic, integration tests for workflows
-- **Documentation**: README + inline comments for complex logic
-
-### Data Quality
-
-- **Schema Validation**: All data conforms to defined schemas
-- **Audit Trail**: Complete history of learning activities
-- **Backup Strategy**: Regular SQLite database backups
-- **Data Privacy**: All data stays local, no external services
-
-### User Experience
-
-- **Fast Feedback**: Agent responses within 2-3 seconds
-- **Clear Progress**: Always show current status and next steps
-- **Error Messages**: Helpful, actionable error descriptions
-- **Consistent Interface**: Same patterns across all interactions
-
-## Technology Constraints
-
-### Dependencies
-
-- **Core**: TypeScript, BAML, SQLite, n8n
-- **LLM**: Claude API (with fallback options)
-- **UI**: CLI first, web interface later
-- **Deployment**: Local development, self-hosted production
-- **Future**: Python agents for specialized ML tasks (via JSON interface)
-
-### Performance Targets
-
-- **Agent Response**: < 3 seconds for typical operations
-- **Database Queries**: < 100ms for state lookups
-- **Memory Usage**: < 512MB for typical session
-- **Storage Growth**: < 1MB per learning session
-
-## Security & Privacy
-
-### Data Protection
-
-- **Local Storage**: All learning data stays on local machine
-- **No Telemetry**: No usage data sent to external services
-- **API Keys**: Secure storage of LLM provider credentials
-- **Access Control**: File system permissions protect data
-
-### Error Handling
-
-- **Graceful Degradation**: System works with reduced functionality if agents fail
-- **State Consistency**: Failed operations don't corrupt learning state
-- **Recovery Procedures**: Clear steps to recover from common failures
-- **Logging**: Sufficient detail for debugging without exposing sensitive data
-
-## Development Guidelines
-
-### Git Workflow
-
-- **Feature Branches**: One branch per agent or major feature
-- **Commit Messages**: Clear, descriptive commit messages
-- **Code Reviews**: All changes reviewed before merge
-- **Testing**: Tests pass before merge
-
-### Agent Development
-
-- **BAML First**: Define prompts before implementing agent logic
-- **State Isolation**: Agents only modify their own state directly
-- **Error Boundaries**: Each agent handles its own failures
-- **Performance**: Profile and optimize slow agent operations
-
-### Documentation
-
-- **API Documentation**: All public interfaces documented
-- **Setup Guide**: Clear instructions for new development setup
-- **User Guide**: How to use the system for learning
-- **Troubleshooting**: Common issues and solutions
-
-## Success Metrics
-
-### Learning Effectiveness
-
-- **Module Completion Rate**: % of started modules completed
-- **Knowledge Retention**: Quiz scores over time
-- **Learning Velocity**: Time to complete modules vs. estimates
-- **User Satisfaction**: Self-reported learning experience
-
-### System Reliability
-
-- **Uptime**: % of time system is available
-- **Error Rate**: Failed operations per session
-- **Response Time**: Agent response latency distribution
-- **Data Integrity**: Zero data loss or corruption events
-
-### Development Velocity
-
-- **Feature Delivery**: New capabilities delivered on schedule
-- **Bug Resolution**: Time from report to fix
-- **Test Coverage**: % of code covered by tests
-- **Technical Debt**: Manageable complexity and maintainability
+- Agent response < 3s typical · state lookups < 100ms · keep a session's storage growth modest.
