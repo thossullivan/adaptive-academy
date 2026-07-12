@@ -408,7 +408,7 @@ volumes:
 Append to `.env` (real value):
 
 ```
-OBSIDIAN_VAULT_PATH=/Users/tomsullivan/Library/Mobile Documents/iCloud~md~obsidian/Documents/HomeVault
+OBSIDIAN_VAULT_PATH=/Users/you/Library/Mobile Documents/iCloud~md~obsidian/Documents/HomeVault
 ```
 
 Update `.env.example` to:
