@@ -19,6 +19,11 @@ stance runs through the whole system.
 - **An orchestrated agent crew** you can watch work: a Researcher (fan-out source gathering), a
   CurriculumDirector (phased trackers toward a "North Star"), a Tutor, and an Assessor — coordinated
   through shared state, with an observability trace of "what the agents did."
+- **Long-horizon Programs with verified-depth gates:** above single topics, a **Program** is a
+  researched milestone map (e.g. "PhD-level prep in custom LLMs") that spawns topics on demand and
+  gates progress on *evidence* — a milestone only "passes" when its load-bearing concepts survive a
+  delayed, unassisted recall **and** a graded artifact. The map **re-researches itself** against what
+  you've learned and what's changed in the field, proposing a reviewable diff you accept or reject.
 - **Anti-Goodhart competence triangulation:** a concept is "solid" only when multiple independent
   signals agree (graded self-explanation, decay/recall, calibration, teach-back, shipped artifacts)
   — never a single grade.
@@ -119,9 +124,18 @@ Notes:
 
 ## Design & evidence
 
+This project is **built in public, spec-first**: each capability starts as a written design spec,
+becomes a bite-sized implementation plan, then ships via subagent-driven development with adversarial
+code review. Those documents *are* the build log — a fuller record of the reasoning than the code
+alone, and the most interesting part to read if you're here to learn from the process.
+
 - Overview (architecture + goal): [`docs/OVERVIEW.md`](docs/OVERVIEW.md)
-- Design spec: [`docs/superpowers/specs/2026-06-15-adaptive-academy-redesign.md`](docs/superpowers/specs/2026-06-15-adaptive-academy-redesign.md)
-- Learning-science evidence base (cited): [`docs/research/2026-06-15-learning-science-evidence.md`](docs/research/2026-06-15-learning-science-evidence.md)
+- Learning-science evidence base (cited, adversarially verified): [`docs/research/`](docs/research/)
+- Design specs, per capability: [`docs/superpowers/specs/`](docs/superpowers/specs/) — e.g. the
+  [original redesign](docs/superpowers/specs/2026-06-15-adaptive-academy-redesign.md), the
+  [Program layer](docs/superpowers/specs/2026-07-09-program-layer.md), and
+  [Map Revision](docs/superpowers/specs/2026-07-10-map-revision.md)
+- Implementation plans (TDD, task-by-task): [`docs/superpowers/plans/`](docs/superpowers/plans/)
 
 ## Status & contributing
 
