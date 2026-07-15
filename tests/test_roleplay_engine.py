@@ -33,22 +33,39 @@ def test_persona_prompt_embeds_brief_and_hides_grading():
 
 
 def _materialized_milestone(s):
-    p = Program(title="B2B Sales", goal_statement="g"); s.add(p); s.commit(); s.refresh(p)
+    p = Program(title="B2B Sales", goal_statement="g")
+    s.add(p)
+    s.commit()
+    s.refresh(p)
     m = Milestone(program_id=p.id, title="Discovery", success_criteria="run a discovery call")
-    s.add(m); s.commit(); s.refresh(m)
-    t = Topic(title="Discovery"); s.add(t); s.commit(); s.refresh(t)
-    tr = Track(topic_id=t.id, title="tr"); s.add(tr); s.commit(); s.refresh(tr)
+    s.add(m)
+    s.commit()
+    s.refresh(m)
+    t = Topic(title="Discovery")
+    s.add(t)
+    s.commit()
+    s.refresh(t)
+    tr = Track(topic_id=t.id, title="tr")
+    s.add(tr)
+    s.commit()
+    s.refresh(tr)
     c = Concept(track_id=tr.id, name="SPIN questioning", is_load_bearing=True)
-    s.add(c); s.commit(); s.refresh(c)
-    s.add(KnowledgeEstimate(concept_id=c.id, level="low")); s.commit()
-    s.add(ProgramTopicLink(milestone_id=m.id, topic_id=t.id, status="started")); s.commit()
+    s.add(c)
+    s.commit()
+    s.refresh(c)
+    s.add(KnowledgeEstimate(concept_id=c.id, level="low"))
+    s.commit()
+    s.add(ProgramTopicLink(milestone_id=m.id, topic_id=t.id, status="started"))
+    s.commit()
     return p, m
 
 
 def test_direct_fills_brief_and_activates(session):
     p, m = _materialized_milestone(session)
     rp = RoleplaySession(program_id=p.id, milestone_id=m.id, status="briefing")
-    session.add(rp); session.commit(); session.refresh(rp)
+    session.add(rp)
+    session.commit()
+    session.refresh(rp)
     brief = {"persona": "VP Eng", "goal": "resist", "situation": "cold call",
              "hidden_objections": ["price"], "win_conditions": ["demo"], "difficulty": "low"}
     llm = ScriptedLLMClient([LLMResponse(text=json.dumps(brief))])
@@ -65,7 +82,9 @@ def _active_session(s):
                          persona_brief={"persona": "VP", "goal": "resist", "situation": "call",
                                         "hidden_objections": [], "win_conditions": [],
                                         "difficulty": "low"})
-    s.add(rp); s.commit(); s.refresh(rp)
+    s.add(rp)
+    s.commit()
+    s.refresh(rp)
     return rp
 
 

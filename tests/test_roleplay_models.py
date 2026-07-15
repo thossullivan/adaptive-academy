@@ -9,15 +9,22 @@ from adaptive_academy.models import (
 
 
 def _session_row(s):
-    p = Program(title="B2B Sales", goal_statement="g"); s.add(p); s.commit(); s.refresh(p)
+    p = Program(title="B2B Sales", goal_statement="g")
+    s.add(p)
+    s.commit()
+    s.refresh(p)
     m = Milestone(program_id=p.id, title="Discovery", success_criteria="c")
-    s.add(m); s.commit(); s.refresh(m)
+    s.add(m)
+    s.commit()
+    s.refresh(m)
     rp = RoleplaySession(
         program_id=p.id, milestone_id=m.id, status="active",
         persona_brief={"persona": "VP Eng", "goal": "resist", "situation": "cold call",
                        "hidden_objections": ["price"], "win_conditions": ["book a demo"],
                        "difficulty": "high"})
-    s.add(rp); s.commit(); s.refresh(rp)
+    s.add(rp)
+    s.commit()
+    s.refresh(rp)
     return rp
 
 
@@ -35,11 +42,24 @@ def test_roleplay_session_and_turns_roundtrip(session):
 
 def test_assessment_and_event_carry_roleplay_session_id(session):
     rp = _session_row(session)
-    t = Topic(title="T"); session.add(t); session.commit(); session.refresh(t)
-    tr = Track(topic_id=t.id, title="tr"); session.add(tr); session.commit(); session.refresh(tr)
-    c = Concept(track_id=tr.id, name="SPIN"); session.add(c); session.commit(); session.refresh(c)
+    t = Topic(title="T")
+    session.add(t)
+    session.commit()
+    session.refresh(t)
+    tr = Track(topic_id=t.id, title="tr")
+    session.add(tr)
+    session.commit()
+    session.refresh(tr)
+    c = Concept(track_id=tr.id, name="SPIN")
+    session.add(c)
+    session.commit()
+    session.refresh(c)
     a = Assessment(concept_id=c.id, kind="roleplay", prompt="p", roleplay_session_id=rp.id)
     e = AgentEvent(kind="roleplay:brief", roleplay_session_id=rp.id)
-    session.add(a); session.add(e); session.commit(); session.refresh(a); session.refresh(e)
+    session.add(a)
+    session.add(e)
+    session.commit()
+    session.refresh(a)
+    session.refresh(e)
     assert a.roleplay_session_id == rp.id
     assert e.roleplay_session_id == rp.id
