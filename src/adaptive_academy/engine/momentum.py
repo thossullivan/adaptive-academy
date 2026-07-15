@@ -28,13 +28,15 @@ BECALMED_DAYS = 10
 # Every Assessment is a graded generative effort, so all kinds qualify; the allowlist stays
 # explicit so a future non-learning assessment kind can be excluded deliberately.
 QUALIFYING_KINDS: set[str] = {
-    "self_explanation",
-    "calibration",
-    "source_quiz",
-    "recall",
-    "teach",
-    "productive_failure",
     "artifact_review",
+    "calibration",
+    "paper_probe",
+    "productive_failure",
+    "recall",
+    "roleplay",
+    "self_explanation",
+    "source_quiz",
+    "teach",
 }
 
 
