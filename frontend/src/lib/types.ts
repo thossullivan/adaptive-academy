@@ -161,3 +161,17 @@ export type RoleplaySession = {
   scorecard?: ScorecardRow[] | null;
 };
 export type RoleplayTurnResult = { reply: string; status: RoleplaySession['status'] };
+
+export type PaperQuestion = { index: number; axis: string; prompt: string };
+export type PaperAnswerRow = { question_index: number; content: string };
+export type PaperProbe = {
+  probe_id: number;
+  program_id: number;
+  milestone_id: number;
+  status: 'drafting' | 'answering' | 'graded';
+  paper: { title: string; url: string; source: string };
+  questions: PaperQuestion[];
+  answers: PaperAnswerRow[];
+  outcome?: { result: string; summary: string } | null;
+  scorecard?: ScorecardRow[] | null;
+};

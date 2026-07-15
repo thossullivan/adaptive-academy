@@ -17,6 +17,10 @@
   let gates = $state<Record<number, GateReport>>({});
   let overrideFor = $state<number | null>(null);
   let overrideReason = $state('');
+  let probeFor = $state<number | null>(null);
+  let probeUrl = $state('');
+  let probePaste = $state('');
+  let probeTitle = $state('');
   let pendingSave: Promise<unknown> | null = null;
   let revision = $state<MapRevisionInfo | null>(null);
   let showArchived = $state(false);
@@ -172,6 +176,26 @@
     try {
       const session = await api.startRoleplay(programId, m.id);
       await goto(`/roleplay/${session.session_id}`);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      busy = false;
+    }
+  }
+
+  async function startProbe(m: MilestoneInfo) {
+    if (!probeUrl.trim() && !probePaste.trim()) {
+      error = 'Give an arXiv URL or paste the paper text.';
+      return;
+    }
+    busy = true;
+    error = '';
+    try {
+      const probe = await api.startPaperProbe(programId, m.id, {
+        url: probeUrl.trim(),
+        pasted_text: probePaste.trim(),
+        title: probeTitle.trim()
+      });
+      await goto(`/paper-probe/${probe.probe_id}`);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       busy = false;
@@ -356,6 +380,20 @@
               >
                 Spar
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onclick={() => {
+                  probeFor = probeFor === m.id ? null : m.id;
+                  probeUrl = '';
+                  probePaste = '';
+                  probeTitle = '';
+                }}
+                disabled={busy || !startedTopic(m)}
+                title={startedTopic(m) ? '' : "Start this milestone's topic first."}
+              >
+                Probe a paper
+              </Button>
               {#if m.gate_status !== 'passed' && overrideFor !== m.id}
                 <button
                   class="text-sm text-muted hover:text-fg"
@@ -368,6 +406,30 @@
                 </button>
               {/if}
             </div>
+            {#if probeFor === m.id}
+              <div class="mt-3 flex flex-col gap-2 rounded-[var(--radius-md)] border border-border bg-surface-2 p-3">
+                <input
+                  bind:value={probeUrl}
+                  placeholder="arXiv URL (e.g. https://arxiv.org/abs/1706.03762)"
+                  class="rounded-[var(--radius-sm)] border border-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none"
+                />
+                <div class="text-center text-xs text-muted">or</div>
+                <textarea
+                  bind:value={probePaste}
+                  rows="3"
+                  placeholder="Paste the paper text…"
+                  class="resize-y rounded-[var(--radius-sm)] border border-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none"
+                ></textarea>
+                <input
+                  bind:value={probeTitle}
+                  placeholder="Title (optional)"
+                  class="rounded-[var(--radius-sm)] border border-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none"
+                />
+                <div>
+                  <Button size="sm" onclick={() => startProbe(m)} disabled={busy}>Start probe</Button>
+                </div>
+              </div>
+            {/if}
             {#if overrideFor === m.id}
               <div class="mt-3 grid gap-2">
                 <Textarea
