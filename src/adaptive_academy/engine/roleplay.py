@@ -6,8 +6,8 @@ from adaptive_academy.engine.gates import milestone_load_bearing
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
-from adaptive_academy.models import AgentEvent, Milestone, RoleplaySession, RoleplayTurn
-from adaptive_academy.prompts import ROLEPLAY_DIRECTOR, build_roleplay_persona_prompt
+from adaptive_academy.models import AgentEvent, Milestone, RoleplaySession
+from adaptive_academy.prompts import ROLEPLAY_DIRECTOR
 
 _TURN_CAP = 15
 _END = "[[END]]"
