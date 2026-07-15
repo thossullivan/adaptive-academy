@@ -96,6 +96,31 @@ class RoleplayTurn(SQLModel, table=True):
     created_at: datetime = Field(default_factory=_now)
 
 
+class PaperProbe(SQLModel, table=True):
+    """A critical paper-reading probe tied to a Program milestone."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: int = Field(foreign_key="program.id")
+    milestone_id: int = Field(foreign_key="milestone.id")
+    paper_title: str = ""
+    paper_url: str = ""
+    paper_text: str = ""
+    source: str = "paste"  # arxiv | paste
+    status: str = "drafting"  # drafting | answering | graded
+    questions: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    outcome: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class PaperProbeAnswer(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    probe_id: int = Field(foreign_key="paperprobe.id")
+    question_index: int
+    content: str
+    created_at: datetime = Field(default_factory=_now)
+
+
 class AgentEvent(SQLModel, table=True):
     """Observability trace: one row per engine/agent step.
 
@@ -107,6 +132,7 @@ class AgentEvent(SQLModel, table=True):
     topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
     program_id: Optional[int] = Field(default=None, foreign_key="program.id")
     roleplay_session_id: Optional[int] = Field(default=None, foreign_key="roleplaysession.id")
+    paper_probe_id: Optional[int] = Field(default=None, foreign_key="paperprobe.id")
     kind: str
     detail: str = ""
     created_at: datetime = Field(default_factory=_now)
@@ -249,6 +275,7 @@ class Assessment(SQLModel, table=True):
     rubric_id: Optional[int] = Field(default=None, foreign_key="rubric.id")
     anchor_id: Optional[int] = Field(default=None, foreign_key="referenceanchor.id")
     roleplay_session_id: Optional[int] = Field(default=None, foreign_key="roleplaysession.id")
+    paper_probe_id: Optional[int] = Field(default=None, foreign_key="paperprobe.id")
     baseline_assessment_id: Optional[int] = Field(default=None, foreign_key="assessment.id")
     delta: Optional[float] = None
     created_at: datetime = Field(default_factory=_now)
