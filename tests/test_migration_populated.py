@@ -75,5 +75,5 @@ def test_migration_applies_to_populated_referenced_tables(tmp_path):
 
     assert "archived" in milestone_cols
     assert "added_by" in link_cols
-    assert version == "af45456b0fc5"  # head as of the roleplay-tables migration
+    assert version == "d3b9f1c274ae"  # head as of the paper-probe-tables migration
     assert milestone_count == 1 and link_count == 1

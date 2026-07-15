@@ -69,6 +69,15 @@ def test_topic_wind_counts_only_qualifying_assessments(session):
     assert ws.days_since == 0.0
 
 
+def test_topic_wind_counts_paper_probe_assessment(session):
+    t, c = _topic_with_concept(session, "Probed topic")
+    _assess(session, c.id, "paper_probe", NOW)          # qualifies (graded paper probe)
+    ws = topic_wind(session, t.id, now=NOW)
+    assert round(ws.value, 3) == 1.0
+    assert ws.state == "steady"
+    assert ws.days_since == 0.0
+
+
 def test_topic_wind_unsailed_when_no_assessments(session):
     t, _ = _topic_with_concept(session, "Quiet topic")
     ws = topic_wind(session, t.id, now=NOW)

@@ -29,6 +29,7 @@ from adaptive_academy.api.routes_decay import (
     ops_router as decay_ops_router,
     topic_router as decay_topic_router,
 )
+from adaptive_academy.api.routes_paper_probe import router as paper_probe_router
 from adaptive_academy.api.routes_programs import router as programs_router
 from adaptive_academy.api.routes_remediate import router as remediate_router
 from adaptive_academy.api.routes_roleplay import router as roleplay_router
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_momentum.router)
     app.include_router(programs_router)
     app.include_router(roleplay_router)
+    app.include_router(paper_probe_router)
     _mount_spa(app)
     return app
 
