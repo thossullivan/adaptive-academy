@@ -10,6 +10,7 @@ from adaptive_academy.models import (
     ProgramTopicLink, RoleplaySession, RoleplayTurn, Assessment,
 )
 from adaptive_academy.engine.roleplay import grade_roleplay
+from adaptive_academy.engine.gates import evaluate_concept, evaluate_milestone_readonly
 
 
 def _ended_session(s):
@@ -66,3 +67,27 @@ def test_grade_writes_one_assessment_per_concept_and_outcome(session):
     assert rp.outcome["result"] == "demo booked"
     rows = session.exec(select(Assessment).where(Assessment.roleplay_session_id == rp.id)).all()
     assert len(rows) == 1
+
+
+def test_roleplay_at_threshold_counts_as_artifact_ok():
+    rows = [Assessment(id=1, concept_id=1, kind="roleplay", prompt="p", score=0.8)]
+    ev = evaluate_concept(1, "SPIN questioning", rows)
+    assert ev.artifact_ok is True
+
+
+def test_roleplay_below_threshold_does_not_count_as_artifact_ok():
+    rows = [Assessment(id=1, concept_id=1, kind="roleplay", prompt="p", score=0.5)]
+    ev = evaluate_concept(1, "SPIN questioning", rows)
+    assert ev.artifact_ok is False
+
+
+def test_graded_roleplay_reaches_milestone_gate_artifact_axis(session):
+    p, m, c, rp = _ended_session(session)
+    grade_json = json.dumps({"score": 0.8, "verdict": "solid", "mechanism_present": True,
+                             "gaps": []})
+    outcome_json = json.dumps({"result": "demo booked", "summary": "Good implication q."})
+    llm = ScriptedLLMClient([LLMResponse(text=grade_json), LLMResponse(text=outcome_json)])
+    grade_roleplay(session, rp, llm=llm)
+    report = evaluate_milestone_readonly(session, m)
+    concept_evidence = next(e for e in report.concepts if e.concept_id == c.id)
+    assert concept_evidence.artifact_ok is True

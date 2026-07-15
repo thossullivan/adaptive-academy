@@ -17,7 +17,7 @@ from adaptive_academy.models import AgentEvent, Assessment, Concept, Milestone, 
 DELAY_DAYS = 7          # recall must be >= this many days after the prior engagement
 HELD_RATIO = 0.85       # mirrors engine/decay.py: recall keeps >=85% of prior score
 ARTIFACT_THRESHOLD = 0.7
-ARTIFACT_KINDS = {"artifact_review", "teach", "productive_failure"}
+ARTIFACT_KINDS = {"artifact_review", "teach", "productive_failure", "roleplay"}
 
 
 def _naive_utc(dt: datetime) -> datetime:
