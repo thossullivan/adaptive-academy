@@ -1,0 +1,102 @@
+import json
+
+from sqlmodel import Session, select
+
+from adaptive_academy.engine.assess import assess_concept
+from adaptive_academy.engine.gates import milestone_load_bearing
+from adaptive_academy.engine.levels import compute_levels
+from adaptive_academy.jsonout import extract_json
+from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.models import (
+    AgentEvent, Assessment, Milestone, PaperProbe, PaperProbeAnswer,
+)
+from adaptive_academy.prompts import PAPER_PROBE_DIRECTOR, PAPER_PROBE_OUTCOME
+
+
+def _emit(session: Session, pp: PaperProbe, kind: str, detail: str = "") -> None:
+    session.add(AgentEvent(program_id=pp.program_id, paper_probe_id=pp.id,
+                           kind=kind, detail=detail))
+
+
+def direct(session: Session, pp: PaperProbe, *, llm: LLMClient) -> PaperProbe:
+    """Generate the critical-reading question set from the paper + load-bearing concepts."""
+    milestone = session.get(Milestone, pp.milestone_id)
+    concepts = milestone_load_bearing(session, milestone)
+    lines = ["LOAD-BEARING CONCEPTS ([id=N] name — learner level):"]
+    for c in concepts:
+        level = compute_levels(c.estimate)
+        lines.append(f"[id={c.id}] {c.name} — challenge={level.challenge}")
+    user = "<<<PAPER>>>\n" + pp.paper_text + "\n<<<END_PAPER>>>\n\n" + "\n".join(lines)
+
+    _emit(session, pp, "prompt", PAPER_PROBE_DIRECTOR.tag)
+    resp = llm.complete(system=PAPER_PROBE_DIRECTOR,
+                        messages=[{"role": "user", "content": user}], tools=[])
+    data = json.loads(extract_json(resp.text))
+    valid_ids = {c.id for c in concepts}
+    questions: list[dict] = []
+    for i, q in enumerate(data.get("questions", [])):
+        cids = [cid for cid in q.get("concept_ids", []) if cid in valid_ids]
+        questions.append({"index": i, "axis": q.get("axis", ""),
+                          "prompt": q.get("prompt", ""), "concept_ids": cids})
+    pp.questions = questions
+    pp.status = "answering"
+    _emit(session, pp, "paper_probe:questions", f"{len(questions)} question(s)")
+    session.add(pp)
+    session.commit()
+    session.refresh(pp)
+    return pp
+
+
+def _answers(session: Session, pp: PaperProbe) -> dict[int, str]:
+    rows = session.exec(
+        select(PaperProbeAnswer).where(PaperProbeAnswer.probe_id == pp.id)
+        .order_by(PaperProbeAnswer.question_index)).all()
+    return {a.question_index: a.content for a in rows}
+
+
+def _qa_text(pp: PaperProbe, answers: dict[int, str],
+             concept_id: int | None = None) -> str:
+    parts = []
+    for q in pp.questions:
+        if concept_id is not None and concept_id not in q.get("concept_ids", []):
+            continue
+        a = answers.get(q["index"], "(no answer)")
+        parts.append(f"Q ({q.get('axis', '')}): {q.get('prompt', '')}\nA: {a}")
+    return "\n\n".join(parts)
+
+
+def grade_paper_probe(session: Session, pp: PaperProbe, *,
+                      llm: LLMClient) -> list[Assessment]:
+    """Blind grade: reuse assess_concept per exercised load-bearing concept, then an outcome."""
+    milestone = session.get(Milestone, pp.milestone_id)
+    concepts = milestone_load_bearing(session, milestone)
+    answers = _answers(session, pp)
+
+    # Idempotent re-grade: clear any prior evidence for this probe so retries never double-count.
+    for old in session.exec(
+            select(Assessment).where(Assessment.paper_probe_id == pp.id)).all():
+        session.delete(old)
+
+    graded: list[Assessment] = []
+    for c in concepts:
+        text = _qa_text(pp, answers, c.id)
+        if not text:
+            continue  # the paper's questions never exercised this concept — no evidence
+        result = assess_concept(session, c, "paper_probe", text, llm=llm)
+        result.assessment.paper_probe_id = pp.id
+        session.add(result.assessment)
+        graded.append(result.assessment)
+
+    _emit(session, pp, "prompt", PAPER_PROBE_OUTCOME.tag)
+    user = "<<<ANSWERS>>>\n" + _qa_text(pp, answers) + "\n<<<END_ANSWERS>>>"
+    resp = llm.complete(system=PAPER_PROBE_OUTCOME,
+                        messages=[{"role": "user", "content": user}], tools=[])
+    pp.outcome = json.loads(extract_json(resp.text))
+    pp.status = "graded"
+    _emit(session, pp, "paper_probe:graded", f"{len(graded)} concept(s)")
+    session.add(pp)
+    session.commit()
+    for a in graded:
+        session.refresh(a)
+    session.refresh(pp)
+    return graded
