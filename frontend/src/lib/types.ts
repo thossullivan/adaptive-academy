@@ -148,3 +148,16 @@ export interface CreateProgramBody {
   title: string; goal_statement?: string; target_depth?: string; prior_knowledge?: string;
   weekly_time_budget?: string; horizon?: string; focus_area?: string;
 }
+
+export type RoleplayTurnRow = { role: 'user' | 'persona'; content: string };
+export type ScorecardRow = { concept_id: number; concept: string; score: number; verdict: string; gaps: string[] };
+export type RoleplaySession = {
+  session_id: number;
+  program_id: number;
+  status: 'briefing' | 'active' | 'ended' | 'graded';
+  brief_public: { persona?: string; situation?: string };
+  turns: RoleplayTurnRow[];
+  outcome?: { result: string; summary: string } | null;
+  scorecard?: ScorecardRow[] | null;
+};
+export type RoleplayTurnResult = { reply: string; status: RoleplaySession['status'] };
