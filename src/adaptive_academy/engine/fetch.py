@@ -60,17 +60,18 @@ def _resolve_host(host: str) -> list[str]:
     return [info[4][0] for info in socket.getaddrinfo(host, None)]
 
 
-def _http_get(url: str) -> bytes:
+def _http_get(url: str, max_bytes: int = MAX_BYTES) -> bytes:
     req = Request(url, headers={"User-Agent": "adaptive-academy/artifact-fetch"})
     with urlopen(req, timeout=TIMEOUT_S) as resp:  # noqa: S310  scheme/host validated by caller
-        return resp.read(MAX_BYTES + 1)
+        return resp.read(max_bytes + 1)
 
 
 def fetch_artifact_text(
     url: str,
     *,
     resolve: Callable[[str], list[str]] = _resolve_host,
-    get: Callable[[str], bytes] = _http_get,
+    get: Callable[[str], bytes] | None = None,
+    max_bytes: int = MAX_BYTES,
 ) -> str | None:
     """Return the URL's text (size-capped, stripped) or None if it can't be fetched safely."""
     if not url:
@@ -90,12 +91,13 @@ def fetch_artifact_text(
         return None
     if not addrs or not all(_ip_is_public(a) for a in addrs):
         return None
+    fetch = get or (lambda u: _http_get(u, max_bytes))
     try:
-        raw = get(url)
+        raw = fetch(url)
     except Exception:
         return None
     if not raw:
         return None
-    text = raw[:MAX_BYTES].decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+    text = raw[:max_bytes].decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
     text = text.strip()
     return text or None
