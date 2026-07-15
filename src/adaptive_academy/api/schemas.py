@@ -477,3 +477,35 @@ class MapRevisionOut(BaseModel):
     id: int
     map_health: str
     changes: list[MapChangeOut]
+
+
+class RoleplayTurnIn(BaseModel):
+    content: str
+
+
+class RoleplayTurnRow(BaseModel):
+    role: str
+    content: str
+
+
+class ScorecardRow(BaseModel):
+    concept_id: int
+    concept: str
+    score: float
+    verdict: str
+    gaps: list[str]
+
+
+class RoleplaySessionOut(BaseModel):
+    session_id: int
+    program_id: int
+    status: str
+    brief_public: dict          # persona + situation only
+    turns: list[RoleplayTurnRow]
+    outcome: Optional[dict] = None
+    scorecard: Optional[list[ScorecardRow]] = None
+
+
+class RoleplayTurnOut(BaseModel):
+    reply: str
+    status: str

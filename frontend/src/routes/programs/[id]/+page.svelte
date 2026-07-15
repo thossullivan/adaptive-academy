@@ -161,6 +161,22 @@
     }
     busy = false;
   }
+
+  function startedTopic(m: MilestoneInfo) {
+    return m.links.find((l) => l.status === 'started');
+  }
+
+  async function spar(m: MilestoneInfo) {
+    busy = true;
+    error = '';
+    try {
+      const session = await api.startRoleplay(programId, m.id);
+      await goto(`/roleplay/${session.session_id}`);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      busy = false;
+    }
+  }
 </script>
 
 <svelte:head><title>{detail?.program.title ?? 'Program'} · Adaptive Academy</title></svelte:head>
@@ -331,6 +347,15 @@
           {#if !inReview}
             <div class="mt-4 flex items-center gap-3">
               <Button size="sm" onclick={() => loadGate(m)} disabled={busy}>Check gate</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onclick={() => spar(m)}
+                disabled={busy || !startedTopic(m)}
+                title={startedTopic(m) ? '' : "Start this milestone's topic first."}
+              >
+                Spar
+              </Button>
               {#if m.gate_status !== 'passed' && overrideFor !== m.id}
                 <button
                   class="text-sm text-muted hover:text-fg"

@@ -75,6 +75,27 @@ class Message(SQLModel, table=True):
     conversation: Optional[Conversation] = Relationship(back_populates="messages")
 
 
+class RoleplaySession(SQLModel, table=True):
+    """A persona-driven adversarial roleplay tied to a Program milestone."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: int = Field(foreign_key="program.id")
+    milestone_id: int = Field(foreign_key="milestone.id")
+    status: str = "briefing"  # briefing | active | ended | graded
+    persona_brief: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    outcome: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+
+class RoleplayTurn(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="roleplaysession.id")
+    role: str  # "user" | "persona"
+    content: str
+    created_at: datetime = Field(default_factory=_now)
+
+
 class AgentEvent(SQLModel, table=True):
     """Observability trace: one row per engine/agent step.
 
@@ -85,6 +106,7 @@ class AgentEvent(SQLModel, table=True):
     conversation_id: Optional[int] = Field(default=None, foreign_key="conversation.id")
     topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
     program_id: Optional[int] = Field(default=None, foreign_key="program.id")
+    roleplay_session_id: Optional[int] = Field(default=None, foreign_key="roleplaysession.id")
     kind: str
     detail: str = ""
     created_at: datetime = Field(default_factory=_now)
@@ -226,6 +248,7 @@ class Assessment(SQLModel, table=True):
     confidence_actual: Optional[float] = None
     rubric_id: Optional[int] = Field(default=None, foreign_key="rubric.id")
     anchor_id: Optional[int] = Field(default=None, foreign_key="referenceanchor.id")
+    roleplay_session_id: Optional[int] = Field(default=None, foreign_key="roleplaysession.id")
     baseline_assessment_id: Optional[int] = Field(default=None, foreign_key="assessment.id")
     delta: Optional[float] = None
     created_at: datetime = Field(default_factory=_now)
