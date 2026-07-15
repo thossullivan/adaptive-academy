@@ -142,10 +142,8 @@
                   {#each session.scorecard as row (row.concept_id)}
                     <tr class="border-t border-border/50">
                       <td class="py-1.5 pr-4 text-fg">{row.concept}</td>
-                      <td class="py-1.5 pr-4">{row.score}</td>
-                      <td class="py-1.5 pr-4"
-                        ><Badge tone={gateBadge(row.verdict).tone}>{gateBadge(row.verdict).label}</Badge></td
-                      >
+                      <td class="py-1.5 pr-4">{Math.round(row.score * 100)}%</td>
+                      <td class="py-1.5 pr-4 text-muted">{row.verdict}</td>
                       <td class="py-1.5 text-muted">{row.gaps.join(', ') || '—'}</td>
                     </tr>
                   {/each}
