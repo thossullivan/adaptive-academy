@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext, MapRevisionInfo, RoleplaySession, RoleplayTurnResult } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext, MapRevisionInfo, RoleplaySession, RoleplayTurnResult, PaperProbe } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -195,7 +195,27 @@ export const api = {
       body: JSON.stringify({ content })
     }).then(j<RoleplayTurnResult>),
   endRoleplay: (sid: number) =>
-    fetch(`/api/roleplay/${sid}/end`, { method: 'POST' }).then(j<RoleplaySession>)
+    fetch(`/api/roleplay/${sid}/end`, { method: 'POST' }).then(j<RoleplaySession>),
+
+  startPaperProbe: (
+    programId: number,
+    milestoneId: number,
+    body: { url?: string; pasted_text?: string; title?: string }
+  ) =>
+    fetch(`/api/programs/${programId}/milestones/${milestoneId}/paper-probe`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(j<PaperProbe>),
+  getPaperProbe: (pid: number) => fetch(`/api/paper-probe/${pid}`).then(j<PaperProbe>),
+  answerPaperProbe: (pid: number, question_index: number, content: string) =>
+    fetch(`/api/paper-probe/${pid}/answers`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ question_index, content })
+    }).then(j<{ status: string }>),
+  submitPaperProbe: (pid: number) =>
+    fetch(`/api/paper-probe/${pid}/submit`, { method: 'POST' }).then(j<PaperProbe>)
 };
 
 /** Derive a per-concept knowledge level from its assessment history (latest estimate). */
