@@ -1,5 +1,7 @@
 import json
 
+from sqlmodel import select
+
 from adaptive_academy.prompts import (
     ROLEPLAY_DIRECTOR, ROLEPLAY_PERSONA, ROLEPLAY_GRADE, build_roleplay_persona_prompt,
 )
@@ -7,9 +9,9 @@ from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.models import (
     Program, Milestone, Track, Topic, Concept, KnowledgeEstimate,
-    ProgramTopicLink, RoleplaySession,
+    ProgramTopicLink, RoleplaySession, RoleplayTurn,
 )
-from adaptive_academy.engine.roleplay import direct
+from adaptive_academy.engine.roleplay import direct, run_roleplay_turn
 
 
 def test_prompts_have_tags():
@@ -55,3 +57,45 @@ def test_direct_fills_brief_and_activates(session):
     assert out.persona_brief["persona"] == "VP Eng"
     # the concept name should have been included in the director's prompt
     assert "SPIN questioning" in llm.calls[0]["messages"][0]["content"]
+
+
+def _active_session(s):
+    p, m = _materialized_milestone(s)
+    rp = RoleplaySession(program_id=p.id, milestone_id=m.id, status="active",
+                         persona_brief={"persona": "VP", "goal": "resist", "situation": "call",
+                                        "hidden_objections": [], "win_conditions": [],
+                                        "difficulty": "low"})
+    s.add(rp); s.commit(); s.refresh(rp)
+    return rp
+
+
+def test_turn_persists_pair_and_stays_active(session):
+    rp = _active_session(session)
+    llm = ScriptedLLMClient([LLMResponse(text="Who is this?")])
+    res = run_roleplay_turn(session, rp, "Hi, calling about X", llm=llm)
+    assert res.reply == "Who is this?" and res.status == "active"
+    turns = session.exec(select(RoleplayTurn).where(RoleplayTurn.session_id == rp.id)
+                         .order_by(RoleplayTurn.id)).all()
+    assert [(t.role, t.content) for t in turns] == [
+        ("user", "Hi, calling about X"), ("persona", "Who is this?")]
+
+
+def test_end_signal_strips_token_and_ends(session):
+    rp = _active_session(session)
+    llm = ScriptedLLMClient([LLMResponse(text="Fine, book the demo. [[END]]")])
+    res = run_roleplay_turn(session, rp, "Let me show you", llm=llm)
+    assert res.status == "ended"
+    assert res.reply == "Fine, book the demo."
+    session.refresh(rp)
+    assert rp.status == "ended"
+
+
+def test_turn_cap_ends_session(session):
+    rp = _active_session(session)
+    # Pre-seed 14 prior user turns; the 15th should trip the cap.
+    for i in range(14):
+        session.add(RoleplayTurn(session_id=rp.id, role="user", content=f"u{i}"))
+    session.commit()
+    llm = ScriptedLLMClient([LLMResponse(text="Still not interested.")])
+    res = run_roleplay_turn(session, rp, "one more thing", llm=llm)
+    assert res.status == "ended"
