@@ -2,7 +2,6 @@
   import { page } from '$app/stores';
   import { onMount, tick } from 'svelte';
   import { api } from '$lib/api';
-  import { gateBadge } from '$lib/programs';
   import type { RoleplaySession, RoleplayTurnRow } from '$lib/types';
   import { Badge, Button, Card } from '$lib/ui';
 
