@@ -509,3 +509,41 @@ class RoleplaySessionOut(BaseModel):
 class RoleplayTurnOut(BaseModel):
     reply: str
     status: str
+
+
+class PaperProbeStartIn(BaseModel):
+    url: str = ""
+    pasted_text: str = ""
+    title: str = ""
+
+
+class PaperProbeAnswerIn(BaseModel):
+    question_index: int
+    content: str
+
+
+class PaperQuestionRow(BaseModel):
+    index: int
+    axis: str
+    prompt: str
+
+
+class PaperProbeAnswerRow(BaseModel):
+    question_index: int
+    content: str
+
+
+class PaperProbeOut(BaseModel):
+    probe_id: int
+    program_id: int
+    milestone_id: int
+    status: str
+    paper: dict  # {title, url, source}
+    questions: list[PaperQuestionRow]
+    answers: list[PaperProbeAnswerRow] = []
+    outcome: Optional[dict] = None
+    scorecard: Optional[list[ScorecardRow]] = None
+
+
+class PaperProbeAnswerOut(BaseModel):
+    status: str
