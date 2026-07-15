@@ -31,6 +31,7 @@ from adaptive_academy.api.routes_decay import (
 )
 from adaptive_academy.api.routes_programs import router as programs_router
 from adaptive_academy.api.routes_remediate import router as remediate_router
+from adaptive_academy.api.routes_roleplay import router as roleplay_router
 from adaptive_academy.api.routes_retention import (
     card_router as retention_card_router,
     ops_router as retention_ops_router,
@@ -136,6 +137,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_vault.router)
     app.include_router(routes_momentum.router)
     app.include_router(programs_router)
+    app.include_router(roleplay_router)
     _mount_spa(app)
     return app
 
