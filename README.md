@@ -27,6 +27,11 @@ stance runs through the whole system.
 - **Anti-Goodhart competence triangulation:** a concept is "solid" only when multiple independent
   signals agree (graded self-explanation, decay/recall, calibration, teach-back, shipped artifacts)
   — never a single grade.
+- **Deliberate practice under pressure:** spar with an auto-generated **persona** (a skeptical
+  buyer, a staff engineer in a design review, a thesis committee) or get **probed on a real paper**
+  (an arXiv link or pasted text) with a structured, generation-first critical-reading examiner —
+  both blind-graded per concept into the same milestone gates, so *defending* your understanding is
+  how you prove it.
 - **The Voyage:** a forgiving, game-like momentum layer (per-topic "wind" + a cross-topic **Fleet**)
   that models whether you *keep going*, derived from your real activity and kept independent of
   competence.
@@ -62,12 +67,13 @@ SvelteKit 2 / Svelte 5 / Tailwind 4. Package manager: `uv`. Task runner: `just`.
 ```bash
 just install                  # uv sync (installs Python deps)
 uv run alembic upgrade head   # create the SQLite schema
-just seed                     # seed the "Build LLMs from scratch" topic  ← REQUIRED
+just seed                     # optional: drop in a starter "Build LLMs from scratch" topic
 cd frontend && npm install && cd ..
 ```
 
-> **Don't skip `just seed`.** Without it the database has no topic and the app loads to an empty
-> state with nothing to work on.
+> **`just seed` is optional** — it seeds one starter topic so there's something to explore
+> immediately. Otherwise you start from an empty state and create your own **Program** (a
+> researched milestone map) or topic from the app — that's the real entry point.
 
 ## Run
 
@@ -133,15 +139,18 @@ alone, and the most interesting part to read if you're here to learn from the pr
 - Learning-science evidence base (cited, adversarially verified): [`docs/research/`](docs/research/)
 - Design specs, per capability: [`docs/superpowers/specs/`](docs/superpowers/specs/) — e.g. the
   [original redesign](docs/superpowers/specs/2026-06-15-adaptive-academy-redesign.md), the
-  [Program layer](docs/superpowers/specs/2026-07-09-program-layer.md), and
-  [Map Revision](docs/superpowers/specs/2026-07-10-map-revision.md)
+  [Program layer](docs/superpowers/specs/2026-07-09-program-layer.md),
+  [Map Revision](docs/superpowers/specs/2026-07-10-map-revision.md),
+  [Roleplay / Examiner](docs/superpowers/specs/2026-07-15-roleplay-examiner-design.md), and
+  [Paper Probe](docs/superpowers/specs/2026-07-15-paper-probe-design.md)
 - Implementation plans (TDD, task-by-task): [`docs/superpowers/plans/`](docs/superpowers/plans/)
 
 ## Status & contributing
 
 Pre-1.0 and actively built in public — expect rough edges and moving parts. Issues, ideas, and PRs
-that help people learn are welcome. (A `CONTRIBUTING.md` and a smoother first-run/PWA path are on the
-near-term list.)
+that help people learn are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md), the
+[Code of Conduct](CODE_OF_CONDUCT.md), and the [security policy](SECURITY.md). (A smoother
+first-run / PWA path is still on the near-term list.)
 
 ## License
 
