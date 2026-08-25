@@ -2,11 +2,17 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
+  import { api, evidenceLabel, groupSuggestionsByKind, scoutCardTitle } from '$lib/api';
   import { changeSummary, gateBadge } from '$lib/programs';
-  import type { GateReport, MapRevisionInfo, MilestoneInfo, ProgramDetail } from '$lib/types';
+  import type {
+    GateReport,
+    MapRevisionInfo,
+    MilestoneInfo,
+    ProgramDetail,
+    TopicSuggestion
+  } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Input, Textarea } from '$lib/ui';
+  import { Card, Button, Badge, Input, Select, Textarea } from '$lib/ui';
 
   const programId = Number($page.params.id);
   let detail = $state<ProgramDetail | null>(null);
@@ -24,14 +30,32 @@
   let pendingSave: Promise<unknown> | null = null;
   let revision = $state<MapRevisionInfo | null>(null);
   let showArchived = $state(false);
+  let suggestions = $state<TopicSuggestion[]>([]);
+  let suggestionMilestones = $state<Record<number, number>>({});
+  let scoutNote = $state('');
 
   const inReview = $derived(
     detail?.milestones.some((m) => m.links.some((l) => l.status === 'proposed')) ?? false
   );
+  const scoutGroups = $derived(groupSuggestionsByKind(suggestions));
+  const scoutTitle = $derived(scoutCardTitle(suggestions) ?? 'Scout');
 
   async function load() {
     try {
-      detail = await api.getProgram(programId);
+      const [nextDetail, nextSuggestions] = await Promise.all([
+        api.getProgram(programId),
+        api.listSuggestions(programId, 'proposed')
+      ]);
+      detail = nextDetail;
+      suggestions = nextSuggestions;
+      const firstMilestone = detail.milestones.find((milestone) => !milestone.archived);
+      const nextChoices = { ...suggestionMilestones };
+      for (const suggestion of suggestions) {
+        if (nextChoices[suggestion.id] == null && firstMilestone) {
+          nextChoices[suggestion.id] = firstMilestone.id;
+        }
+      }
+      suggestionMilestones = nextChoices;
       revision = detail?.has_open_revision ? await api.getOpenRevision(programId).catch(() => null) : null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -40,6 +64,53 @@
     }
   }
   onMount(load);
+
+  async function runScout() {
+    busy = true;
+    error = '';
+    scoutNote = '';
+    try {
+      const result = await api.runScout(programId);
+      const count = Object.values(result.candidates).reduce((total, value) => total + value, 0);
+      scoutNote = `Scout reviewed ${count} candidate${count === 1 ? '' : 's'}${
+        result.truncated ? ' within its time limit' : ''
+      }.`;
+      suggestions = await api.listSuggestions(programId, 'proposed');
+      const firstMilestone = detail?.milestones.find((milestone) => !milestone.archived);
+      if (firstMilestone) {
+        const nextChoices = { ...suggestionMilestones };
+        for (const suggestion of suggestions) {
+          nextChoices[suggestion.id] ??= firstMilestone.id;
+        }
+        suggestionMilestones = nextChoices;
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    busy = false;
+  }
+
+  async function resolveSuggestion(suggestionId: number, accept: boolean) {
+    const milestoneId = suggestionMilestones[suggestionId];
+    if (accept && milestoneId == null) {
+      error = 'Select a milestone before accepting this suggestion.';
+      return;
+    }
+    busy = true;
+    error = '';
+    try {
+      if (accept) {
+        await api.acceptSuggestion(suggestionId, milestoneId);
+        detail = await api.getProgram(programId);
+      } else {
+        await api.dismissSuggestion(suggestionId);
+      }
+      suggestions = suggestions.filter((suggestion) => suggestion.id !== suggestionId);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    busy = false;
+  }
 
   async function revise() {
     busy = true;
@@ -490,5 +561,68 @@
         {showArchived ? 'Hide archived' : `Show ${archivedCount} archived`}
       </button>
     {/if}
+
+    <Card accent class="mt-4" eyebrow="Evidence-backed topics" title={scoutTitle}>
+      {#snippet header()}
+        <Button size="sm" onclick={runScout} disabled={busy}
+          >{busy ? 'Running…' : 'Run scout'}</Button
+        >
+      {/snippet}
+      {#if scoutNote}<p class="mb-3 text-xs text-muted">{scoutNote}</p>{/if}
+      {#if scoutGroups.length === 0}
+        <p class="text-sm text-muted">No proposed suggestions.</p>
+      {:else}
+        <div class="grid gap-5">
+          {#each scoutGroups as group (group.kind)}
+            <div>
+              <Badge mono tone="neutral">{group.kind.replaceAll('_', ' ')}</Badge>
+              <ul class="mt-2 grid gap-3">
+                {#each group.suggestions as suggestion (suggestion.id)}
+                  <li class="grid gap-3 border-t border-border/50 pt-3 text-sm lg:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)]">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-baseline gap-2">
+                        <p class="font-medium text-fg">{suggestion.title}</p>
+                        <span class="nums text-xs text-faint"
+                          >{Math.round(suggestion.score * 100)}%</span
+                        >
+                      </div>
+                      <p class="mt-1 text-muted">{suggestion.rationale}</p>
+                      <details class="mt-2 text-xs text-faint">
+                        <summary class="cursor-pointer">Evidence ({suggestion.evidence.length})</summary>
+                        <ul class="mt-1 grid gap-1 pl-3">
+                          {#each suggestion.evidence as evidence}
+                            <li>{evidenceLabel(evidence)}</li>
+                          {/each}
+                        </ul>
+                      </details>
+                    </div>
+                    <div class="grid content-start gap-2">
+                      <Select bind:value={suggestionMilestones[suggestion.id]} disabled={busy}>
+                        {#each detail.milestones.filter((milestone) => !milestone.archived) as milestone (milestone.id)}
+                          <option value={milestone.id}>{milestone.title}</option>
+                        {/each}
+                      </Select>
+                      <div class="flex gap-2">
+                        <Button
+                          size="sm"
+                          onclick={() => resolveSuggestion(suggestion.id, true)}
+                          disabled={busy}
+                        >Accept</Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onclick={() => resolveSuggestion(suggestion.id, false)}
+                          disabled={busy}
+                        >Dismiss</Button>
+                      </div>
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </Card>
   {/if}
 </Page>

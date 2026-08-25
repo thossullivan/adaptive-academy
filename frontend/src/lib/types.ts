@@ -191,6 +191,34 @@ export interface CreateProgramBody {
   weekly_time_budget?: string; horizon?: string; focus_area?: string;
 }
 
+export interface ScoutEvidence {
+  kind: string;
+  id?: number;
+  ref?: string;
+  name?: string;
+}
+export interface TopicSuggestion {
+  id: number;
+  program_id: number;
+  title: string;
+  rationale: string;
+  candidate_kind: string;
+  evidence: ScoutEvidence[];
+  score: number;
+  status: string;
+  created_at: string;
+  decided_at: string | null;
+}
+export interface ScoutResult {
+  suggestions: TopicSuggestion[];
+  candidates: Record<string, number>;
+  truncated: boolean;
+}
+export interface ScoutSuggestionGroup {
+  kind: string;
+  suggestions: TopicSuggestion[];
+}
+
 export type RoleplayTurnRow = { role: 'user' | 'persona'; content: string };
 export type ScorecardRow = { concept_id: number; concept: string; score: number; verdict: string; gaps: string[] };
 export type RoleplaySession = {

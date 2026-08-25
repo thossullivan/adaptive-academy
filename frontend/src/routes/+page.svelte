@@ -1,7 +1,7 @@
 <script lang="ts">
   import { topics } from '$lib/topics.svelte';
-  import { api } from '$lib/api';
-  import type { Curriculum, Assessment, EventOut, Concept } from '$lib/types';
+  import { api, evidenceLabel, groupSuggestionsByKind, scoutCardTitle } from '$lib/api';
+  import type { Curriculum, Assessment, EventOut, Concept, TopicSuggestion } from '$lib/types';
   import { conceptSignals, conceptVerdict, VERDICT_RANK, type ConceptSignals, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
@@ -20,6 +20,10 @@
   let events = $state<EventOut[]>([]);
   let dueCount = $state(0);
   let cardCount = $state(0);
+  let scoutSuggestions = $state<TopicSuggestion[]>([]);
+  let scoutMilestoneId = $state<number | null>(null);
+  let scoutBusy = $state(false);
+  let scoutError = $state('');
 
   let itemsDone = $state(0);
   let itemsTotal = $state(0);
@@ -37,10 +41,25 @@
   const lastDelta = $derived(
     trend.length >= 2 ? trend[trend.length - 1].score - trend[trend.length - 2].score : null
   );
+  const scoutTitle = $derived(scoutCardTitle(scoutSuggestions));
+  const scoutGroups = $derived(groupSuggestionsByKind(scoutSuggestions));
+
+  async function loadScout(topicId: number) {
+    scoutSuggestions = [];
+    scoutMilestoneId = null;
+    scoutError = '';
+    const context = await api.programContext(topicId).catch(() => null);
+    if (!context) return;
+    scoutMilestoneId = context.milestone_id;
+    scoutSuggestions = await api
+      .listSuggestions(context.program_id, 'proposed')
+      .catch(() => [] as TopicSuggestion[]);
+  }
 
   async function load(topicId: number) {
     loading = true;
     hasCurriculum = false;
+    await loadScout(topicId);
     try {
       cur = await api.getCurriculum(topicId);
       hasCurriculum = true;
@@ -95,6 +114,26 @@
     loading = false;
   }
 
+  async function resolveScoutSuggestion(suggestionId: number, accept: boolean) {
+    if (accept && scoutMilestoneId == null) {
+      scoutError = 'Choose a Program milestone from the Program page.';
+      return;
+    }
+    scoutBusy = true;
+    scoutError = '';
+    try {
+      if (accept) {
+        await api.acceptSuggestion(suggestionId, scoutMilestoneId!);
+      } else {
+        await api.dismissSuggestion(suggestionId);
+      }
+      scoutSuggestions = scoutSuggestions.filter((item) => item.id !== suggestionId);
+    } catch (e) {
+      scoutError = e instanceof Error ? e.message : String(e);
+    }
+    scoutBusy = false;
+  }
+
   $effect(() => {
     const id = topics.current?.id;
     if (id != null) load(id);
@@ -134,6 +173,50 @@
       <Button variant="outline" href="/topics/{tid}/map">Constellation</Button>
       <Button href="/topics/{tid}/today">Start today's session →</Button>
     {/snippet}
+
+    {#if scoutTitle}
+      <Card accent class="mb-4 rise" eyebrow="Evidence-backed topics" title={scoutTitle}>
+        <div class="grid gap-4">
+          {#each scoutGroups as group (group.kind)}
+            <div>
+              <Badge mono tone="neutral">{group.kind.replaceAll('_', ' ')}</Badge>
+              <ul class="mt-2 grid gap-3">
+                {#each group.suggestions as suggestion (suggestion.id)}
+                  <li class="flex flex-wrap items-start justify-between gap-3 border-t border-border/50 pt-3 text-sm">
+                    <div class="min-w-0 flex-1">
+                      <p class="font-medium text-fg">{suggestion.title}</p>
+                      <p class="mt-1 text-muted">{suggestion.rationale}</p>
+                      <details class="mt-2 text-xs text-faint">
+                        <summary class="cursor-pointer">Evidence ({suggestion.evidence.length})</summary>
+                        <ul class="mt-1 grid gap-1 pl-3">
+                          {#each suggestion.evidence as evidence}
+                            <li>{evidenceLabel(evidence)}</li>
+                          {/each}
+                        </ul>
+                      </details>
+                    </div>
+                    <div class="flex shrink-0 gap-2">
+                      <Button
+                        size="sm"
+                        onclick={() => resolveScoutSuggestion(suggestion.id, true)}
+                        disabled={scoutBusy}
+                      >Accept</Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onclick={() => resolveScoutSuggestion(suggestion.id, false)}
+                        disabled={scoutBusy}
+                      >Dismiss</Button>
+                    </div>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/each}
+        </div>
+        {#if scoutError}<p class="mt-3 text-sm text-danger">{scoutError}</p>{/if}
+      </Card>
+    {/if}
 
     {#if loading}
       <div class="grid place-items-center py-24 text-muted">
