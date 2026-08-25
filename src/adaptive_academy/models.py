@@ -434,3 +434,65 @@ class MapChange(SQLModel, table=True):
     source_urls: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     status: str = "proposed"  # proposed | accepted | rejected
     created_at: datetime = Field(default_factory=_now)
+
+
+class ConceptEdge(SQLModel, table=True):
+    """Directed, typed, bi-temporal edge between two concepts."""
+
+    __table_args__ = (
+        Index(
+            "ix_conceptedge_src_concept_id_valid_until",
+            "src_concept_id",
+            "valid_until",
+        ),
+        Index(
+            "ix_conceptedge_dst_concept_id_valid_until",
+            "dst_concept_id",
+            "valid_until",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    src_concept_id: int = Field(foreign_key="concept.id")
+    dst_concept_id: int = Field(foreign_key="concept.id")
+    kind: str  # prerequisite | related | alias
+    weight: float = 1.0
+    origin: str  # researcher | revision | alias | learner
+    origin_ref: str = ""
+    valid_from: datetime = Field(default_factory=_now)
+    valid_until: Optional[datetime] = None
+    recorded_at: datetime = Field(default_factory=_now)
+
+
+class ChunkConcept(SQLModel, table=True):
+    """Which concepts a chunk mentions after deterministic string matching."""
+
+    __table_args__ = (
+        UniqueConstraint(
+            "chunk_id",
+            "concept_id",
+            name="uq_chunkconcept_chunk_id_concept_id",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    chunk_id: int = Field(foreign_key="chunk.id")
+    concept_id: int = Field(foreign_key="concept.id")
+    hits: int = 1
+
+
+class TopicSuggestion(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_topicsuggestion_status_program_id", "status", "program_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: Optional[int] = Field(default=None, foreign_key="program.id")
+    title: str
+    rationale: str
+    candidate_kind: str  # frontier | orphan_term | orphan_note | extension
+    evidence: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    score: float = 0.0
+    status: str = "proposed"  # proposed | accepted | dismissed
+    created_at: datetime = Field(default_factory=_now)
+    decided_at: Optional[datetime] = None

@@ -87,7 +87,7 @@ def test_memory_migration_upgrades_populated_database_and_downgrades(tmp_path):
     assert prior.returncode == 0, prior.stderr
     _seed_populated_database(url)
 
-    upgraded = _alembic(url, "upgrade", "head")
+    upgraded = _alembic(url, "upgrade", "ba15f4c29e71")  # the memory-chunks revision; downgrade -1 must drop it
     assert upgraded.returncode == 0, upgraded.stderr
     assert MEMORY_OBJECTS <= _schema_objects(url)
 
