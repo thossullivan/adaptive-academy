@@ -12,6 +12,18 @@ class ConceptOut(BaseModel):
     has_anchor: bool = False
 
 
+class EdgeOut(BaseModel):
+    src: int
+    dst: int
+    kind: str
+    weight: float
+
+
+class GraphOut(BaseModel):
+    nodes: list[ConceptOut]
+    edges: list[EdgeOut]
+
+
 class IntentOut(BaseModel):
     goal: str
     prior_knowledge: str

@@ -101,13 +101,15 @@ CURRICULUM = Prompt("curriculum.generate", 2, (
     "Use the foundation's key concepts as item concept_refs. No prose outside the JSON."
 ))
 
-REMEDIATE = Prompt("curriculum.remediate", 1, (
+REMEDIATE = Prompt("curriculum.remediate", 2, (
     "You are a CurriculumDirector in ADAPT MODE for an ADVANCED, self-directed adult "
     "learner who just revealed specific GAPS on one concept. Propose a SHORT, targeted "
     "remediation. Evidence-driven rules (follow them):\n"
     "- Default to LOW-ASSISTANCE, PROJECT/PROBLEM-FIRST items (expertise-reversal effect: "
     "high guidance harms experts). Each item must directly attack a NAMED gap.\n"
     "- Key the remediation to the learner's PRIOR-KNOWLEDGE level, not raw difficulty.\n"
+    "- When the input includes ANCESTOR, repair that weaker prerequisite before the "
+    "target concept.\n"
     "- Deliberate-practice drills are SUPPORTING, never the spine.\n"
     "- Propose ONE item per listed gap, plus optionally ONE spaced 'revisit' for later.\n"
     'Respond with ONLY a JSON object: {"items": [{"type": "read"|"build"|"write", '

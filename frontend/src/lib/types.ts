@@ -1,4 +1,19 @@
 export interface Concept { id: number; name: string; is_load_bearing: boolean; has_anchor?: boolean; }
+export type GraphEdgeKind = 'prerequisite' | 'related' | 'alias';
+export interface GraphEdge {
+  src: number;
+  dst: number;
+  kind: GraphEdgeKind;
+  weight: number;
+}
+export interface GraphLink {
+  source: number;
+  target: number;
+  kind: GraphEdgeKind;
+  weight: number;
+}
+export interface ConceptGraph { nodes: Concept[]; edges: GraphEdge[]; }
+export type GraphAncestor = [conceptId: number, depth: number];
 export interface Topic { id: number; title: string; concepts: Concept[]; intent?: Intent | null; }
 export interface EventOut { kind: string; detail: string; }
 export interface MemoryHit {

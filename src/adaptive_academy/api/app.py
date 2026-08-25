@@ -26,6 +26,7 @@ from adaptive_academy.api.routes_anchors import (
     topic_router as anchor_topic_router,
 )
 from adaptive_academy.api.routes_assess import router as assess_router
+from adaptive_academy.api.routes_graph import router as graph_router
 from adaptive_academy.api.routes_decay import (
     ops_router as decay_ops_router,
     topic_router as decay_topic_router,
@@ -125,6 +126,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_conversations.router)
     app.include_router(routes_items.router)
     app.include_router(assess_router)
+    app.include_router(graph_router)
     app.include_router(remediate_router)
     app.include_router(retention_card_router)
     app.include_router(retention_topic_router)

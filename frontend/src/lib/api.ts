@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, MemorySearchResult, MemoryReindexBody, MemoryReindexResult, MemoryStats, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext, MapRevisionInfo, RoleplaySession, RoleplayTurnResult, PaperProbe } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, MemorySearchResult, MemoryReindexBody, MemoryReindexResult, MemoryStats, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext, MapRevisionInfo, RoleplaySession, RoleplayTurnResult, PaperProbe, ConceptGraph, GraphAncestor } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -30,6 +30,10 @@ export const api = {
     fetch(`/api/topics/${topicId}/research`, { method: 'POST' }).then(j<ResearchResult>),
   getFoundation: (topicId: number) =>
     fetch(`/api/topics/${topicId}/foundation`).then(j<Foundation>),
+  getGraph: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/graph`).then(j<ConceptGraph>),
+  getAncestors: (conceptId: number, depth = 3) =>
+    fetch(`/api/concepts/${conceptId}/ancestors?depth=${depth}`).then(j<GraphAncestor[]>),
   listEvents: (topicId: number) => fetch(`/api/topics/${topicId}/events`).then(j<EventOut[]>),
   listSources: (topicId: number, status?: string) =>
     fetch(`/api/topics/${topicId}/sources${status ? `?status=${status}` : ''}`).then(j<SourceDoc[]>),
