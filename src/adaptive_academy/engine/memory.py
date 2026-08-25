@@ -1,16 +1,31 @@
 """Pure text chunking and indexing helpers for local memory retrieval."""
 
+from __future__ import annotations
+
 import hashlib
 import re
+import time
 import unicodedata
 from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
 
 from sqlmodel import Session, select
 
 from adaptive_academy.engine.vault import parse_frontmatter
-from adaptive_academy.models import Chunk
+from adaptive_academy.llm.retriever_types import Hit
+from adaptive_academy.models import (
+    AgentEvent,
+    Chunk,
+    Concept,
+    ConceptAlias,
+    Track,
+    VaultLink,
+)
+
+if TYPE_CHECKING:
+    from adaptive_academy.llm.retriever_types import Retriever
 
 DEFAULT_K = 6
 INJECT_BUDGET_CHARS = 2400
@@ -45,6 +60,32 @@ class IndexResult:
     removed: int
 
 
+@dataclass(frozen=True)
+class ChunkFilter:
+    """Relational constraints applied before a retriever ranks chunks."""
+
+    kinds: tuple[str, ...] = ()
+    topic_id: int | None = None
+    concept_id: int | None = None
+    exclude_source_refs: tuple[str, ...] = ()
+    since: datetime | None = None
+    source_refs: tuple[str, ...] = ()
+
+
+def resolve_chunk_filter(session: Session, where: ChunkFilter) -> ChunkFilter:
+    """Derive a concept's topic when the caller omits the topic filter."""
+    if where.concept_id is None or where.topic_id is not None:
+        return where
+
+    concept = session.get(Concept, where.concept_id)
+    if concept is None:
+        return where
+    track = session.get(Track, concept.track_id)
+    if track is None:
+        return where
+    return replace(where, topic_id=track.topic_id)
+
+
 def normalize(text: str) -> str:
     """Return NFC text with leading, trailing, and repeated whitespace removed."""
     normalized = unicodedata.normalize("NFC", text)
@@ -54,6 +95,42 @@ def normalize(text: str) -> str:
 def content_hash(text: str) -> str:
     """Return a stable hash for text after normalization."""
     return hashlib.sha256(normalize(text).encode("utf-8")).hexdigest()
+
+
+def sanitize_fts_query(query: str) -> str:
+    """Convert arbitrary input into a safe FTS5 disjunction of quoted tokens."""
+    tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
+    operators = {"and", "or", "not", "near"}
+    kept = [
+        token
+        for token in tokens
+        if len(token) >= 2 and token.casefold() not in operators
+    ]
+    if not kept:
+        return '""'
+    return " OR ".join(f'"{token}"' for token in kept)
+
+
+def expand_query(session: Session, query: str, *, concept_id: int | None) -> str:
+    """Append the selected concept name and canonical alias without using an LLM."""
+    if concept_id is None:
+        return query
+
+    concept = session.get(Concept, concept_id)
+    alias = session.exec(
+        select(ConceptAlias).where(ConceptAlias.concept_id == concept_id)
+    ).first()
+    additions = [concept.name if concept is not None else ""]
+    additions.append(alias.canonical_name if alias is not None else "")
+
+    expanded = query.strip()
+    included = expanded.casefold()
+    for addition in additions:
+        addition = addition.strip()
+        if addition and addition.casefold() not in included:
+            expanded = f"{expanded} {addition}".strip()
+            included = expanded.casefold()
+    return expanded
 
 
 def _split_long_paragraph(paragraph: str, target: int) -> list[str]:
@@ -296,3 +373,214 @@ def jaccard(a: str, b: str) -> float:
     if not union:
         return 0.0
     return len(a_tokens & b_tokens) / len(union)
+
+
+def retrieve(
+    session: Session,
+    retriever: Retriever,
+    query: str,
+    *,
+    kinds: tuple[str, ...] = (),
+    topic_id: int | None = None,
+    concept_id: int | None = None,
+    k: int = DEFAULT_K,
+    exclude_source_refs: tuple[str, ...] = (),
+    order: str = "relevance",
+    since: datetime | None = None,
+    expand_links: bool = False,
+    event_target: dict[str, int | None] | None = None,
+) -> list[Hit]:
+    """Retrieve direct hits, then append zero-score link hits into open slots."""
+    started = time.perf_counter()
+    try:
+        if order not in {"relevance", "recency"}:
+            raise ValueError(f"unsupported retrieval order: {order}")
+
+        expanded_query = expand_query(session, query, concept_id=concept_id)
+        where = resolve_chunk_filter(
+            session,
+            ChunkFilter(
+                kinds=kinds,
+                topic_id=topic_id,
+                concept_id=concept_id,
+                exclude_source_refs=exclude_source_refs,
+                since=since,
+            ),
+        )
+        limit = max(k, 0)
+        search_k = limit * 3
+        ranked = retriever.search(session, expanded_query, where=where, k=search_k)
+        candidates = _load_ranked_chunks(session, ranked, where=where)
+        if order == "recency":
+            candidates.sort(
+                key=lambda hit: (_datetime_key(hit.chunk.created_at), hit.score),
+                reverse=True,
+            )
+        direct_hits = _deduplicate_hits(candidates, limit=limit)
+        link_hits: list[Hit] = []
+        if expand_links and len(direct_hits) < limit:
+            linked_source_refs = _linked_source_refs(session, direct_hits)
+        else:
+            linked_source_refs = []
+        if linked_source_refs:
+            link_where = replace(where, source_refs=tuple(linked_source_refs))
+            link_ranked = retriever.search(
+                session,
+                expanded_query,
+                where=link_where,
+                k=max(len(linked_source_refs) * 3, limit * 3),
+            )
+            link_candidates = _load_ranked_chunks(session, link_ranked, where=link_where)
+            best_by_source: dict[str, Hit] = {}
+            for candidate in link_candidates:
+                source_ref = candidate.chunk.source_ref
+                current = best_by_source.get(source_ref)
+                if current is None or candidate.score > current.score:
+                    best_by_source[source_ref] = candidate
+            for source_ref in linked_source_refs:
+                candidate = best_by_source.get(source_ref)
+                if candidate is None:
+                    chunk = session.exec(
+                        select(Chunk)
+                        .where(
+                            Chunk.source_ref == source_ref,
+                            Chunk.ordinal == 0,
+                        )
+                        .order_by(Chunk.id)
+                    ).first()
+                    if chunk is None or not _matches_filter(chunk, link_where):
+                        continue
+                    candidate = Hit(chunk=chunk, score=0.0)
+                link_hits.append(Hit(chunk=candidate.chunk, score=0.0, via="link"))
+
+        hits = _deduplicate_hits([*direct_hits, *link_hits], limit=limit)
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        _add_memory_event(
+            session,
+            kind="memory:retrieve",
+            detail=(
+                f"k={k} hits={len(hits)} links="
+                f"{sum(hit.via == 'link' for hit in hits)} "
+                f"kinds={','.join(kinds) if kinds else 'all'} order={order} ms={elapsed_ms}"
+            ),
+            event_target=event_target,
+        )
+        return hits
+    except Exception as exc:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        _add_memory_event(
+            session,
+            kind="memory:error",
+            detail=f"{type(exc).__name__}: {exc} ms={elapsed_ms}",
+            event_target=event_target,
+        )
+        return []
+
+
+def _load_ranked_chunks(
+    session: Session,
+    ranked: list[tuple[int, float]],
+    *,
+    where: ChunkFilter,
+) -> list[Hit]:
+    where = resolve_chunk_filter(session, where)
+    hits: list[Hit] = []
+    seen_ids: set[int] = set()
+    for chunk_id, score in ranked:
+        if chunk_id in seen_ids:
+            continue
+        seen_ids.add(chunk_id)
+        chunk = session.get(Chunk, chunk_id)
+        if chunk is not None and _matches_filter(chunk, where):
+            hits.append(Hit(chunk=chunk, score=float(score)))
+    return hits
+
+
+def _matches_filter(chunk: Chunk, where: ChunkFilter) -> bool:
+    if where.kinds and chunk.kind not in where.kinds:
+        return False
+    if where.topic_id is not None and chunk.topic_id != where.topic_id:
+        return False
+    if where.concept_id is not None and chunk.concept_id != where.concept_id:
+        admits_topic_chunk = (
+            where.topic_id is not None
+            and chunk.topic_id == where.topic_id
+            and chunk.concept_id is None
+        )
+        if not admits_topic_chunk:
+            return False
+    if chunk.source_ref in where.exclude_source_refs:
+        return False
+    if where.source_refs and chunk.source_ref not in where.source_refs:
+        return False
+    if where.since is not None:
+        if _datetime_key(chunk.created_at) < _datetime_key(where.since):
+            return False
+    return True
+
+
+def _linked_source_refs(
+    session: Session,
+    direct_hits: list[Hit],
+) -> list[str]:
+    linked_source_refs: list[str] = []
+    seen_source_refs = {hit.chunk.source_ref for hit in direct_hits}
+
+    for direct_hit in direct_hits:
+        if direct_hit.chunk.kind != "vault_note":
+            continue
+        links = session.exec(
+            select(VaultLink)
+            .where(
+                VaultLink.src_ref == direct_hit.chunk.source_ref,
+                VaultLink.dst_ref != "",
+            )
+            .order_by(VaultLink.id)
+        ).all()
+        for link in links:
+            if link.dst_ref in seen_source_refs:
+                continue
+            seen_source_refs.add(link.dst_ref)
+            linked_source_refs.append(link.dst_ref)
+    return linked_source_refs
+
+
+def _deduplicate_hits(hits: list[Hit], *, limit: int) -> list[Hit]:
+    unique: list[Hit] = []
+    hashes: set[str] = set()
+    for hit in hits:
+        if len(unique) >= limit:
+            break
+        if hit.chunk.content_hash in hashes:
+            continue
+        hashes.add(hit.chunk.content_hash)
+        unique.append(hit)
+    return unique
+
+
+def _datetime_key(value: datetime) -> float:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.timestamp()
+
+
+def _add_memory_event(
+    session: Session,
+    *,
+    kind: str,
+    detail: str,
+    event_target: dict[str, int | None] | None,
+) -> None:
+    allowed = {
+        "conversation_id",
+        "topic_id",
+        "program_id",
+        "roleplay_session_id",
+        "paper_probe_id",
+    }
+    target = {
+        key: value
+        for key, value in (event_target or {}).items()
+        if key in allowed
+    }
+    session.add(AgentEvent(kind=kind, detail=detail, **target))
