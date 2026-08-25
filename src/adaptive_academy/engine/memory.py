@@ -22,6 +22,7 @@ from adaptive_academy.models import (
     Chunk,
     Concept,
     ConceptAlias,
+    Conversation,
     Message,
     PaperProbe,
     PaperProbeAnswer,
@@ -38,6 +39,12 @@ if TYPE_CHECKING:
 
 DEFAULT_K = 6
 INJECT_BUDGET_CHARS = 2400
+TUTOR_GROUNDING_K = 4
+TUTOR_COVERED_K = 3
+GROUNDING_K = 3
+AVOID_K = 5
+MEMORY_MARKER = "MEMORY"
+ALREADY_COVERED_MARKER = "ALREADY_COVERED"
 CHUNK_TARGET_CHARS = 1200
 MAX_INDEX_CHARS = 2_000_000
 TUTOR_TURN_MIN_CHARS = 200
@@ -731,6 +738,197 @@ def jaccard(a: str, b: str) -> float:
     if not union:
         return 0.0
     return len(a_tokens & b_tokens) / len(union)
+
+
+def render_block(
+    hits: list[Hit],
+    *,
+    marker: str,
+    budget: int = INJECT_BUDGET_CHARS,
+) -> str:
+    """Render complete retrieved chunks within a strict character budget."""
+    marker_name = marker.strip().strip("<>")
+    if marker_name.startswith("END_"):
+        marker_name = marker_name[4:]
+    if not hits or not marker_name or budget <= 0:
+        return ""
+
+    opening = f"<<<{marker_name}>>>"
+    closing = f"<<<END_{marker_name}>>>"
+    entries: list[str] = []
+    for hit in hits:
+        entry = f"{_provenance_line(hit)}\n{hit.chunk.text}"
+        candidate = f"{opening}\n{'\n\n'.join([*entries, entry])}\n{closing}"
+        if len(candidate) > budget:
+            break
+        entries.append(entry)
+    if not entries:
+        return ""
+    return f"{opening}\n{'\n\n'.join(entries)}\n{closing}"
+
+
+def _provenance_line(hit: Hit) -> str:
+    chunk = hit.chunk
+    meta = chunk.meta or {}
+    parts = [chunk.kind]
+    assessment_kind = str(meta.get("assessment_kind", "")).strip()
+    role = str(meta.get("role", "")).strip()
+    if assessment_kind:
+        parts.append(assessment_kind)
+    elif role:
+        parts.append(role)
+    if meta.get("score") is not None:
+        parts.append(f"score {meta['score']}")
+    arxiv_id = str(meta.get("arxiv_id", "")).strip()
+    if arxiv_id:
+        parts.append(f"arXiv:{arxiv_id}")
+    if chunk.heading:
+        heading = f"§ {chunk.heading}" if chunk.kind == "paper" else chunk.heading
+        parts.append(heading)
+    if chunk.kind in {"learner_output", "tutor_turn", "question"}:
+        parts.append(chunk.created_at.date().isoformat())
+    return f"[{' · '.join(parts)}]"
+
+
+def append_block_entry(
+    block: str,
+    text: str,
+    *,
+    marker: str,
+    label: str,
+    budget: int = INJECT_BUDGET_CHARS,
+) -> str:
+    """Append one complete generated entry, falling back to that entry alone."""
+    marker_name = marker.strip().strip("<>")
+    if marker_name.startswith("END_"):
+        marker_name = marker_name[4:]
+    opening = f"<<<{marker_name}>>>"
+    closing = f"<<<END_{marker_name}>>>"
+    entry = f"[{label}]\n{text}"
+    if block.endswith(closing):
+        candidate = f"{block[:-len(closing)].rstrip()}\n\n{entry}\n{closing}"
+    else:
+        candidate = f"{opening}\n{entry}\n{closing}"
+    if len(candidate) <= budget:
+        return candidate
+    fallback = f"{opening}\n{entry}\n{closing}"
+    return fallback if len(fallback) <= budget else block
+
+
+def memory_blocks_for_tutor(
+    session: Session,
+    retriever: Retriever,
+    convo: Conversation,
+    concept: Concept,
+    user_text: str,
+) -> tuple[str, str, list[Hit]]:
+    """Build tutor grounding and anti-repeat blocks for one conversation turn."""
+    if concept.id is None:
+        return "", "", []
+    messages = session.exec(
+        select(Message).where(Message.conversation_id == convo.id)
+    ).all()
+    excluded = tuple(
+        f"message:{message.id}" for message in messages if message.id is not None
+    )
+    query = f"{concept.name} {user_text}".strip()
+    target = {"conversation_id": convo.id}
+    grounding_hits = retrieve(
+        session,
+        retriever,
+        query,
+        kinds=("vault_note", "source_doc", "paper"),
+        concept_id=concept.id,
+        k=TUTOR_GROUNDING_K,
+        expand_links=True,
+        event_target=target,
+    )
+    tutor_hits = retrieve(
+        session,
+        retriever,
+        query,
+        kinds=("tutor_turn",),
+        concept_id=concept.id,
+        k=TUTOR_COVERED_K,
+        exclude_source_refs=excluded,
+        order="recency",
+        event_target=target,
+    )
+    learner_hits = retrieve(
+        session,
+        retriever,
+        query,
+        kinds=("learner_output",),
+        concept_id=concept.id,
+        k=TUTOR_COVERED_K,
+        exclude_source_refs=excluded,
+        order="recency",
+        event_target=target,
+    )
+    covered_hits = [*tutor_hits, *learner_hits]
+    return (
+        render_block(grounding_hits, marker=MEMORY_MARKER),
+        render_block(covered_hits, marker=ALREADY_COVERED_MARKER),
+        [*grounding_hits, *covered_hits],
+    )
+
+
+def avoid_block_for_concepts(
+    session: Session,
+    retriever: Retriever,
+    concept_ids: Iterable[int],
+    *,
+    k: int = AVOID_K,
+) -> tuple[str, list[Hit]]:
+    """Retrieve and render prior questions across one or more concepts."""
+    hits: list[Hit] = []
+    for concept_id in dict.fromkeys(concept_ids):
+        concept = session.get(Concept, concept_id)
+        if concept is None:
+            continue
+        hits.extend(
+            retrieve(
+                session,
+                retriever,
+                concept.name,
+                kinds=("question",),
+                concept_id=concept_id,
+                k=k,
+                event_target={"topic_id": topic_id_for_concept(session, concept_id)},
+            )
+        )
+
+    ranked = sorted(
+        hits,
+        key=lambda hit: (
+            -hit.score,
+            -_datetime_key(hit.chunk.created_at),
+            hit.chunk.id or 0,
+        ),
+    )
+    unique: list[Hit] = []
+    hashes: set[str] = set()
+    for hit in ranked:
+        if len(unique) >= max(k, 0):
+            break
+        if hit.chunk.content_hash in hashes:
+            continue
+        hashes.add(hit.chunk.content_hash)
+        unique.append(hit)
+    return render_block(unique, marker=ALREADY_COVERED_MARKER), unique
+
+
+def is_near_duplicate(
+    text: str,
+    hits: list[Hit],
+    *,
+    threshold: float = NEARDUP_JACCARD,
+) -> Hit | None:
+    """Return the first prior chunk meeting the normalized Jaccard threshold."""
+    for hit in hits:
+        if jaccard(text, hit.chunk.text) >= threshold:
+            return hit
+    return None
 
 
 def retrieve(

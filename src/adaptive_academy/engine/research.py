@@ -5,7 +5,14 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from sqlmodel import Session
 
 from adaptive_academy.engine.fanout import fan_out_with_retry
+from adaptive_academy.engine.memory import (
+    ALREADY_COVERED_MARKER,
+    DEFAULT_K,
+    INJECT_BUDGET_CHARS,
+    retrieve,
+)
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
+from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import RESEARCH_FOUNDATION
@@ -94,11 +101,19 @@ class Foundation:
     prerequisite_map: dict
 
 
-def _build_foundation_user_msg(topic: str, intent: str, sources: list[RawSource]) -> str:
+def _build_foundation_user_msg(
+    topic: str,
+    intent: str,
+    sources: list[RawSource],
+    *,
+    covered_block: str = "",
+) -> str:
     lines = [f"TOPIC: {topic}", f"LEARNER INTENT: {intent}", "", "<<<SOURCES>>>"]
     for s in sources:
         lines.append(f"- [{s.tier}] {s.title} ({s.url}) — {s.summary}".rstrip(" —"))
     lines.append("<<<END_SOURCES>>>")
+    if covered_block:
+        lines.extend(["", covered_block])
     return "\n".join(lines)
 
 
@@ -112,10 +127,20 @@ def _parse_foundation_json(text: str) -> Foundation:
 
 
 def synthesize_foundation(
-    topic: str, intent: str, sources: list[RawSource], llm: LLMClient
+    topic: str,
+    intent: str,
+    sources: list[RawSource],
+    llm: LLMClient,
+    *,
+    covered_block: str = "",
 ) -> Foundation:
     """Single structured LLM call → Foundation (overview + concepts + prereq map)."""
-    user_msg = _build_foundation_user_msg(topic, intent, sources)
+    user_msg = _build_foundation_user_msg(
+        topic,
+        intent,
+        sources,
+        covered_block=covered_block,
+    )
     resp = llm.complete(
         system=RESEARCH_FOUNDATION,
         messages=[{"role": "user", "content": user_msg}],
@@ -141,6 +166,7 @@ def research_topic(
     max_subagents: int = 5,
     cap: int = 12,
     max_workers: int = 5,
+    retriever: Retriever | None = None,
 ) -> ResearchResult:
     """Fan out over briefs, dedupe+rank, synthesize a foundation, persist, and trace."""
     events: list[AgentEvent] = []
@@ -176,8 +202,27 @@ def research_topic(
     if dropped:
         emit("research:capped", f"dropped {len(dropped)} of {len(ranked)}")
 
+    covered_block = ""
+    if retriever is not None:
+        vault_hits = retrieve(
+            session,
+            retriever,
+            topic.title,
+            kinds=("vault_note",),
+            topic_id=topic.id,
+            k=DEFAULT_K,
+            event_target={"topic_id": topic.id},
+        )
+        covered_block = _vault_heading_block(vault_hits)
+
     emit("prompt", RESEARCH_FOUNDATION.tag)
-    foundation_data = synthesize_foundation(topic.title, intent.goal, kept, llm)
+    foundation_data = synthesize_foundation(
+        topic.title,
+        intent.goal,
+        kept,
+        llm,
+        covered_block=covered_block,
+    )
     emit("research:synth", f"{len(foundation_data.key_concepts)} key concepts")
 
     source_rows: list[SourceDoc] = []
@@ -211,3 +256,31 @@ def research_topic(
         session.refresh(row)
     session.refresh(foundation)
     return ResearchResult(foundation=foundation, sources=source_rows, events=events)
+
+
+def _vault_heading_block(hits: list[Hit]) -> str:
+    opening = f"<<<{ALREADY_COVERED_MARKER}>>>"
+    closing = f"<<<END_{ALREADY_COVERED_MARKER}>>>"
+    headings: list[str] = []
+    seen: set[str] = set()
+    for hit in hits:
+        heading = (hit.chunk.heading or hit.chunk.context).strip()
+        if not heading or heading in seen:
+            continue
+        candidate_headings = [*headings, heading]
+        candidate = (
+            f"{opening}\n"
+            + "\n".join(f"- {item}" for item in candidate_headings)
+            + f"\n{closing}"
+        )
+        if len(candidate) > INJECT_BUDGET_CHARS:
+            break
+        seen.add(heading)
+        headings.append(heading)
+    if not headings:
+        return ""
+    return (
+        f"{opening}\n"
+        + "\n".join(f"- {heading}" for heading in headings)
+        + f"\n{closing}"
+    )

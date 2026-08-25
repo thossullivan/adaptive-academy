@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
-from adaptive_academy.api.deps import get_llm, get_session
+from adaptive_academy.api.deps import get_llm, get_retriever, get_session
 from adaptive_academy.api.schemas import (
     RoleplaySessionOut, RoleplayTurnIn, RoleplayTurnOut, RoleplayTurnRow, ScorecardRow,
 )
 from adaptive_academy.engine.gates import milestone_load_bearing
 from adaptive_academy.engine.roleplay import direct, grade_roleplay, run_roleplay_turn
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     Assessment, Concept, Milestone, RoleplaySession, RoleplayTurn,
@@ -49,7 +50,8 @@ def _out(session: Session, rp: RoleplaySession) -> RoleplaySessionOut:
              response_model=RoleplaySessionOut)
 def start_roleplay(program_id: int, milestone_id: int,
                    session: Session = Depends(get_session),
-                   llm: LLMClient = Depends(get_llm)):
+                   llm: LLMClient = Depends(get_llm),
+                   retriever: Retriever = Depends(get_retriever)):
     milestone = session.get(Milestone, milestone_id)
     if milestone is None or milestone.program_id != program_id:
         raise HTTPException(404, "milestone not found")
@@ -59,7 +61,7 @@ def start_roleplay(program_id: int, milestone_id: int,
     session.add(rp)
     session.commit()
     session.refresh(rp)
-    direct(session, rp, llm=llm)
+    direct(session, rp, llm=llm, retriever=retriever)
     return _out(session, rp)
 
 

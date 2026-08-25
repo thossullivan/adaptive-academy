@@ -23,10 +23,11 @@ from claude_agent_sdk import (
 from sqlmodel import Session
 
 from adaptive_academy.engine.levels import compute_levels
-from adaptive_academy.engine.memory import index_message
+from adaptive_academy.engine.memory import index_message, memory_blocks_for_tutor
 from adaptive_academy.engine.tools import reveal_gate
 from adaptive_academy.engine.tutor import TurnResult, _FALLBACK
 from adaptive_academy.llm.registry import get_model
+from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.llm.types import AgentSDKError
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
 from adaptive_academy.prompts import build_tutor_system_prompt
@@ -72,6 +73,7 @@ def run_tutor_turn_sdk(
     user_text: str,
     *,
     role: str = "reasoning",
+    retriever: Retriever | None = None,
 ) -> TurnResult:
     events: list[AgentEvent] = []
 
@@ -95,7 +97,23 @@ def run_tutor_turn_sdk(
     concept = session.get(Concept, convo.concept_id)
     levels = compute_levels(concept.estimate if concept else None)
     emit("levels", f"assistance={levels.assistance} challenge={levels.challenge}")
-    system = build_tutor_system_prompt(concept.name if concept else "", levels)
+    memory_block = ""
+    covered_block = ""
+    memory_hits: list[Hit] = []
+    if retriever is not None and concept is not None:
+        memory_block, covered_block, memory_hits = memory_blocks_for_tutor(
+            session,
+            retriever,
+            convo,
+            concept,
+            user_text,
+        )
+    system = build_tutor_system_prompt(
+        concept.name if concept else "",
+        levels,
+        memory_block=memory_block,
+        covered_block=covered_block,
+    )
     prompt = format_history(convo)
 
     @tool("log_attempt", "Record that the learner made a genuine attempt", {"summary": str})
@@ -143,4 +161,4 @@ def run_tutor_turn_sdk(
         levels=levels,
     )
     session.commit()
-    return TurnResult(reply=reply, events=events)
+    return TurnResult(reply=reply, events=events, memory=memory_hits)

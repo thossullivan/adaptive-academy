@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
-from adaptive_academy.api.deps import get_llm, get_session, use_agent_sdk
+from adaptive_academy.api.deps import get_llm, get_retriever, get_session, use_agent_sdk
 from adaptive_academy.api.schemas import (
     ConversationOut,
     EventOut,
@@ -12,6 +12,7 @@ from adaptive_academy.api.schemas import (
 )
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.tutor import run_tutor_turn
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import Concept, Conversation
 
@@ -62,6 +63,7 @@ def send_message(
     body: SendMessageIn,
     session: Session = Depends(get_session),
     llm: LLMClient = Depends(get_llm),
+    retriever: Retriever = Depends(get_retriever),
 ):
     convo = session.get(Conversation, conversation_id)
     if not convo:
@@ -69,9 +71,20 @@ def send_message(
     if use_agent_sdk():
         # Subscription tutor: SDK in-process tools + code-enforced attempt-gate (no API key).
         from adaptive_academy.engine.tutor_sdk import run_tutor_turn_sdk
-        result = run_tutor_turn_sdk(session, convo, body.content)
+        result = run_tutor_turn_sdk(
+            session,
+            convo,
+            body.content,
+            retriever=retriever,
+        )
     else:
-        result = run_tutor_turn(session, convo, body.content, llm)
+        result = run_tutor_turn(
+            session,
+            convo,
+            body.content,
+            llm,
+            retriever=retriever,
+        )
     session.refresh(convo)
     levels = _levels_for(session, convo)
     return SendMessageOut(
