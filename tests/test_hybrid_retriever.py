@@ -6,8 +6,8 @@ from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
-from adaptive_academy.db import ensure_fts, ensure_vec
 from adaptive_academy.api.routes_memory import memory_stats
+from adaptive_academy.db import ensure_fts, ensure_vec
 from adaptive_academy.engine.memory import ChunkFilter, content_hash
 from adaptive_academy.llm.fts_retriever import FtsRetriever
 from adaptive_academy.llm.hybrid_retriever import HybridRetriever
@@ -140,9 +140,11 @@ def test_get_embedder_uses_scripted_backend_for_scripted_retrieval(monkeypatch):
 def test_memory_stats_reports_active_hybrid_retriever(vec_session):
     retriever = HybridRetriever(FtsRetriever(), ScriptedEmbedder())
 
-    stats = memory_stats(session=vec_session, retriever=retriever)
+    hybrid_stats = memory_stats(session=vec_session, retriever=retriever)
+    fts_stats = memory_stats(session=vec_session, retriever=FtsRetriever())
 
-    assert stats.retriever == "hybrid"
+    assert hybrid_stats.retriever == "hybrid"
+    assert fts_stats.retriever == "fts"
 
 
 def test_hybrid_degrades_once_when_the_embedder_is_unavailable(monkeypatch, caplog):
