@@ -2,8 +2,9 @@
 import json
 from dataclasses import dataclass
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
+from adaptive_academy.engine import graph
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
@@ -259,6 +260,14 @@ def generate_curriculum(
         session.commit()
         session.refresh(concept)
         session.add(KnowledgeEstimate(concept_id=concept.id, level="high", confidence=0.5))
+
+    concepts = session.exec(select(Concept).where(Concept.track_id == track.id)).all()
+    pairs, unresolved = graph.edges_from_prerequisite_map(foundation.prerequisite_map, concepts)
+    for topic_track in session.exec(select(Track).where(Track.topic_id == topic.id)).all():
+        graph.invalidate_track_edges(session, topic_track.id)
+    inserted = graph.insert_edges(session, pairs, kind="prerequisite", origin="researcher",
+                                  origin_ref=f"foundation:{topic.id}")
+    emit("graph:edges", f"{inserted} edges, {len(unresolved)} unresolved")
     emit("curriculum:concepts", f"{len(foundation.key_concepts)} concepts, {lb_count} load-bearing")
 
     emit("curriculum:done", f"track {track.id}")

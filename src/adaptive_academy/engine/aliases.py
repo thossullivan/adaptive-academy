@@ -103,6 +103,11 @@ def apply_program_aliases(session: Session, topic_id: int) -> AliasResult:
         result.registered += 1
 
     if result.registered:
+        session.flush()
+        from adaptive_academy.engine import graph
+
+        for canonical in {normalize_name(concept.name) for concept in concepts}:
+            graph.alias_edges(session, program_id, canonical)
         session.add(AgentEvent(
             topic_id=topic_id, kind="program:alias",
             detail=f"{result.registered} registered, {len(result.seeded)} seeded"))

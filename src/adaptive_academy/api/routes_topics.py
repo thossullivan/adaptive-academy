@@ -54,6 +54,7 @@ from adaptive_academy.models import (
     Assessment,
     Concept,
     ConceptAlias,
+    ConceptEdge,
     Deliverable,
     Item,
     KnowledgeEstimate,
@@ -388,41 +389,53 @@ def import_curriculum(
     if topic is None:
         raise HTTPException(404, "topic not found")
     view = markdown_to_track(body.markdown)
-    # Replace any existing track for this topic.
+    # Replace unreferenced tracks. A track with graph history must keep its concepts.
+    track = None
     old = session.exec(select(Track).where(Track.topic_id == topic_id)).all()
-    for t in old:
-        for p in session.exec(select(Phase).where(Phase.track_id == t.id)).all():
+    for old_track in old:
+        for p in session.exec(select(Phase).where(Phase.track_id == old_track.id)).all():
             for it in session.exec(select(Item).where(Item.phase_id == p.id)).all():
                 session.delete(it)
             d = session.exec(select(Deliverable).where(Deliverable.phase_id == p.id)).first()
             if d:
                 session.delete(d)
             session.delete(p)
-        for s in session.exec(select(Sidebar).where(Sidebar.track_id == t.id)).all():
+        for s in session.exec(select(Sidebar).where(Sidebar.track_id == old_track.id)).all():
             session.delete(s)
-        # Concepts (and their estimates + program aliases) belong to the track too —
-        # delete them before the track, or the default cascade NULLs concept.track_id
-        # and violates NOT NULL. ConceptAlias.concept_id is also a NOT NULL FK (program
-        # topics get one alias row per concept via apply_program_aliases after curriculum
-        # generation), so it must go before the concept too or foreign_keys=ON raises.
-        for c in session.exec(select(Concept).where(Concept.track_id == t.id)).all():
-            est = session.exec(
-                select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == c.id)
+        concepts = session.exec(select(Concept).where(Concept.track_id == old_track.id)).all()
+        concept_ids = [concept.id for concept in concepts if concept.id is not None]
+        has_graph_history = session.exec(
+            select(ConceptEdge).where(
+                (ConceptEdge.src_concept_id.in_(concept_ids))
+                | (ConceptEdge.dst_concept_id.in_(concept_ids))
+            )
+        ).first() is not None if concept_ids else False
+        if has_graph_history:
+            if track is None:
+                track = old_track
+                track.title = view.title
+                track.overview = view.overview
+                session.add(track)
+            continue
+        for concept in concepts:
+            estimate = session.exec(
+                select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)
             ).first()
-            if est:
-                session.delete(est)
+            if estimate:
+                session.delete(estimate)
             for alias in session.exec(
-                select(ConceptAlias).where(ConceptAlias.concept_id == c.id)
+                select(ConceptAlias).where(ConceptAlias.concept_id == concept.id)
             ).all():
                 session.delete(alias)
-            session.delete(c)
-        session.delete(t)
+            session.delete(concept)
+        session.delete(old_track)
     session.commit()
 
-    track = Track(topic_id=topic_id, title=view.title, overview=view.overview)
-    session.add(track)
-    session.commit()
-    session.refresh(track)
+    if track is None:
+        track = Track(topic_id=topic_id, title=view.title, overview=view.overview)
+        session.add(track)
+        session.commit()
+        session.refresh(track)
     for pi, pv in enumerate(view.phases):
         phase = Phase(track_id=track.id, title=pv.title, position=pi,
                       est_hours=pv.est_hours, flags=pv.flags)
