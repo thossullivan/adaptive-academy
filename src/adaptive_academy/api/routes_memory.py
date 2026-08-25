@@ -60,11 +60,11 @@ def _parse_kinds(values: list[str] | None) -> tuple[str, ...]:
 
 @router.get("/search", response_model=MemorySearchOut)
 def search_memory(
-    q: str = Query(...),
+    q: str = Query(""),
     topic_id: int | None = None,
     concept_id: int | None = None,
     kinds: list[str] | None = Query(None),
-    k: int = Query(DEFAULT_K, ge=1),
+    k: int = Query(DEFAULT_K, ge=1, le=50),
     session: Session = Depends(get_session),
     retriever: Retriever = Depends(get_retriever),
 ) -> MemorySearchOut:
@@ -94,6 +94,12 @@ def reindex_memory(
     fetch: Callable[[str], str | None] = Depends(get_fetcher),
 ) -> MemoryReindexOut:
     kinds = REINDEX_KINDS if body.kinds is None else _parse_kinds(body.kinds)
+    unsupported_kinds = sorted(set(kinds) - set(REINDEX_KINDS))
+    if unsupported_kinds:
+        raise HTTPException(
+            400,
+            f"unsupported reindex kinds: {', '.join(unsupported_kinds)}",
+        )
     vault_path = _resolve_path(body.vault_path) if "vault_note" in kinds else ""
     topic_statement = select(Topic).order_by(Topic.id)
     if body.topic_id is not None:
@@ -102,12 +108,31 @@ def reindex_memory(
     if body.topic_id is not None and not topics:
         raise HTTPException(404, "topic not found")
 
+    vault_topic_ids: set[int] | None = None
+    if body.topic_id is None and "vault_note" in kinds:
+        vault_topic_ids = {
+            topic_id
+            for topic_id in session.exec(
+                select(Chunk.topic_id).where(Chunk.kind == "vault_note").distinct()
+            ).all()
+            if topic_id is not None
+        }
+
     started = time.perf_counter()
     indexed = 0
     skipped = 0
     removed = 0
     truncated = False
     for topic in topics:
+        topic_kinds = tuple(
+            kind
+            for kind in kinds
+            if kind != "vault_note"
+            or vault_topic_ids is None
+            or topic.id in vault_topic_ids
+        )
+        if not topic_kinds:
+            continue
         remaining = REINDEX_DEADLINE_S - (time.perf_counter() - started)
         if remaining <= 0:
             truncated = True
@@ -118,7 +143,7 @@ def reindex_memory(
                 topic.id,
                 vault_path=vault_path,
                 fetch=fetch,
-                kinds=kinds,
+                kinds=topic_kinds,
                 deadline_s=remaining,
             )
         except ValueError as exc:

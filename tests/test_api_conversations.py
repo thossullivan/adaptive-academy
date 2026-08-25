@@ -50,7 +50,8 @@ def client():
     c = TestClient(app)
     c.engine = engine
     c.topic_id, c.concept_id, c.retriever = topic_id, concept_id, retriever
-    return c
+    yield c
+    app.dependency_overrides.clear()
 
 
 def test_health(client):

@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import select
 
+from adaptive_academy.api import routes_memory
 from adaptive_academy.api.app import create_app
 from adaptive_academy.api.deps import get_fetcher, get_retriever, get_session
 from adaptive_academy.engine.memory import index_text
@@ -78,6 +79,11 @@ def test_search_returns_ranked_hits_with_bounded_snippets_and_rejects_blank_quer
     assert len(hits[1]["snippet"]) <= 240
     assert "\n" not in hits[1]["snippet"]
     assert client.get("/api/memory/search", params={"q": "   "}).status_code == 400
+    assert client.get("/api/memory/search").status_code == 400
+    assert (
+        client.get("/api/memory/search", params={"q": "attention", "k": 51}).status_code
+        == 422
+    )
 
 
 def test_reindex_tmp_vault_is_idempotent(session, memory_api, tmp_path):
@@ -138,6 +144,79 @@ def test_reindex_without_topic_indexes_all_topics(session, memory_api):
     assert response.json()["indexed"] == 2
     chunks = session.exec(select(Chunk).where(Chunk.kind == "source_doc")).all()
     assert {chunk.topic_id for chunk in chunks} == {first_topic.id, second_topic.id}
+
+
+def test_reindex_without_topic_preserves_vault_chunk_owners(
+    session,
+    memory_api,
+    tmp_path,
+):
+    client, first_topic, _ = memory_api
+    second_topic = Topic(title="Second topic")
+    session.add(second_topic)
+    session.commit()
+    session.refresh(second_topic)
+    (tmp_path / "a.md").write_text("# Alpha\n\nFirst note.", encoding="utf-8")
+    (tmp_path / "b.md").write_text("# Beta\n\nSecond note.", encoding="utf-8")
+    seeded = client.post(
+        "/api/memory/reindex",
+        json={
+            "topic_id": first_topic.id,
+            "vault_path": str(tmp_path),
+            "kinds": ["vault_note"],
+        },
+    )
+    assert seeded.status_code == 200
+    before = {
+        chunk.source_ref: chunk.topic_id
+        for chunk in session.exec(
+            select(Chunk).where(Chunk.kind == "vault_note").order_by(Chunk.source_ref)
+        ).all()
+    }
+    assert len(before) == 2
+    assert set(before.values()) == {first_topic.id}
+
+    response = client.post(
+        "/api/memory/reindex",
+        json={"vault_path": str(tmp_path)},
+    )
+
+    assert response.status_code == 200
+    after = {
+        chunk.source_ref: chunk.topic_id
+        for chunk in session.exec(
+            select(Chunk).where(Chunk.kind == "vault_note").order_by(Chunk.source_ref)
+        ).all()
+    }
+    assert after == before
+
+
+def test_reindex_rejects_unsupported_kinds(memory_api):
+    client, _, _ = memory_api
+
+    response = client.post(
+        "/api/memory/reindex",
+        json={"kinds": ["bogus"]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "unsupported reindex kinds: bogus"
+
+
+def test_reindex_reports_truncation_when_deadline_is_exhausted(
+    memory_api,
+    monkeypatch,
+):
+    client, _, _ = memory_api
+    monkeypatch.setattr(routes_memory, "REINDEX_DEADLINE_S", 0.0)
+
+    response = client.post(
+        "/api/memory/reindex",
+        json={"kinds": ["source_doc"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["truncated"] is True
 
 
 def test_stats_counts_match_topic(session, memory_api):
