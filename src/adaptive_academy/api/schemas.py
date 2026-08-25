@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel
@@ -36,6 +37,40 @@ class MessageOut(BaseModel):
     content: str
 
 
+class MemoryHitOut(BaseModel):
+    chunk_id: int
+    kind: str
+    heading: str
+    snippet: str
+    score: float
+    source_ref: str
+
+
+class MemorySearchOut(BaseModel):
+    hits: list[MemoryHitOut] = []
+
+
+class MemoryReindexIn(BaseModel):
+    topic_id: Optional[int] = None
+    vault_path: str = ""
+    kinds: Optional[list[str]] = None
+
+
+class MemoryReindexOut(BaseModel):
+    indexed: int
+    skipped: int
+    removed: int
+    truncated: bool
+    ms: int
+    note: str = ""
+
+
+class MemoryStatsOut(BaseModel):
+    by_kind: dict[str, int]
+    last_indexed_at: Optional[datetime] = None
+    retriever: str
+
+
 class EventOut(BaseModel):
     kind: str
     detail: str
@@ -60,6 +95,7 @@ class SendMessageOut(BaseModel):
     assistance_level: str
     challenge_level: str
     events: list[EventOut]
+    memory: list[MemoryHitOut] = []
 
 
 class CreateTopicIn(BaseModel):

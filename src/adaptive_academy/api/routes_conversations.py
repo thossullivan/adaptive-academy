@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from adaptive_academy.api.deps import get_llm, get_retriever, get_session, use_agent_sdk
+from adaptive_academy.api.routes_memory import memory_hit_out
 from adaptive_academy.api.schemas import (
     ConversationOut,
     EventOut,
@@ -93,4 +94,5 @@ def send_message(
         assistance_level=levels.assistance,
         challenge_level=levels.challenge,
         events=[EventOut(kind=e.kind, detail=e.detail) for e in result.events],
+        memory=[memory_hit_out(hit) for hit in result.memory],
     )

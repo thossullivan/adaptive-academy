@@ -291,8 +291,13 @@ def reindex_vault(
     vault_path: str,
     *,
     subfolder: str = "",
+    only_refs: set[str] | None = None,
 ) -> IndexResult:
-    """Index vault note text and wikilinks with one transaction per file."""
+    """Index vault note text and wikilinks with one transaction per file.
+
+    With ``only_refs`` (file URIs), only those notes are (re)indexed and only their
+    orphans removed — used by all-topic sweeps so one topic never claims another's notes.
+    """
     from adaptive_academy.engine.memory import (
         IndexResult,
         content_hash,
@@ -304,6 +309,8 @@ def reindex_vault(
     vault = safe_vault_dir(vault_path)
     root = safe_child(vault, subfolder) if subfolder else vault
     paths = scan_notes(root)
+    if only_refs is not None:
+        paths = [path for path in paths if path.resolve().as_uri() in only_refs]
     current_refs = {path.resolve().as_uri() for path in paths}
     title_index = build_title_index(vault)
     indexed = 0
@@ -376,6 +383,8 @@ def reindex_vault(
         ).all()
         if chunk.source_ref.startswith(root_prefix)
     }
+    if only_refs is not None:
+        existing_refs &= only_refs
     for source_ref in sorted(existing_refs - current_refs):
         removed += _remove_vault_source(session, source_ref)
         session.commit()
