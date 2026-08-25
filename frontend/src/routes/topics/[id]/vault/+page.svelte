@@ -2,9 +2,12 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult } from '$lib/types';
+  import { toasts } from '$lib/toast.svelte';
+  import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Input, Badge } from '$lib/ui';
+  import MemorySearchResults from './MemorySearchResults.svelte';
+  import { MAX_MEMORY_RESULTS, runMemoryReindex, runMemorySearch } from './memory-actions';
 
   const topicId = Number($page.params.id);
   const STORE_KEY = 'aa_vault_path';
@@ -18,11 +21,19 @@
   let exportRes = $state<VaultExportResult | null>(null);
   let exportAllRes = $state<VaultExportAllResult | null>(null);
   let ingestRes = $state<VaultIngestResult | null>(null);
+  let query = $state('');
+  let resultLimit = $state('20');
+  let searchHits = $state<MemoryHit[]>([]);
+  let searching = $state(false);
+  let searched = $state(false);
+  let reindexing = $state(false);
+  let stats = $state<MemoryStats | null>(null);
   let error = $state('');
 
   onMount(() => {
     path = localStorage.getItem(STORE_KEY) ?? '';
     if (path) check();
+    loadStats();
   });
 
   async function check() {
@@ -39,6 +50,49 @@
   }
 
   const ready = $derived(!!status?.is_dir);
+
+  async function loadStats() {
+    stats = await api.memoryStats(topicId).catch(() => null);
+  }
+
+  async function search() {
+    if (!query.trim() || searching) return;
+    error = '';
+    searching = true;
+    searched = false;
+    try {
+      const result = await runMemorySearch(api.searchMemory, query, topicId, resultLimit);
+      resultLimit = String(result.k);
+      searchHits = result.hits;
+      searched = true;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      searching = false;
+    }
+  }
+
+  async function reindex() {
+    if (reindexing) return;
+    error = '';
+    reindexing = true;
+    try {
+      await runMemoryReindex(
+        api.reindexMemory,
+        {
+          topic_id: topicId,
+          vault_path: path.trim() || undefined
+        },
+        (message, tone) => toasts.show(message, tone)
+      );
+      await loadStats();
+      if (query.trim()) await search();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      reindexing = false;
+    }
+  }
 
   async function runExport() {
     error = '';
@@ -166,6 +220,58 @@
         {/if}
       </Card>
     </div>
+
+    <Card eyebrow="Memory index" title="Search what Adaptive Academy remembers">
+      <form
+        class="flex flex-col gap-2 sm:flex-row"
+        onsubmit={(e) => {
+          e.preventDefault();
+          search();
+        }}
+      >
+        <Input
+          bind:value={query}
+          oninput={() => {
+            searched = false;
+            searchHits = [];
+          }}
+          placeholder="Search vault notes, sources, and prior learning…"
+        />
+        <label class="flex items-center gap-2 text-xs text-faint">
+          Results
+          <Input
+            bind:value={resultLimit}
+            type="number"
+            min="1"
+            max={MAX_MEMORY_RESULTS}
+            class="w-20"
+            aria-label="Maximum search results"
+          />
+        </label>
+        <Button type="submit" size="sm" disabled={searching || !query.trim()}>
+          {searching ? 'Searching…' : 'Search'}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={reindex}
+          disabled={reindexing || (!path.trim() && !status)}
+        >
+          {reindexing ? 'Reindexing…' : 'Reindex'}
+        </Button>
+      </form>
+
+      {#if stats}
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-faint">
+          <Badge mono tone="neutral">{stats.retriever}</Badge>
+          {#each Object.entries(stats.by_kind) as [kind, count] (kind)}
+            <span>{kind.replaceAll('_', ' ')} <span class="nums text-fg-dim">{count}</span></span>
+          {/each}
+        </div>
+      {/if}
+
+      <MemorySearchResults hits={searchHits} {query} {searched} {searching} />
+    </Card>
 
     {#if error}
       <p class="text-sm" style:color="var(--danger)">{error}</p>

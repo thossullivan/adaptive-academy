@@ -1,15 +1,24 @@
 export interface Concept { id: number; name: string; is_load_bearing: boolean; has_anchor?: boolean; }
 export interface Topic { id: number; title: string; concepts: Concept[]; intent?: Intent | null; }
 export interface EventOut { kind: string; detail: string; }
-export interface MessageOut { role: 'user' | 'tutor'; content: string; }
+export interface MemoryHit {
+  chunk_id: number;
+  kind: string;
+  heading: string;
+  snippet: string;
+  score: number;
+  source_ref: string;
+}
+export interface MessageOut { role: 'user' | 'tutor'; content: string; memory?: MemoryHit[]; }
 export interface Conversation {
   id: number; concept_id: number; attempt_logged: boolean;
   assistance_level: string; challenge_level: string; messages: MessageOut[];
 }
-export interface SendResult {
+export interface SendMessageOut {
   reply: string; attempt_logged: boolean;
-  assistance_level: string; challenge_level: string; events: EventOut[];
+  assistance_level: string; challenge_level: string; events: EventOut[]; memory: MemoryHit[];
 }
+export type SendResult = SendMessageOut;
 export interface Intent { goal: string; prior_knowledge: string; time_budget: string; }
 export interface SourceDoc {
   id: number; title: string; url: string; tier: number;
@@ -91,6 +100,24 @@ export interface VaultExportResult {
 export interface VaultExportAllResult {
   topics: number;
   written: string[];
+}
+export interface MemorySearchResult { hits: MemoryHit[]; }
+export interface MemoryReindexBody {
+  topic_id?: number;
+  vault_path?: string;
+  kinds?: string[];
+}
+export interface MemoryReindexResult {
+  indexed: number;
+  skipped: number;
+  removed: number;
+  truncated: boolean;
+  ms: number;
+}
+export interface MemoryStats {
+  by_kind: Record<string, number>;
+  last_indexed_at: string | null;
+  retriever: string;
 }
 
 export interface WindState {
