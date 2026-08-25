@@ -68,7 +68,7 @@ def _six_node_graph(session) -> list[Concept]:
     return concepts
 
 
-def test_ancestors_depth_cap_cycle_safety_and_descendant_direction(session):
+def test_ancestors_depth_cycle_safety_and_descendant_direction(session):
     a, b, c, d, e, f = _six_node_graph(session)
 
     assert ancestors(session, a.id, max_depth=1) == [(b.id, 1)]
@@ -93,6 +93,19 @@ def test_ancestors_depth_cap_cycle_safety_and_descendant_direction(session):
     assert descendants(session, c.id, max_depth=2) == [(b.id, 1), (a.id, 2)]
 
 
+def test_ancestors_clamps_depth_to_six(session):
+    _, concepts = _track(session, list("ABCDEFGH"), title="Long chain")
+    for source, destination in zip(concepts[:-1], concepts[1:], strict=True):
+        _edge(session, source, destination)
+    session.flush()
+
+    result = ancestors(session, concepts[0].id, max_depth=10)
+
+    assert max(depth for _, depth in result) == 6
+    assert (concepts[6].id, 6) in result
+    assert concepts[7].id not in {concept_id for concept_id, _ in result}
+
+
 def test_traversal_uses_bitemporal_validity_window(session):
     a, b, _, _, _, f = _six_node_graph(session)
 
@@ -114,9 +127,12 @@ def test_neighbors_honors_edge_kinds(session):
 
 
 def test_weakest_ancestor_orders_level_before_latest_score(session):
-    a, b, c, _, _, _ = _six_node_graph(session)
+    a, b, c, d, e, f = _six_node_graph(session)
     session.add(KnowledgeEstimate(concept_id=b.id, level="low"))
     session.add(KnowledgeEstimate(concept_id=c.id, level="medium"))
+    session.add(KnowledgeEstimate(concept_id=d.id, level="high"))
+    session.add(KnowledgeEstimate(concept_id=e.id, level="high"))
+    session.add(KnowledgeEstimate(concept_id=f.id, level="high"))
     session.add(
         Assessment(
             concept_id=b.id,
@@ -144,6 +160,19 @@ def test_weakest_ancestor_orders_level_before_latest_score(session):
     session.flush()
 
     assert weakest_ancestor(session, a.id) == (b.id, 0.9)
+
+
+def test_weakest_ancestor_treats_missing_estimate_as_weakest(session):
+    _, (target, estimated, unestimated) = _track(
+        session,
+        ["Target", "Estimated", "Unestimated"],
+    )
+    _edge(session, target, estimated)
+    _edge(session, target, unestimated)
+    session.add(KnowledgeEstimate(concept_id=estimated.id, level="high"))
+    session.flush()
+
+    assert weakest_ancestor(session, target.id) == (unestimated.id, 0.0)
 
 
 def test_frontier_returns_only_verified_concepts_with_outside_neighbors(session):

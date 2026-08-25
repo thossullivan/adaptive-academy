@@ -31,7 +31,7 @@ LEVEL_ORDER = {"low": 0, "medium": 1, "high": 2}
 @dataclass(frozen=True)
 class BackfillResult:
     tracks: int
-    edges: int
+    edges: int  # Desired current edge count, not rows inserted by this call.
     unresolved: int
 
 
@@ -85,6 +85,8 @@ def edges_from_prerequisite_map(
                 record_unresolved(prerequisite_name)
                 continue
             if source is None or source.id is None:
+                continue
+            if source.id == prerequisite.id:
                 continue
             pair = (source.id, prerequisite.id)
             if pair not in seen_pairs:
@@ -351,7 +353,7 @@ def weakest_ancestor(
     session: Session,
     concept_id: int,
 ) -> tuple[int, float] | None:
-    """Return the weakest prerequisite ancestor and its latest assessment score."""
+    """Return the weakest ancestor, treating an unestimated ancestor as weakest."""
     ancestor_ids = [
         ancestor_id
         for ancestor_id, _depth in ancestors(
@@ -380,7 +382,7 @@ def weakest_ancestor(
 
     def weakness_key(ancestor_id: int) -> tuple[int, float, int]:
         estimate = estimate_by_concept.get(ancestor_id)
-        level_rank = LEVEL_ORDER.get(estimate.level, len(LEVEL_ORDER)) if estimate else len(LEVEL_ORDER)
+        level_rank = LEVEL_ORDER.get(estimate.level, -1) if estimate else -1
         return level_rank, float(latest_score.get(ancestor_id, 0.0)), ancestor_id
 
     weakest_id = min(ancestor_ids, key=weakness_key)
@@ -389,6 +391,7 @@ def weakest_ancestor(
 
 def frontier(session: Session, track_id: int) -> list[tuple[int, list[str]]]:
     """Return verified concepts with at least one neighbor outside their track."""
+    # Concept.track_id is non-null, so "outside any track" means a different track_id.
     concepts = session.exec(
         select(Concept)
         .where(Concept.track_id == track_id)

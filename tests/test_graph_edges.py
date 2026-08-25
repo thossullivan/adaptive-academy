@@ -61,6 +61,26 @@ def test_prerequisite_map_resolves_exact_normalized_and_unknown_names(session):
     assert unresolved == ["Unknown"]
 
 
+def test_prerequisite_map_does_not_store_self_loop(session):
+    _, (concept,) = _track(session, ["Self-referential"])
+
+    pairs, unresolved = edges_from_prerequisite_map(
+        {"Self-referential": ["Self-referential"]},
+        [concept],
+    )
+    inserted = insert_edges(
+        session,
+        pairs,
+        kind="prerequisite",
+        origin="researcher",
+    )
+
+    assert pairs == []
+    assert unresolved == []
+    assert inserted == 0
+    assert session.exec(select(ConceptEdge)).all() == []
+
+
 def test_insert_edges_is_idempotent(session):
     _, (source, destination) = _track(session, ["Source", "Destination"])
     pairs = [(source.id, destination.id)]
