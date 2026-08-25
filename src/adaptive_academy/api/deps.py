@@ -16,6 +16,7 @@ from adaptive_academy.settings import settings
 
 logger = logging.getLogger(__name__)
 _logged_retriever_degradations: set[str] = set()
+_fts_available: bool | None = None
 
 
 def use_agent_sdk() -> bool:
@@ -76,13 +77,22 @@ def get_retriever() -> Retriever:
             "hybrid",
             "Hybrid retrieval is not available yet; using FTS5.",
         )
-    if ensure_fts(engine):
+    global _fts_available
+    if _fts_available is None:
+        _fts_available = ensure_fts(engine)
+    if _fts_available:
         return FtsRetriever()
     _warn_retriever_degradation_once(
         "fts",
         "FTS5 is unavailable; using scripted token-overlap retrieval.",
     )
     return ScriptedRetriever()
+
+
+def reset_retriever_cache() -> None:
+    """Clear the cached FTS5 availability result."""
+    global _fts_available
+    _fts_available = None
 
 
 def _warn_retriever_degradation_once(key: str, message: str) -> None:

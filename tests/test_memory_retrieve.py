@@ -93,6 +93,19 @@ def test_retrieve_caps_three_distinct_candidates_to_one(session):
     assert hits[0].chunk.id == chunks[0].id
 
 
+def test_retrieve_overfetches_before_deduplicating(session):
+    first = _chunk("same text", "vault:first")
+    duplicate = _chunk("same text", "vault:duplicate")
+    distinct = _chunk("different text", "vault:distinct")
+    session.add_all([first, duplicate, distinct])
+    session.flush()
+    retriever = ScriptedRetriever({"memory": [first.id, duplicate.id, distinct.id]})
+
+    hits = retrieve(session, retriever, "memory", k=2)
+
+    assert [hit.chunk.id for hit in hits] == [first.id, distinct.id]
+
+
 def test_retrieve_converts_backend_failure_to_error_event(session):
     topic = Topic(title="Errors")
     session.add(topic)
@@ -234,13 +247,20 @@ def test_expand_links_adds_best_neighbor_below_direct_hits(session):
     session.flush()
     session.add(VaultLink(src_ref="vault:a", dst_ref="vault:b", dst_title="B"))
     session.flush()
-    retriever = ScriptedRetriever(
-        {"memory": [source.id, linked_best.id, linked_other.id]}
-    )
+    class LinkAwareRetriever:
+        name = "link-aware"
+
+        def search(self, session, query, *, where, k):
+            if where.source_refs:
+                return [(linked_other.id, 0.2), (linked_best.id, 0.8)][:k]
+            return [(source.id, 1.0)][:k]
+
+        def on_index(self, session, chunk_ids):
+            return None
 
     hits = retrieve(
         session,
-        retriever,
+        LinkAwareRetriever(),
         "memory",
         k=2,
         expand_links=True,
@@ -248,6 +268,46 @@ def test_expand_links_adds_best_neighbor_below_direct_hits(session):
 
     assert [hit.chunk.id for hit in hits] == [source.id, linked_best.id]
     assert [hit.via for hit in hits] == ["direct", "link"]
+    assert [hit.score for hit in hits] == [1.0, 0.0]
+
+
+def test_expand_links_preserves_neighbors_already_ranked_as_direct(session):
+    source = _chunk("memory source", "vault:a")
+    neighbor = _chunk("memory neighbor", "vault:b")
+    session.add_all([source, neighbor])
+    session.flush()
+    session.add(VaultLink(src_ref="vault:a", dst_ref="vault:b", dst_title="B"))
+    session.flush()
+    retriever = ScriptedRetriever({"memory": [source.id, neighbor.id]})
+
+    direct = retrieve(session, retriever, "memory", k=3)
+    expanded = retrieve(session, retriever, "memory", k=3, expand_links=True)
+
+    assert [(hit.chunk.id, hit.score, hit.via) for hit in expanded] == [
+        (hit.chunk.id, hit.score, hit.via) for hit in direct
+    ]
+
+
+def test_expand_links_uses_ordinal_zero_when_neighbor_does_not_match(session):
+    source = _chunk("memory alpha", "vault:a")
+    neighbor = _chunk("totally unrelated words", "vault:b")
+    session.add_all([source, neighbor])
+    session.flush()
+    session.add(VaultLink(src_ref="vault:a", dst_ref="vault:b", dst_title="B"))
+    session.flush()
+
+    hits = retrieve(
+        session,
+        FtsRetriever(),
+        "memory",
+        k=3,
+        expand_links=True,
+    )
+
+    assert [hit.chunk.id for hit in hits] == [source.id, neighbor.id]
+    assert [hit.via for hit in hits] == ["direct", "link"]
+    assert hits[1].chunk.ordinal == 0
+    assert hits[1].score == 0.0
 
 
 def test_retriever_setting_uses_aa_environment(monkeypatch):
@@ -271,6 +331,7 @@ def test_get_retriever_accepts_vec_as_hybrid_alias(monkeypatch):
 
     monkeypatch.setattr(deps.settings, "retriever", "vec")
     monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
+    deps.reset_retriever_cache()
 
     assert isinstance(deps.get_retriever(), FtsRetriever)
 
@@ -284,6 +345,7 @@ def test_get_retriever_warns_once_and_uses_fts_for_unknown_value(
     monkeypatch.setattr(deps.settings, "retriever", "unknown")
     monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
     monkeypatch.setattr(deps, "_logged_retriever_degradations", set())
+    deps.reset_retriever_cache()
 
     with caplog.at_level("WARNING"):
         first = deps.get_retriever()
@@ -298,6 +360,17 @@ def test_get_retriever_degrades_to_scripted_without_fts(monkeypatch):
     from adaptive_academy.api import deps
 
     monkeypatch.setattr(deps.settings, "retriever", "fts")
-    monkeypatch.setattr(deps, "ensure_fts", lambda engine: False)
+    calls = 0
+
+    def unavailable(_engine):
+        nonlocal calls
+        calls += 1
+        return False
+
+    monkeypatch.setattr(deps, "ensure_fts", unavailable)
+    deps.reset_retriever_cache()
 
     assert isinstance(deps.get_retriever(), ScriptedRetriever)
+    assert isinstance(deps.get_retriever(), ScriptedRetriever)
+    assert calls == 1
+    deps.reset_retriever_cache()

@@ -81,8 +81,9 @@ def test_fts_bm25_prefers_exact_frequency_and_searches_context(session):
 
 def test_sanitizer_makes_hostile_input_a_valid_match(session):
     foo = _chunk("foo only", "vault:foo")
+    operator = _chunk("or", "vault:operator")
     other = _chunk("unrelated content", "vault:other")
-    session.add_all([foo, other])
+    session.add_all([foo, operator, other])
     session.flush()
 
     sanitized = sanitize_fts_query('foo" OR 1=1 --')
@@ -93,8 +94,9 @@ def test_sanitizer_makes_hostile_input_a_valid_match(session):
         k=10,
     )
 
-    assert sanitized == '"foo" OR "OR"'
+    assert sanitized == '"foo"'
     assert [chunk_id for chunk_id, _ in hits] == [foo.id]
+    assert operator.id not in [chunk_id for chunk_id, _ in hits]
     assert FtsRetriever().search(session, "- !", where=ChunkFilter(), k=10) == []
 
 

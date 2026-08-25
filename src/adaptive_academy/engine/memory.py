@@ -100,7 +100,12 @@ def content_hash(text: str) -> str:
 def sanitize_fts_query(query: str) -> str:
     """Convert arbitrary input into a safe FTS5 disjunction of quoted tokens."""
     tokens = re.findall(r"[^\W_]+", query, flags=re.UNICODE)
-    kept = [token for token in tokens if len(token) >= 2]
+    operators = {"and", "or", "not", "near"}
+    kept = [
+        token
+        for token in tokens
+        if len(token) >= 2 and token.casefold() not in operators
+    ]
     if not kept:
         return '""'
     return " OR ".join(f'"{token}"' for token in kept)
@@ -385,7 +390,7 @@ def retrieve(
     expand_links: bool = False,
     event_target: dict[str, int | None] | None = None,
 ) -> list[Hit]:
-    """Retrieve ranked chunks and emit an observability event without committing."""
+    """Retrieve direct hits, then append zero-score link hits into open slots."""
     started = time.perf_counter()
     try:
         if order not in {"relevance", "recency"}:
@@ -402,7 +407,8 @@ def retrieve(
                 since=since,
             ),
         )
-        search_k = max(k * 3, 0) if order == "recency" else max(k, 0)
+        limit = max(k, 0)
+        search_k = limit * 3
         ranked = retriever.search(session, expanded_query, where=where, k=search_k)
         candidates = _load_ranked_chunks(session, ranked, where=where)
         if order == "recency":
@@ -410,43 +416,44 @@ def retrieve(
                 key=lambda hit: (_datetime_key(hit.chunk.created_at), hit.score),
                 reverse=True,
             )
-        candidates = _deduplicate_hits(candidates, limit=search_k)
-
-        if expand_links:
-            direct_hits, linked_source_refs, existing_link_hits = _partition_linked_hits(
-                session,
-                candidates,
-                limit=max(k, 0),
-            )
+        direct_hits = _deduplicate_hits(candidates, limit=limit)
+        link_hits: list[Hit] = []
+        if expand_links and len(direct_hits) < limit:
+            linked_source_refs = _linked_source_refs(session, direct_hits)
         else:
-            direct_hits = candidates[: max(k, 0)]
             linked_source_refs = []
-            existing_link_hits = []
-
-        direct_hits = _deduplicate_hits(direct_hits, limit=max(k, 0))
-        link_hits = existing_link_hits
-        if linked_source_refs and len(direct_hits) < max(k, 0):
+        if linked_source_refs:
             link_where = replace(where, source_refs=tuple(linked_source_refs))
             link_ranked = retriever.search(
                 session,
                 expanded_query,
                 where=link_where,
-                k=max(len(linked_source_refs) * 3, k * 3),
+                k=max(len(linked_source_refs) * 3, limit * 3),
             )
             link_candidates = _load_ranked_chunks(session, link_ranked, where=link_where)
             best_by_source: dict[str, Hit] = {}
             for candidate in link_candidates:
-                best_by_source.setdefault(candidate.chunk.source_ref, candidate)
-            for candidate in existing_link_hits:
-                best_by_source.setdefault(candidate.chunk.source_ref, candidate)
-            link_hits = [
-                Hit(chunk=hit.chunk, score=hit.score, via="link")
-                for source_ref in linked_source_refs
-                if (hit := best_by_source.get(source_ref)) is not None
-            ]
-            link_hits.sort(key=lambda hit: hit.score, reverse=True)
+                source_ref = candidate.chunk.source_ref
+                current = best_by_source.get(source_ref)
+                if current is None or candidate.score > current.score:
+                    best_by_source[source_ref] = candidate
+            for source_ref in linked_source_refs:
+                candidate = best_by_source.get(source_ref)
+                if candidate is None:
+                    chunk = session.exec(
+                        select(Chunk)
+                        .where(
+                            Chunk.source_ref == source_ref,
+                            Chunk.ordinal == 0,
+                        )
+                        .order_by(Chunk.id)
+                    ).first()
+                    if chunk is None or not _matches_filter(chunk, link_where):
+                        continue
+                    candidate = Hit(chunk=chunk, score=0.0)
+                link_hits.append(Hit(chunk=candidate.chunk, score=0.0, via="link"))
 
-        hits = _deduplicate_hits([*direct_hits, *link_hits], limit=max(k, 0))
+        hits = _deduplicate_hits([*direct_hits, *link_hits], limit=limit)
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         _add_memory_event(
             session,
@@ -512,41 +519,30 @@ def _matches_filter(chunk: Chunk, where: ChunkFilter) -> bool:
     return True
 
 
-def _partition_linked_hits(
+def _linked_source_refs(
     session: Session,
-    candidates: list[Hit],
-    *,
-    limit: int,
-) -> tuple[list[Hit], list[str], list[Hit]]:
-    direct_hits: list[Hit] = []
+    direct_hits: list[Hit],
+) -> list[str]:
     linked_source_refs: list[str] = []
-    existing_link_hits: list[Hit] = []
-    seen_link_refs: set[str] = set()
+    seen_source_refs = {hit.chunk.source_ref for hit in direct_hits}
 
-    for candidate in candidates:
-        if len(direct_hits) >= limit:
-            break
-        if candidate.chunk.source_ref in seen_link_refs:
-            existing_link_hits.append(
-                Hit(chunk=candidate.chunk, score=candidate.score, via="link")
-            )
-            continue
-        direct_hits.append(candidate)
-        if candidate.chunk.kind != "vault_note":
+    for direct_hit in direct_hits:
+        if direct_hit.chunk.kind != "vault_note":
             continue
         links = session.exec(
             select(VaultLink)
             .where(
-                VaultLink.src_ref == candidate.chunk.source_ref,
+                VaultLink.src_ref == direct_hit.chunk.source_ref,
                 VaultLink.dst_ref != "",
             )
             .order_by(VaultLink.id)
         ).all()
         for link in links:
-            if link.dst_ref not in seen_link_refs:
-                seen_link_refs.add(link.dst_ref)
-                linked_source_refs.append(link.dst_ref)
-    return direct_hits, linked_source_refs, existing_link_hits
+            if link.dst_ref in seen_source_refs:
+                continue
+            seen_source_refs.add(link.dst_ref)
+            linked_source_refs.append(link.dst_ref)
+    return linked_source_refs
 
 
 def _deduplicate_hits(hits: list[Hit], *, limit: int) -> list[Hit]:

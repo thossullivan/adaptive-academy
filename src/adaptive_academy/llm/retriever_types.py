@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Hit:
-    """One retrieved chunk and its query-relative score."""
+    """One chunk with a direct query score or a zero-score link marker."""
 
     chunk: Chunk
     score: float
