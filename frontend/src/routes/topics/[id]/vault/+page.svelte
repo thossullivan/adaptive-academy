@@ -21,6 +21,7 @@
   let exportAllRes = $state<VaultExportAllResult | null>(null);
   let ingestRes = $state<VaultIngestResult | null>(null);
   let query = $state('');
+  let resultLimit = $state('20');
   let searchHits = $state<MemoryHit[]>([]);
   let searching = $state(false);
   let reindexing = $state(false);
@@ -58,7 +59,10 @@
     error = '';
     searching = true;
     try {
-      const result = await api.searchMemory(query.trim(), { topic_id: topicId });
+      const parsedLimit = Number.parseInt(resultLimit, 10);
+      const k = Number.isFinite(parsedLimit) ? Math.min(100, Math.max(1, parsedLimit)) : 20;
+      resultLimit = String(k);
+      const result = await api.searchMemory(query.trim(), { topic_id: topicId, k });
       searchHits = result.hits;
     } catch (e) {
       error = String(e);
@@ -226,10 +230,21 @@
         }}
       >
         <Input bind:value={query} placeholder="Search vault notes, sources, and prior learning…" />
+        <label class="flex items-center gap-2 text-xs text-faint">
+          Results
+          <Input
+            bind:value={resultLimit}
+            type="number"
+            min="1"
+            max="100"
+            class="w-20"
+            aria-label="Maximum search results"
+          />
+        </label>
         <Button type="submit" size="sm" disabled={searching || !query.trim()}>
           {searching ? 'Searching…' : 'Search'}
         </Button>
-        <Button variant="outline" size="sm" onclick={reindex} disabled={!ready || reindexing}>
+        <Button variant="outline" size="sm" onclick={reindex} disabled={reindexing}>
           {reindexing ? 'Reindexing…' : 'Reindex'}
         </Button>
       </form>
