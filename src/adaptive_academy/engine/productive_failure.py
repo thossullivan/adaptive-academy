@@ -84,6 +84,7 @@ def generate_challenge(session: Session, concept: Concept, *, llm: LLMClient) ->
         topic_id=topic_id,
         concept_id=concept.id,
     )
+    session.commit()
     return problem
 
 

@@ -142,6 +142,8 @@ Note: `fetch.fetch_artifact_text` returns `None` on failure (SSRF block, bad sch
 - `memory.index_roleplay_turn(session, t: RoleplayTurn, *, topic_id, concept_ids)`; `memory.index_question(session, *, text, source_ref, topic_id, concept_id)`; `memory.index_paper_answer(...)`.
 - Topic resolution helper `memory.topic_id_for_concept(session, concept_id)` (reuse `productive_failure._topic_id_for` — promote it into `memory.py` and import from there).
 
+**Known Task 6 tradeoff:** Roleplay and paper-probe grading index the same full transcript or QA text once per load-bearing concept. Hash dedup hides duplicates during retrieval, but these chunks still consume the `ALREADY_COVERED` candidate budget.
+
 - [ ] **Step 1: failing tests** — for each site, drive the existing engine function with `ScriptedLLMClient` and assert the expected `Chunk` rows (`kind`, `source_ref`, `concept_id`) exist after the call; a 40-char tutor reply produces no `tutor_turn` chunk; re-running the same site does not duplicate.
 - [ ] **Step 2: implement** the helpers and the one-line calls; keep every call inside the site's existing transaction.
 - [ ] **Step 3:** full `just test` green — every pre-existing tutor/assess/roleplay/paper-probe test must pass unchanged.

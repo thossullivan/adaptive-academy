@@ -1,6 +1,6 @@
 import json
 
-from sqlmodel import select
+from sqlmodel import Session, select
 
 import adaptive_academy.engine.tutor_sdk as tutor_sdk
 from adaptive_academy.api.routes_paper_probe import post_answer
@@ -10,20 +10,23 @@ from adaptive_academy.engine.assess import assess_concept
 from adaptive_academy.engine.decay import grade_decay_check, schedule_decay_check
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.paper_probe import direct as direct_paper_probe
+from adaptive_academy.engine.paper_probe import grade_paper_probe
 from adaptive_academy.engine.productive_failure import consolidate, generate_challenge
 from adaptive_academy.engine.roleplay import direct as direct_roleplay
-from adaptive_academy.engine.roleplay import run_roleplay_turn
+from adaptive_academy.engine.roleplay import grade_roleplay, run_roleplay_turn
 from adaptive_academy.engine.teach import grade_teaching
 from adaptive_academy.engine.tutor import run_tutor_turn
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
+    Assessment,
     Chunk,
     Concept,
     Conversation,
     KnowledgeEstimate,
     Milestone,
     PaperProbe,
+    PaperProbeAnswer,
     Program,
     ProgramTopicLink,
     RoleplaySession,
@@ -317,14 +320,16 @@ def test_productive_failure_indexes_generated_question_and_assessment(session):
     generated_ref = (
         f"productive_failure:{concept.id}:{memory.content_hash(problem)}"
     )
-    question = session.exec(
-        select(Chunk).where(Chunk.source_ref == generated_ref)
-    ).one()
-    assert (question.kind, question.topic_id, question.concept_id) == (
-        "question",
-        topic.id,
-        concept.id,
-    )
+    session.rollback()
+    with Session(session.get_bind()) as persisted_session:
+        question = persisted_session.exec(
+            select(Chunk).where(Chunk.source_ref == generated_ref)
+        ).one()
+        assert (question.kind, question.topic_id, question.concept_id) == (
+            "question",
+            topic.id,
+            concept.id,
+        )
 
     memory.index_question(
         session,
@@ -425,6 +430,36 @@ def test_roleplay_indexes_opening_and_both_turn_roles(session):
     assert all(chunk.concept_id == concept.id for chunk in indexed.values())
 
 
+def test_roleplay_turn_indexes_after_load_bearing_concepts_are_removed(session):
+    _, concept, milestone = _seed_milestone(session)
+    roleplay = RoleplaySession(
+        program_id=milestone.program_id,
+        milestone_id=milestone.id,
+        status="active",
+        persona_brief={"persona": "Reviewer"},
+    )
+    session.add(roleplay)
+    session.commit()
+    session.refresh(roleplay)
+    concept.is_load_bearing = False
+    session.add(concept)
+    session.commit()
+
+    run_roleplay_turn(
+        session,
+        roleplay,
+        "I would preserve the learner's answer despite the map revision.",
+        llm=ScriptedLLMClient([LLMResponse(text="Please continue.")]),
+    )
+
+    chunks = session.exec(
+        select(Chunk).where(Chunk.source_ref.startswith("roleplayturn:"))
+    ).all()
+    assert len(chunks) == 2
+    assert all(chunk.topic_id is None for chunk in chunks)
+    assert all(chunk.concept_id is None for chunk in chunks)
+
+
 def test_paper_probe_indexes_questions(session):
     topic, concept, milestone = _seed_milestone(session)
     probe = PaperProbe(
@@ -519,6 +554,172 @@ def test_paper_answer_indexes_and_updates_without_duplication(session):
     assert rows[0].concept_id == concept.id
     assert rows[0].meta == {"role": "extension"}
     assert rows[0].text.endswith("recency ordering.")
+
+
+def test_paper_answer_indexes_after_load_bearing_concepts_are_removed(session):
+    _, concept, milestone = _seed_milestone(session)
+    probe = PaperProbe(
+        program_id=milestone.program_id,
+        milestone_id=milestone.id,
+        paper_title="Contextual Retrieval",
+        paper_text="The paper compares local ranking methods.",
+        status="answering",
+        questions=[
+            {
+                "index": 0,
+                "axis": "extension",
+                "prompt": "What would you extend?",
+                "concept_ids": [],
+            }
+        ],
+    )
+    session.add(probe)
+    session.commit()
+    session.refresh(probe)
+    concept.is_load_bearing = False
+    session.add(concept)
+    session.commit()
+
+    post_answer(
+        probe.id,
+        PaperProbeAnswerIn(
+            question_index=0,
+            content="I would preserve this answer after the map revision.",
+        ),
+        session,
+    )
+
+    answer = session.exec(
+        select(PaperProbeAnswer).where(PaperProbeAnswer.probe_id == probe.id)
+    ).one()
+    chunk = session.exec(
+        select(Chunk).where(Chunk.source_ref == f"paperprobe:{probe.id}#0")
+    ).one()
+    assert answer.content == chunk.text
+    assert chunk.topic_id is None
+    assert chunk.concept_id is None
+
+
+def _add_unrelated_assessment(session, concept: Concept, topic: Topic) -> Assessment:
+    assessment = Assessment(
+        concept_id=concept.id,
+        kind="self_explanation",
+        prompt="Explain an unrelated retrieval decision.",
+        response="The unrelated evidence remains live.",
+        verdict="retained",
+        score=0.5,
+    )
+    session.add(assessment)
+    session.flush()
+    memory.index_assessment(session, assessment, topic_id=topic.id)
+    session.commit()
+    session.refresh(assessment)
+    return assessment
+
+
+def _assert_no_orphan_assessment_chunks(session) -> None:
+    live_ids = set(session.exec(select(Assessment.id)).all())
+    chunks = session.exec(
+        select(Chunk).where(Chunk.source_ref.startswith("assessment:"))
+    ).all()
+    chunk_assessment_ids = {
+        int(chunk.source_ref.removeprefix("assessment:").split("#", 1)[0])
+        for chunk in chunks
+    }
+    assert chunk_assessment_ids <= live_ids
+
+
+def test_roleplay_regrade_removes_chunks_for_replaced_assessment(session):
+    topic, concept, milestone = _seed_milestone(session)
+    roleplay = RoleplaySession(
+        program_id=milestone.program_id,
+        milestone_id=milestone.id,
+        status="ended",
+        persona_brief={"persona": "Reviewer"},
+    )
+    session.add(roleplay)
+    session.commit()
+    session.refresh(roleplay)
+    session.add(
+        RoleplayTurn(
+            session_id=roleplay.id,
+            role="user",
+            content="I defend local retrieval with explicit ranking evidence.",
+        )
+    )
+    session.commit()
+    outcome = LLMResponse(text=json.dumps({"result": "complete", "summary": "clear"}))
+    first = grade_roleplay(
+        session,
+        roleplay,
+        llm=ScriptedLLMClient([_grade_response(), outcome]),
+    )[0]
+    replaced_id = first.id
+    unrelated = _add_unrelated_assessment(session, concept, topic)
+
+    replacement = grade_roleplay(
+        session,
+        roleplay,
+        llm=ScriptedLLMClient([_grade_response(score=0.9), outcome]),
+    )[0]
+
+    assert replacement.id not in {replaced_id, unrelated.id}
+    assert session.get(Assessment, replaced_id) is None
+    assert not session.exec(
+        select(Chunk).where(Chunk.source_ref.startswith(f"assessment:{replaced_id}#"))
+    ).all()
+    _assert_no_orphan_assessment_chunks(session)
+
+
+def test_paper_probe_regrade_removes_chunks_for_replaced_assessment(session):
+    topic, concept, milestone = _seed_milestone(session)
+    probe = PaperProbe(
+        program_id=milestone.program_id,
+        milestone_id=milestone.id,
+        paper_title="Contextual Retrieval",
+        paper_text="The paper compares local ranking methods.",
+        status="answering",
+        questions=[
+            {
+                "index": 0,
+                "axis": "method",
+                "prompt": "How does local ranking work?",
+                "concept_ids": [concept.id],
+            }
+        ],
+    )
+    session.add(probe)
+    session.commit()
+    session.refresh(probe)
+    session.add(
+        PaperProbeAnswer(
+            probe_id=probe.id,
+            question_index=0,
+            content="It ranks local evidence before generation.",
+        )
+    )
+    session.commit()
+    outcome = LLMResponse(text=json.dumps({"result": "complete", "summary": "clear"}))
+    first = grade_paper_probe(
+        session,
+        probe,
+        llm=ScriptedLLMClient([_grade_response(), outcome]),
+    )[0]
+    replaced_id = first.id
+    unrelated = _add_unrelated_assessment(session, concept, topic)
+
+    replacement = grade_paper_probe(
+        session,
+        probe,
+        llm=ScriptedLLMClient([_grade_response(score=0.9), outcome]),
+    )[0]
+
+    assert replacement.id not in {replaced_id, unrelated.id}
+    assert session.get(Assessment, replaced_id) is None
+    assert not session.exec(
+        select(Chunk).where(Chunk.source_ref.startswith(f"assessment:{replaced_id}#"))
+    ).all()
+    _assert_no_orphan_assessment_chunks(session)
 
 
 def test_topic_id_for_concept_promotes_shared_resolution_helper(session):

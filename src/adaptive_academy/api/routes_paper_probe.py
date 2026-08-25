@@ -126,7 +126,7 @@ def post_answer(pid: int, body: PaperProbeAnswerIn, session: Session = Depends(g
     else:
         milestone = session.get(Milestone, pp.milestone_id)
         concepts = milestone_load_bearing(session, milestone)
-        topic_id = topic_id_for_concept(session, concepts[0].id)
+        topic_id = topic_id_for_concept(session, concepts[0].id) if concepts else None
     index_paper_answer(
         session,
         answer,

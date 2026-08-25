@@ -9,6 +9,7 @@ from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import (
     index_question,
     index_roleplay_turn,
+    remove_source,
     topic_id_for_concept,
 )
 from adaptive_academy.jsonout import extract_json
@@ -81,7 +82,7 @@ def run_roleplay_turn(session: Session, rp: RoleplaySession, user_text: str, *,
     milestone = session.get(Milestone, rp.milestone_id)
     concepts = milestone_load_bearing(session, milestone)
     concept_ids = [concept.id for concept in concepts if concept.id is not None]
-    topic_id = topic_id_for_concept(session, concept_ids[0])
+    topic_id = topic_id_for_concept(session, concept_ids[0]) if concept_ids else None
 
     user_turn = RoleplayTurn(session_id=rp.id, role="user", content=user_text)
     session.add(user_turn)
@@ -147,6 +148,8 @@ def grade_roleplay(session: Session, rp: RoleplaySession, *, llm: LLMClient) -> 
     # existing roleplay evidence for this session so retries never double-count.
     for old in session.exec(
             select(Assessment).where(Assessment.roleplay_session_id == rp.id)).all():
+        remove_source(session, f"assessment:{old.id}#q")
+        remove_source(session, f"assessment:{old.id}#r")
         session.delete(old)
 
     graded: list[Assessment] = []
