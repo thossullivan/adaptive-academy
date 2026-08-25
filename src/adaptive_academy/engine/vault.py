@@ -450,7 +450,12 @@ def _concept_verdict_summary(session: Session, concept: Concept) -> tuple[str, s
 
 
 def ingest_vault(
-    session: Session, topic_id: int, vault_path: str, *, subfolder: str = ""
+    session: Session,
+    topic_id: int,
+    vault_path: str,
+    *,
+    subfolder: str = "",
+    retriever: Retriever | None = None,
 ) -> IngestResult:
     """Scan a vault for markdown notes and register them as `proposed` SourceDocs for the topic.
     Already-ingested notes (same file URL) are skipped, so re-running is safe."""
@@ -475,7 +480,13 @@ def ingest_vault(
         session.add(AgentEvent(
             topic_id=topic_id, kind="vault:ingest", detail=f"{len(titles)} note(s) from vault"))
     session.commit()
-    reindex_vault(session, topic_id, vault_path, subfolder=subfolder)
+    reindex_vault(
+        session,
+        topic_id,
+        vault_path,
+        subfolder=subfolder,
+        retriever=retriever,
+    )
     return IngestResult(count=len(titles), titles=titles)
 
 

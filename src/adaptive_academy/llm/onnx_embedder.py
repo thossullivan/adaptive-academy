@@ -16,17 +16,22 @@ class OnnxEmbedder:
 
     dim = VECTOR_DIM
 
-    def __init__(self, model: str = settings.embedding_model):
+    def __init__(self, model: str | None = None):
         if TextEmbedding is None:
             raise ImportError("fastembed is required for ONNX embeddings")
-        self.name = model
+        self.name = model or settings.embedding_model
+        self.cache_dir = settings.embedding_cache_dir or None
         self._model: Any | None = None
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         if self._model is None:
-            self._model = TextEmbedding(model_name=self.name, lazy_load=True)
+            self._model = TextEmbedding(
+                model_name=self.name,
+                cache_dir=self.cache_dir,
+                lazy_load=True,
+            )
         vectors = [vector.tolist() for vector in self._model.embed(texts)]
         if any(len(vector) != self.dim for vector in vectors):
             raise ValueError(f"embedding model must return {self.dim} dimensions")

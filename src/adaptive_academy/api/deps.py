@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _logged_retriever_degradations: set[str] = set()
 _fts_available: bool | None = None
 _vec_available: bool | None = None
+_embedder: Embedder | None = None
 
 
 def use_agent_sdk() -> bool:
@@ -66,14 +67,19 @@ def get_fetcher() -> Callable[[str], str | None]:
 
 def get_embedder() -> Embedder:
     """Resolve the deterministic test embedder or the local ONNX embedder."""
+    global _embedder
+    if _embedder is not None:
+        return _embedder
     if settings.retriever.strip().lower() == "scripted":
         from adaptive_academy.llm.scripted_embedder import ScriptedEmbedder
 
-        return ScriptedEmbedder()
+        _embedder = ScriptedEmbedder()
+        return _embedder
 
     from adaptive_academy.llm.onnx_embedder import OnnxEmbedder
 
-    return OnnxEmbedder()
+    _embedder = OnnxEmbedder()
+    return _embedder
 
 
 def get_retriever() -> Retriever:
@@ -112,12 +118,11 @@ def get_retriever() -> Retriever:
     if _vec_available:
         try:
             embedder = get_embedder()
-        except ImportError:
-            embedder = None
-        if embedder is not None:
             from adaptive_academy.llm.hybrid_retriever import HybridRetriever
 
             return HybridRetriever(fts, embedder)
+        except (ImportError, ValueError):
+            pass
 
     _warn_retriever_degradation_once(
         "hybrid",
@@ -128,7 +133,8 @@ def get_retriever() -> Retriever:
 
 def reset_retriever_cache() -> None:
     """Clear the cached FTS5 and sqlite-vec availability results."""
-    global _fts_available, _vec_available
+    global _embedder, _fts_available, _vec_available
+    _embedder = None
     _fts_available = None
     _vec_available = None
 

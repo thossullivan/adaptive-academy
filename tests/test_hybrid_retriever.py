@@ -78,6 +78,35 @@ def test_onnx_embedder_construction_does_not_load_the_model():
     assert embedder._model is None
 
 
+def test_onnx_embedder_reads_model_and_cache_settings_at_construction(monkeypatch):
+    from adaptive_academy.llm import onnx_embedder
+
+    calls = []
+
+    class FakeVector:
+        def tolist(self):
+            return [0.0] * 384
+
+    class RecordingTextEmbedding:
+        def __init__(self, *, model_name, cache_dir, lazy_load):
+            calls.append((model_name, cache_dir, lazy_load))
+
+        def embed(self, texts):
+            return [FakeVector() for _ in texts]
+
+    monkeypatch.setattr(onnx_embedder, "TextEmbedding", RecordingTextEmbedding)
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_model", "first-model")
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_cache_dir", "/data/test-cache")
+    embedder = OnnxEmbedder()
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_model", "second-model")
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_cache_dir", "/data/other-cache")
+
+    embedder.embed(["text"])
+
+    assert embedder.name == "first-model"
+    assert calls == [("first-model", "/data/test-cache", True)]
+
+
 def test_hybrid_rrf_merges_exact_and_semantic_hits_with_filters(vec_session):
     session = vec_session
     included = Topic(title="Included")
@@ -129,6 +158,33 @@ def test_hybrid_is_selected_when_both_optional_components_are_available(monkeypa
     deps.reset_retriever_cache()
 
 
+def test_get_retriever_reuses_one_cached_embedder(monkeypatch):
+    from adaptive_academy.api import deps
+    from adaptive_academy.llm import onnx_embedder
+
+    class CountingEmbedder(ScriptedEmbedder):
+        instances = 0
+
+        def __init__(self):
+            type(self).instances += 1
+            super().__init__()
+
+    monkeypatch.setattr(deps.settings, "retriever", "hybrid")
+    monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
+    monkeypatch.setattr(deps, "ensure_vec", lambda _engine: True)
+    monkeypatch.setattr(onnx_embedder, "OnnxEmbedder", CountingEmbedder)
+    deps.reset_retriever_cache()
+
+    first = deps.get_retriever()
+    second = deps.get_retriever()
+
+    assert isinstance(first, HybridRetriever)
+    assert isinstance(second, HybridRetriever)
+    assert first.embedder is second.embedder
+    assert CountingEmbedder.instances == 1
+    deps.reset_retriever_cache()
+
+
 def test_get_embedder_uses_scripted_backend_for_scripted_retrieval(monkeypatch):
     from adaptive_academy.api import deps
 
@@ -147,6 +203,19 @@ def test_memory_stats_reports_active_hybrid_retriever(vec_session):
     assert fts_stats.retriever == "fts"
 
 
+def test_ensure_vec_degrades_without_enable_load_extension(monkeypatch):
+    from adaptive_academy import db
+
+    engine = create_engine("sqlite://")
+
+    def missing_enable_load_extension(_connection, _):
+        raise AttributeError("enable_load_extension")
+
+    monkeypatch.setattr(db, "_load_vec_extension", missing_enable_load_extension)
+
+    assert db.ensure_vec(engine) is False
+
+
 def test_hybrid_degrades_once_when_the_embedder_is_unavailable(monkeypatch, caplog):
     from adaptive_academy.api import deps
 
@@ -158,6 +227,26 @@ def test_hybrid_degrades_once_when_the_embedder_is_unavailable(monkeypatch, capl
         "get_embedder",
         lambda: (_ for _ in ()).throw(ImportError("fastembed unavailable")),
     )
+    monkeypatch.setattr(deps, "_logged_retriever_degradations", set())
+    deps.reset_retriever_cache()
+
+    with caplog.at_level("WARNING"):
+        first = deps.get_retriever()
+        second = deps.get_retriever()
+
+    assert isinstance(first, FtsRetriever)
+    assert isinstance(second, FtsRetriever)
+    assert caplog.messages.count("Hybrid retrieval is unavailable; using FTS5.") == 1
+    deps.reset_retriever_cache()
+
+
+def test_hybrid_degrades_once_when_embedding_dimensions_mismatch(monkeypatch, caplog):
+    from adaptive_academy.api import deps
+
+    monkeypatch.setattr(deps.settings, "retriever", "hybrid")
+    monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
+    monkeypatch.setattr(deps, "ensure_vec", lambda _engine: True)
+    monkeypatch.setattr(deps, "get_embedder", lambda: ScriptedEmbedder(dim=3))
     monkeypatch.setattr(deps, "_logged_retriever_degradations", set())
     deps.reset_retriever_cache()
 

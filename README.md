@@ -71,7 +71,8 @@ just seed                     # optional: drop in a starter "Build LLMs from scr
 cd frontend && npm install && cd ..
 ```
 
-> Hybrid memory needs `uv sync --extra memory`; its first use downloads and caches the embedding model once.
+> Hybrid memory needs `uv sync --extra memory`. Compose caches the model at
+> `/data/fastembed_cache`. The download happens once per `aa-data` volume.
 
 > **`just seed` is optional** — it seeds one starter topic so there's something to explore
 > immediately. Otherwise you start from an empty state and create your own **Program** (a

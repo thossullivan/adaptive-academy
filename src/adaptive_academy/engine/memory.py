@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import or_
 from sqlmodel import Session, col, select
 
 from adaptive_academy.engine.fetch import fetch_artifact_text
@@ -409,7 +410,20 @@ def index_text(
     if callable(on_index):
         session.flush()
         changed_ids = [chunk.id for chunk in changed_chunks if chunk.id is not None]
-        on_index(session, changed_ids)
+        try:
+            with session.begin_nested():
+                on_index(session, changed_ids)
+        except Exception as exc:
+            for chunk in changed_chunks:
+                chunk.embedding_model = None
+                session.add(chunk)
+            session.add(
+                AgentEvent(
+                    topic_id=topic_id,
+                    kind="memory:error",
+                    detail=f"embed: {type(exc).__name__}: {exc}"[:400],
+                )
+            )
 
     return IndexResult(indexed=indexed, skipped=skipped, removed=len(orphans))
 
@@ -751,12 +765,13 @@ def reindex_topic(
             removed += result.removed
             session.commit()
 
-    _reembed_stale_chunks(
+    reembed_truncated = _reembed_stale_chunks(
         session,
         retriever,
         topic_id=topic_id,
-        kinds=kinds,
+        deadline=deadline,
     )
+    truncated = truncated or reembed_truncated
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     session.add(
@@ -784,28 +799,49 @@ def _reembed_stale_chunks(
     retriever: Retriever | None,
     *,
     topic_id: int,
-    kinds: tuple[str, ...],
-) -> None:
-    """Refresh stale vectors and let the retriever remove deleted vector rows."""
+    deadline: float,
+) -> bool:
+    """Refresh stale vectors in bounded batches and report deadline truncation."""
     on_index = getattr(retriever, "on_index", None)
     if not callable(on_index):
-        return
+        return False
 
     embedder = getattr(retriever, "embedder", None)
-    chunk_ids: list[int] = []
-    if embedder is not None and kinds:
-        chunks = session.exec(
-            select(Chunk).where(
-                Chunk.topic_id == topic_id,
-                col(Chunk.kind).in_(kinds),
+    if embedder is None:
+        return False
+
+    chunks = session.exec(
+        select(Chunk)
+        .where(
+            Chunk.topic_id == topic_id,
+            or_(
+                col(Chunk.embedding_model).is_(None),
+                Chunk.embedding_model != embedder.name,
+            ),
+        )
+        .order_by(Chunk.id)
+    ).all()
+    for start in range(0, len(chunks), 64):
+        if start and time.perf_counter() >= deadline:
+            return True
+        batch = chunks[start : start + 64]
+        chunk_ids = [chunk.id for chunk in batch if chunk.id is not None]
+        try:
+            with session.begin_nested():
+                on_index(session, chunk_ids)
+        except Exception as exc:
+            for chunk in batch:
+                chunk.embedding_model = None
+                session.add(chunk)
+            session.add(
+                AgentEvent(
+                    topic_id=topic_id,
+                    kind="memory:error",
+                    detail=f"embed: {type(exc).__name__}: {exc}"[:400],
+                )
             )
-        ).all()
-        chunk_ids = [
-            chunk.id
-            for chunk in chunks
-            if chunk.id is not None and chunk.embedding_model != embedder.name
-        ]
-    on_index(session, chunk_ids)
+        session.commit()
+    return False
 
 
 def jaccard(a: str, b: str) -> float:

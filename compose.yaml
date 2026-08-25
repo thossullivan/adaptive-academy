@@ -6,6 +6,7 @@ services:
     restart: unless-stopped
     environment:
       AA_DATABASE_URL: sqlite:////data/adaptive_academy.db
+      AA_EMBEDDING_CACHE_DIR: /data/fastembed_cache
       AA_OBSIDIAN_VAULT_PATH: /vault
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     volumes:

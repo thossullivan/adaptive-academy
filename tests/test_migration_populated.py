@@ -24,7 +24,7 @@ def _alembic(db_url: str, *args: str) -> subprocess.CompletedProcess:
     if cache_dir := os.environ.get("UV_CACHE_DIR"):
         environment["UV_CACHE_DIR"] = cache_dir
     return subprocess.run(
-        ["uv", "run", "alembic", *args],
+        ["uv", "run", "--offline", "alembic", *args],
         cwd=REPO_ROOT,
         env=environment,
         capture_output=True,

@@ -91,7 +91,11 @@ def ensure_vec(db_engine: Engine) -> bool:
                 "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec "
                 "USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[384])"
             )
-    except (OSError, sqlite3.Error, SQLAlchemyError):
+            connection.exec_driver_sql(
+                "CREATE TRIGGER IF NOT EXISTS chunk_vec_ad AFTER DELETE ON chunk BEGIN "
+                "DELETE FROM chunk_vec WHERE chunk_id = old.id; END"
+            )
+    except (AttributeError, OSError, sqlite3.Error, SQLAlchemyError):
         if newly_registered:
             event.remove(db_engine, "connect", _load_vec_extension)
         return False

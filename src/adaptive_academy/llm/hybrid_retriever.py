@@ -107,11 +107,8 @@ class HybridRetriever:
         return nearest[:HYBRID_CANDIDATE_K]
 
     def on_index(self, session: Session, chunk_ids: list[int]) -> None:
-        """Embed changed chunks and remove vectors whose chunks were deleted."""
+        """Embed changed chunks."""
         session.flush()
-        session.execute(
-            text("DELETE FROM chunk_vec WHERE chunk_id NOT IN (SELECT id FROM chunk)")
-        )
         ordered_ids = list(dict.fromkeys(chunk_ids))
         if not ordered_ids:
             return
