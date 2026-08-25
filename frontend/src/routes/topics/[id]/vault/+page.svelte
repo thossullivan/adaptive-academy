@@ -2,11 +2,12 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import { groupByKind, trimSnippet } from '$lib/memory';
   import { toasts } from '$lib/toast.svelte';
   import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Input, Badge } from '$lib/ui';
+  import MemorySearchResults from './MemorySearchResults.svelte';
+  import { MAX_MEMORY_RESULTS, runMemoryReindex, runMemorySearch } from './memory-actions';
 
   const topicId = Number($page.params.id);
   const STORE_KEY = 'aa_vault_path';
@@ -24,6 +25,7 @@
   let resultLimit = $state('20');
   let searchHits = $state<MemoryHit[]>([]);
   let searching = $state(false);
+  let searched = $state(false);
   let reindexing = $state(false);
   let stats = $state<MemoryStats | null>(null);
   let error = $state('');
@@ -48,7 +50,6 @@
   }
 
   const ready = $derived(!!status?.is_dir);
-  const searchGroups = $derived(groupByKind(searchHits));
 
   async function loadStats() {
     stats = await api.memoryStats(topicId).catch(() => null);
@@ -58,12 +59,12 @@
     if (!query.trim() || searching) return;
     error = '';
     searching = true;
+    searched = false;
     try {
-      const parsedLimit = Number.parseInt(resultLimit, 10);
-      const k = Number.isFinite(parsedLimit) ? Math.min(100, Math.max(1, parsedLimit)) : 20;
-      resultLimit = String(k);
-      const result = await api.searchMemory(query.trim(), { topic_id: topicId, k });
+      const result = await runMemorySearch(api.searchMemory, query, topicId, resultLimit);
+      resultLimit = String(result.k);
       searchHits = result.hits;
+      searched = true;
     } catch (e) {
       error = String(e);
     } finally {
@@ -76,19 +77,18 @@
     error = '';
     reindexing = true;
     try {
-      const result = await api.reindexMemory({
-        topic_id: topicId,
-        vault_path: path.trim() || undefined
-      });
-      const prefix = result.truncated ? 'Reindex stopped at the time limit' : 'Reindex complete';
-      toasts.show(
-        `${prefix}: ${result.indexed} indexed, ${result.skipped} skipped, ${result.removed} removed.`
+      await runMemoryReindex(
+        api.reindexMemory,
+        {
+          topic_id: topicId,
+          vault_path: path.trim() || undefined
+        },
+        (message, tone) => toasts.show(message, tone)
       );
       await loadStats();
       if (query.trim()) await search();
     } catch (e) {
       error = String(e);
-      toasts.show('Memory reindex failed.', 'error');
     } finally {
       reindexing = false;
     }
@@ -229,14 +229,21 @@
           search();
         }}
       >
-        <Input bind:value={query} placeholder="Search vault notes, sources, and prior learning…" />
+        <Input
+          bind:value={query}
+          oninput={() => {
+            searched = false;
+            searchHits = [];
+          }}
+          placeholder="Search vault notes, sources, and prior learning…"
+        />
         <label class="flex items-center gap-2 text-xs text-faint">
           Results
           <Input
             bind:value={resultLimit}
             type="number"
             min="1"
-            max="100"
+            max={MAX_MEMORY_RESULTS}
             class="w-20"
             aria-label="Maximum search results"
           />
@@ -244,7 +251,12 @@
         <Button type="submit" size="sm" disabled={searching || !query.trim()}>
           {searching ? 'Searching…' : 'Search'}
         </Button>
-        <Button variant="outline" size="sm" onclick={reindex} disabled={reindexing}>
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={reindex}
+          disabled={reindexing || (!path.trim() && !status)}
+        >
           {reindexing ? 'Reindexing…' : 'Reindex'}
         </Button>
       </form>
@@ -258,28 +270,7 @@
         </div>
       {/if}
 
-      {#if searchGroups.length}
-        <div class="mt-5 flex flex-col gap-5">
-          {#each searchGroups as group (group.kind)}
-            <section>
-              <div class="mb-2 flex items-center gap-2">
-                <Badge mono tone="neutral">{group.kind.replaceAll('_', ' ')}</Badge>
-                <span class="nums text-xs text-faint">{group.hits.length}</span>
-              </div>
-              <ul class="flex flex-col divide-y divide-border rounded-[var(--radius-md)] border border-border bg-surface-2">
-                {#each group.hits as hit (hit.chunk_id)}
-                  <li class="px-4 py-3">
-                    <div class="text-sm font-medium text-fg-dim">{hit.heading || hit.source_ref}</div>
-                    <p class="mt-1 text-xs leading-relaxed text-faint">{trimSnippet(hit.snippet)}</p>
-                  </li>
-                {/each}
-              </ul>
-            </section>
-          {/each}
-        </div>
-      {:else if query.trim() && !searching}
-        <p class="mt-4 text-sm text-faint">No indexed memory matches this search.</p>
-      {/if}
+      <MemorySearchResults hits={searchHits} {query} {searched} {searching} />
     </Card>
 
     {#if error}
