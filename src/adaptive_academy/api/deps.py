@@ -1,15 +1,21 @@
+import logging
 import os
 from collections.abc import Iterator
 
 from sqlmodel import Session
 
-from adaptive_academy.db import engine
+from adaptive_academy.db import engine, ensure_fts
 from adaptive_academy.llm.anchor_types import AnchorClient
 from adaptive_academy.llm.anthropic_anchor import AnthropicAnchorClient
 from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
 from adaptive_academy.llm.anthropic_researcher import AnthropicResearcherClient
 from adaptive_academy.llm.researcher_types import ResearcherClient
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.settings import settings
+
+logger = logging.getLogger(__name__)
+_logged_retriever_degradations: set[str] = set()
 
 
 def use_agent_sdk() -> bool:
@@ -47,3 +53,34 @@ def get_anchor_client() -> AnchorClient:
         from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
         return AnthropicAnchorClient(llm=AgentSDKLLMClient(role="reasoning"))
     return AnthropicAnchorClient(role="reasoning")
+
+
+def get_retriever() -> Retriever:
+    """Resolve the configured local retriever with safe staged fallbacks."""
+    from adaptive_academy.llm.fts_retriever import FtsRetriever
+    from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
+
+    configured = settings.retriever.strip().lower()
+    if configured == "scripted":
+        return ScriptedRetriever()
+    if configured not in {"fts", "hybrid"}:
+        raise ValueError(f"unsupported retriever: {settings.retriever}")
+    if configured == "hybrid":
+        _warn_retriever_degradation_once(
+            "hybrid",
+            "Hybrid retrieval is not available yet; using FTS5.",
+        )
+    if ensure_fts(engine):
+        return FtsRetriever()
+    _warn_retriever_degradation_once(
+        "fts",
+        "FTS5 is unavailable; using scripted token-overlap retrieval.",
+    )
+    return ScriptedRetriever()
+
+
+def _warn_retriever_degradation_once(key: str, message: str) -> None:
+    if key in _logged_retriever_degradations:
+        return
+    _logged_retriever_degradations.add(key)
+    logger.warning(message)
