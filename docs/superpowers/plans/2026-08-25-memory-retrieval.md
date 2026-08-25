@@ -108,7 +108,10 @@
 - Modify: `src/adaptive_academy/engine/vault.py` (`ingest_vault` also indexes; add `reindex_vault`)
 - Modify: `src/adaptive_academy/engine/memory.py` (add `index_source_doc`, `reindex_topic`)
 - Modify: `src/adaptive_academy/engine/fetch.py` only if a `max_bytes` bump is needed for long sources (keep SSRF guard untouched)
+- Modify: `src/adaptive_academy/api/deps.py` (`get_fetcher()`), `src/adaptive_academy/api/routes_topics.py` (accept hook at the `status = "accepted"` site), `src/adaptive_academy/api/routes_paper_probe.py` (`start_paper_probe` calls `index_paper`), `tests/conftest.py` (offline fetcher override)
 - Test: `tests/test_memory_vault_ingest.py`, `tests/test_memory_source_doc.py`
+
+Note: `fetch.fetch_artifact_text` returns `None` on failure (SSRF block, bad scheme, size, network) — it does not raise. `index_source_doc` treats `None`/empty as a skip (`memory:fetch_skipped`, no chunks) in addition to catching exceptions from an injected fetcher. Per-file vault read failures emit `memory:reindex_skipped` with the file URI; `reindex_topic` emits `memory:reindex_topic` (distinct from `reindex_vault`'s `memory:reindex`).
 
 **Interfaces:**
 - `vault.reindex_vault(session, topic_id, vault_path, *, subfolder="") -> IndexResult` — scans with `scan_notes` (export folder skipped), reads full text up to `MAX_INDEX_CHARS`, skips files whose `(mtime, hash)` match existing chunks, calls `index_text(kind="vault_note", source_ref=<file URI>, doc_title=note_title(...), meta={"tags": [...], "aliases": [...]} from frontmatter, splitter=split_markdown)`, removes chunks whose file is gone. Then rebuilds `VaultLink` rows for the file from `extract_wikilinks`, resolving targets against a title/alias → URI map built once per sweep (`vault.build_title_index(root)`). One commit per file. Emits `AgentEvent(kind="memory:reindex", detail=...)`.
