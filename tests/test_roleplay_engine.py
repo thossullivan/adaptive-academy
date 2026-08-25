@@ -15,7 +15,7 @@ from adaptive_academy.engine.roleplay import direct, run_roleplay_turn
 
 
 def test_prompts_have_tags():
-    assert ROLEPLAY_DIRECTOR.tag == "roleplay.director@v1"
+    assert ROLEPLAY_DIRECTOR.tag == "roleplay.director@v2"
     assert ROLEPLAY_PERSONA.tag == "roleplay.persona@v1"
     assert ROLEPLAY_GRADE.tag == "roleplay.grade@v1"
 

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
-from adaptive_academy.api.deps import get_llm, get_session
+from adaptive_academy.api.deps import get_llm, get_retriever, get_session
 from adaptive_academy.api.schemas import (
     PaperProbeAnswerIn, PaperProbeAnswerOut, PaperProbeAnswerRow, PaperProbeOut,
     PaperProbeStartIn, PaperQuestionRow, ScorecardRow,
@@ -14,6 +14,7 @@ from adaptive_academy.engine.memory import (
 )
 from adaptive_academy.engine.paper import PaperIngestError, ingest_paper
 from adaptive_academy.engine.paper_probe import direct, grade_paper_probe
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     Assessment, Concept, Milestone, PaperProbe, PaperProbeAnswer,
@@ -58,7 +59,8 @@ def _out(session: Session, pp: PaperProbe) -> PaperProbeOut:
              response_model=PaperProbeOut)
 def start_paper_probe(program_id: int, milestone_id: int, body: PaperProbeStartIn,
                       session: Session = Depends(get_session),
-                      llm: LLMClient = Depends(get_llm)):
+                      llm: LLMClient = Depends(get_llm),
+                      retriever: Retriever = Depends(get_retriever)):
     milestone = session.get(Milestone, milestone_id)
     if milestone is None or milestone.program_id != program_id:
         raise HTTPException(404, "milestone not found")
@@ -77,7 +79,7 @@ def start_paper_probe(program_id: int, milestone_id: int, body: PaperProbeStartI
     index_paper(session, pp)
     session.commit()
     session.refresh(pp)
-    direct(session, pp, llm=llm)
+    direct(session, pp, llm=llm, retriever=retriever)
     return _out(session, pp)
 
 

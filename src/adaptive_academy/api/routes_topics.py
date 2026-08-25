@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
 
-from adaptive_academy.api.deps import get_fetcher, get_llm, get_researcher, get_session
+from adaptive_academy.api.deps import (
+    get_fetcher,
+    get_llm,
+    get_researcher,
+    get_retriever,
+    get_session,
+)
 from adaptive_academy.api.schemas import (
     ConceptOut,
     CreateTopicIn,
@@ -41,6 +47,7 @@ from adaptive_academy.engine.track_markdown import (
     track_to_markdown,
 )
 from adaptive_academy.llm.researcher_types import ResearcherClient
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
@@ -181,6 +188,7 @@ def run_research(
     session: Session = Depends(get_session),
     researcher: ResearcherClient = Depends(get_researcher),
     llm: LLMClient = Depends(get_llm),
+    retriever: Retriever = Depends(get_retriever),
 ) -> ResearchOut:
     topic = session.get(Topic, topic_id)
     if topic is None:
@@ -189,7 +197,14 @@ def run_research(
     if intent is None:
         raise HTTPException(status_code=400, detail="topic has no intent")
 
-    result = research_topic(session, topic, intent, researcher=researcher, llm=llm)
+    result = research_topic(
+        session,
+        topic,
+        intent,
+        researcher=researcher,
+        llm=llm,
+        retriever=retriever,
+    )
     return ResearchOut(
         foundation=FoundationOut(
             overview=result.foundation.overview,
