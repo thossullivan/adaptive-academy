@@ -53,11 +53,8 @@ from adaptive_academy.models import (
     AgentEvent,
     Assessment,
     Concept,
-    ConceptAlias,
-    ConceptEdge,
     Deliverable,
     Item,
-    KnowledgeEstimate,
     Milestone,
     Phase,
     Program,
@@ -389,9 +386,13 @@ def import_curriculum(
     if topic is None:
         raise HTTPException(404, "topic not found")
     view = markdown_to_track(body.markdown)
-    # Replace unreferenced tracks. A track with graph history must keep its concepts.
+    # Policy: import replaces the track's phases/items/deliverables/sidebars ONLY.
+    # Concepts, KnowledgeEstimates, ConceptAliases, Assessments and ConceptEdges are
+    # competence evidence and graph history; they are never deleted by an import.
+    # The oldest track is reused (title/overview updated); other tracks lose their
+    # phase content and are removed only when they own no concepts.
+    old = session.exec(select(Track).where(Track.topic_id == topic_id).order_by(Track.id)).all()
     track = None
-    old = session.exec(select(Track).where(Track.topic_id == topic_id)).all()
     for old_track in old:
         for p in session.exec(select(Phase).where(Phase.track_id == old_track.id)).all():
             for it in session.exec(select(Item).where(Item.phase_id == p.id)).all():
@@ -402,33 +403,17 @@ def import_curriculum(
             session.delete(p)
         for s in session.exec(select(Sidebar).where(Sidebar.track_id == old_track.id)).all():
             session.delete(s)
-        concepts = session.exec(select(Concept).where(Concept.track_id == old_track.id)).all()
-        concept_ids = [concept.id for concept in concepts if concept.id is not None]
-        has_graph_history = session.exec(
-            select(ConceptEdge).where(
-                (ConceptEdge.src_concept_id.in_(concept_ids))
-                | (ConceptEdge.dst_concept_id.in_(concept_ids))
-            )
-        ).first() is not None if concept_ids else False
-        if has_graph_history:
-            if track is None:
-                track = old_track
-                track.title = view.title
-                track.overview = view.overview
-                session.add(track)
+        if track is None:
+            track = old_track
+            track.title = view.title
+            track.overview = view.overview
+            session.add(track)
             continue
-        for concept in concepts:
-            estimate = session.exec(
-                select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)
-            ).first()
-            if estimate:
-                session.delete(estimate)
-            for alias in session.exec(
-                select(ConceptAlias).where(ConceptAlias.concept_id == concept.id)
-            ).all():
-                session.delete(alias)
-            session.delete(concept)
-        session.delete(old_track)
+        owns_concepts = session.exec(
+            select(Concept).where(Concept.track_id == old_track.id)
+        ).first() is not None
+        if not owns_concepts:
+            session.delete(old_track)
     session.commit()
 
     if track is None:

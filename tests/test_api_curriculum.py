@@ -92,19 +92,43 @@ def test_generate_400_with_foundation_but_no_accepted_sources(session):
 
 
 def test_import_after_generate_replaces_track_without_crashing(session):
-    # Regression: import must delete the old track's Concepts (and estimates) too, or
-    # the cascade NULLs concept.track_id and raises IntegrityError. This is the normal
-    # generate -> export -> edit -> re-import flow.
+    # Policy: import replaces phases/items/sidebars only. Concepts, estimates, and
+    # concept edges are competence evidence + graph history and survive a re-import
+    # (generate -> export -> edit -> re-import is the normal flow).
+    from sqlmodel import select
+
+    from adaptive_academy.models import Concept, ConceptEdge, KnowledgeEstimate, Track
+
     client = _client(session)
     tid = _seed_topic(session)
     assert client.post(f"/api/topics/{tid}/curriculum").status_code == 200
     md = client.get(f"/api/topics/{tid}/curriculum.md").text
+    concept_ids = {
+        c.id for c in session.exec(select(Concept).join(Track).where(Track.topic_id == tid))
+    }
+    estimates_before = len(session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id.in_(concept_ids))
+    ).all())
+    edges_before = len(session.exec(
+        select(ConceptEdge).where(ConceptEdge.src_concept_id.in_(concept_ids))
+    ).all())
 
     r = client.post(f"/api/topics/{tid}/curriculum/import", json={"markdown": md})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["phases"][0]["title"] == "P1"
-    # exactly one track remains for the topic
+    # exactly one track remains for the topic, and it kept its concepts
+    tracks = session.exec(select(Track).where(Track.topic_id == tid)).all()
+    assert len(tracks) == 1
+    assert {
+        c.id for c in session.exec(select(Concept).where(Concept.track_id == tracks[0].id))
+    } == concept_ids
+    assert len(session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id.in_(concept_ids))
+    ).all()) == estimates_before
+    assert len(session.exec(
+        select(ConceptEdge).where(ConceptEdge.src_concept_id.in_(concept_ids))
+    ).all()) == edges_before
     r2 = client.get(f"/api/topics/{tid}/curriculum")
     assert r2.status_code == 200
     app.dependency_overrides.clear()
