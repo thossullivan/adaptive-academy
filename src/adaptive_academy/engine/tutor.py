@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from sqlmodel import Session
 
 from adaptive_academy.engine.levels import compute_levels
-from adaptive_academy.prompts import build_tutor_system_prompt
+from adaptive_academy.engine.memory import index_message
 from adaptive_academy.engine.tools import TIERS, TOOLS, reveal_gate
 from adaptive_academy.llm.types import LLMClient, LLMResponse, ToolCall
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
+from adaptive_academy.prompts import build_tutor_system_prompt
 
 _MAX_STEPS = 6
 _FALLBACK = "Let's slow down — tell me what you've tried so far, and we'll work from there."
@@ -38,7 +39,15 @@ def run_tutor_turn(
         events.append(ev)
 
     # Persist the incoming user message.
-    session.add(Message(conversation_id=convo.id, role="user", content=user_text))
+    user_message = Message(conversation_id=convo.id, role="user", content=user_text)
+    session.add(user_message)
+    session.flush()
+    index_message(
+        session,
+        user_message,
+        concept_id=convo.concept_id,
+        topic_id=convo.topic_id,
+    )
     session.commit()
     session.refresh(convo)
 
@@ -81,7 +90,16 @@ def run_tutor_turn(
         reply_text = _FALLBACK
 
     # Persist the tutor reply.
-    session.add(Message(conversation_id=convo.id, role="tutor", content=reply_text))
+    tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply_text)
+    session.add(tutor_message)
+    session.flush()
+    index_message(
+        session,
+        tutor_message,
+        concept_id=convo.concept_id,
+        topic_id=convo.topic_id,
+        levels=levels,
+    )
     session.commit()
     return TurnResult(reply=reply_text, events=events)
 

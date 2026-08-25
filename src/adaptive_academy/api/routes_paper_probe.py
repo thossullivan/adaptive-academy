@@ -7,7 +7,11 @@ from adaptive_academy.api.schemas import (
     PaperProbeStartIn, PaperQuestionRow, ScorecardRow,
 )
 from adaptive_academy.engine.gates import milestone_load_bearing
-from adaptive_academy.engine.memory import index_paper
+from adaptive_academy.engine.memory import (
+    index_paper,
+    index_paper_answer,
+    topic_id_for_concept,
+)
 from adaptive_academy.engine.paper import PaperIngestError, ingest_paper
 from adaptive_academy.engine.paper_probe import direct, grade_paper_probe
 from adaptive_academy.llm.types import LLMClient
@@ -99,10 +103,37 @@ def post_answer(pid: int, body: PaperProbeAnswerIn, session: Session = Depends(g
         PaperProbeAnswer.question_index == body.question_index)).first()
     if existing:
         existing.content = body.content
-        session.add(existing)
+        answer = existing
     else:
-        session.add(PaperProbeAnswer(probe_id=pid, question_index=body.question_index,
-                                     content=body.content))
+        answer = PaperProbeAnswer(
+            probe_id=pid,
+            question_index=body.question_index,
+            content=body.content,
+        )
+    session.add(answer)
+    session.flush()
+    question = next(
+        (
+            question
+            for question in pp.questions
+            if question.get("index") == body.question_index
+        ),
+        {},
+    )
+    concept_ids = list(question.get("concept_ids", []))
+    if concept_ids:
+        topic_id = topic_id_for_concept(session, concept_ids[0])
+    else:
+        milestone = session.get(Milestone, pp.milestone_id)
+        concepts = milestone_load_bearing(session, milestone)
+        topic_id = topic_id_for_concept(session, concepts[0].id) if concepts else None
+    index_paper_answer(
+        session,
+        answer,
+        topic_id=topic_id,
+        concept_ids=concept_ids,
+        role=str(question.get("axis", "")),
+    )
     session.commit()
     return PaperProbeAnswerOut(status=pp.status)
 

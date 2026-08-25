@@ -14,9 +14,10 @@ from datetime import datetime, timedelta, timezone
 from sqlmodel import Session, select
 
 from adaptive_academy.engine.assess import assess_concept
+from adaptive_academy.engine.memory import index_question, topic_id_for_concept
 from adaptive_academy.llm.types import LLMClient
-from adaptive_academy.prompts import DECAY_RECALL
 from adaptive_academy.models import Assessment, Concept, RecallPrompt, Track
+from adaptive_academy.prompts import DECAY_RECALL
 
 _HELD_DAYS = 7
 _DECAYED_DAYS = 2
@@ -52,9 +53,17 @@ def schedule_decay_check(session: Session, concept_id: int, *, days: int = 3) ->
         )
     ).first()
     concept = session.get(Concept, concept_id)
+    topic_id = topic_id_for_concept(session, concept_id) if concept is not None else None
     if existing is not None:
         existing.due_at = due
         session.add(existing)
+        index_question(
+            session,
+            text=existing.prompt,
+            source_ref=f"recallprompt:{existing.id}",
+            topic_id=topic_id,
+            concept_id=concept_id,
+        )
         session.commit()
         session.refresh(existing)
         return existing
@@ -65,6 +74,14 @@ def schedule_decay_check(session: Session, concept_id: int, *, days: int = 3) ->
         due_at=due,
     )
     session.add(prompt)
+    session.flush()
+    index_question(
+        session,
+        text=prompt.prompt,
+        source_ref=f"recallprompt:{prompt.id}",
+        topic_id=topic_id,
+        concept_id=concept_id,
+    )
     session.commit()
     session.refresh(prompt)
     return prompt
