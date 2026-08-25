@@ -13,6 +13,7 @@ from adaptive_academy.api import (
     routes_conversations,
     routes_deliverables,
     routes_items,
+    routes_memory,
     routes_momentum,
     routes_practice,
     routes_story,
@@ -136,6 +137,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_teach.router)
     app.include_router(routes_deliverables.router)
     app.include_router(routes_vault.router)
+    app.include_router(routes_memory.router)
     app.include_router(routes_momentum.router)
     app.include_router(programs_router)
     app.include_router(roleplay_router)

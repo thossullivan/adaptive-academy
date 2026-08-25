@@ -39,6 +39,9 @@ if TYPE_CHECKING:
 
 DEFAULT_K = 6
 INJECT_BUDGET_CHARS = 2400
+MEMORY_SNIPPET_CHARS = 240
+REINDEX_KINDS = ("vault_note", "source_doc")
+REINDEX_DEADLINE_S = 60.0
 TUTOR_GROUNDING_K = 4
 TUTOR_COVERED_K = 3
 GROUNDING_K = 3
@@ -667,8 +670,8 @@ def reindex_topic(
     *,
     vault_path: str,
     fetch: Callable[[str], str | None],
-    kinds: tuple[str, ...] = ("vault_note", "source_doc"),
-    deadline_s: float = 60,
+    kinds: tuple[str, ...] = REINDEX_KINDS,
+    deadline_s: float = REINDEX_DEADLINE_S,
 ) -> ReindexResult:
     """Reindex one topic and return partial counts when the deadline expires."""
     from adaptive_academy.engine.vault import reindex_vault
