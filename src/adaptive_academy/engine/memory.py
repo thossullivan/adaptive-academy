@@ -22,6 +22,7 @@ from adaptive_academy.models import (
     AgentEvent,
     Assessment,
     Chunk,
+    ChunkConcept,
     Concept,
     ConceptAlias,
     Conversation,
@@ -60,6 +61,7 @@ VECTOR_DIM = 384
 HYBRID_CANDIDATE_K = 20
 RRF_K = 60
 HYBRID_FILTER_BATCH = 500
+QUERY_NEIGHBOR_LIMIT = 3
 
 _HEADING_RE = re.compile(r"^(#{1,3})[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$")
 _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
@@ -148,9 +150,11 @@ def sanitize_fts_query(query: str) -> str:
 
 
 def expand_query(session: Session, query: str, *, concept_id: int | None) -> str:
-    """Append the selected concept name and canonical alias without using an LLM."""
+    """Append the concept, canonical alias, and up to three graph neighbors."""
     if concept_id is None:
         return query
+
+    from adaptive_academy.engine import graph
 
     concept = session.get(Concept, concept_id)
     alias = session.exec(
@@ -158,6 +162,15 @@ def expand_query(session: Session, query: str, *, concept_id: int | None) -> str
     ).first()
     additions = [concept.name if concept is not None else ""]
     additions.append(alias.canonical_name if alias is not None else "")
+    neighbor_names: list[str] = []
+    for neighbor_id in graph.neighbors(session, concept_id):
+        neighbor = session.get(Concept, neighbor_id)
+        if neighbor is None:
+            continue
+        neighbor_names.append(neighbor.name)
+        if len(neighbor_names) == QUERY_NEIGHBOR_LIMIT:
+            break
+    additions.extend(neighbor_names)
 
     expanded = query.strip()
     included = expanded.casefold()
@@ -167,6 +180,101 @@ def expand_query(session: Session, query: str, *, concept_id: int | None) -> str
             expanded = f"{expanded} {addition}".strip()
             included = expanded.casefold()
     return expanded
+
+
+def concept_name_index(session: Session, topic_id: int) -> list[tuple[int, str]]:
+    """Return concept and canonical alias names for one topic."""
+    concepts = session.exec(
+        select(Concept)
+        .join(Track)
+        .where(Track.topic_id == topic_id)
+        .order_by(Concept.id)
+    ).all()
+    concept_ids = [concept.id for concept in concepts if concept.id is not None]
+    if not concept_ids:
+        return []
+
+    aliases = session.exec(
+        select(ConceptAlias)
+        .where(ConceptAlias.concept_id.in_(concept_ids))
+        .order_by(ConceptAlias.id)
+    ).all()
+    aliases_by_concept: dict[int, list[str]] = {}
+    for alias in aliases:
+        aliases_by_concept.setdefault(alias.concept_id, []).append(alias.canonical_name)
+
+    names: list[tuple[int, str]] = []
+    for concept in concepts:
+        if concept.id is None:
+            continue
+        names.append((concept.id, concept.name))
+        names.extend(
+            (concept.id, alias_name)
+            for alias_name in aliases_by_concept.get(concept.id, [])
+        )
+    return names
+
+
+def tag_chunk_concepts(
+    session: Session,
+    chunk: Chunk,
+    names: list[tuple[int, str]],
+) -> int:
+    """Replace one chunk's concept links using whole-word name matches."""
+    if chunk.id is None:
+        session.flush()
+    if chunk.id is None:
+        raise ValueError("chunk must be flushed before concept tagging")
+
+    searchable_text = f"{chunk.context}\n{chunk.text}"
+    hits_by_concept: dict[int, int] = {}
+    seen_names: set[tuple[int, str]] = set()
+    for concept_id, raw_name in names:
+        name = raw_name.strip()
+        name_key = (concept_id, name.casefold())
+        if len(name) < 4 or name_key in seen_names:
+            continue
+        seen_names.add(name_key)
+        hits = len(
+            re.findall(
+                rf"(?<!\w){re.escape(name)}(?!\w)",
+                searchable_text,
+                flags=re.IGNORECASE,
+            )
+        )
+        if hits:
+            hits_by_concept[concept_id] = hits_by_concept.get(concept_id, 0) + hits
+
+    existing_rows = session.exec(
+        select(ChunkConcept).where(ChunkConcept.chunk_id == chunk.id)
+    ).all()
+    existing_by_concept = {row.concept_id: row for row in existing_rows}
+    for concept_id, hits in hits_by_concept.items():
+        row = existing_by_concept.pop(concept_id, None)
+        if row is None:
+            row = ChunkConcept(
+                chunk_id=chunk.id,
+                concept_id=concept_id,
+                hits=hits,
+            )
+        else:
+            row.hits = hits
+        session.add(row)
+    for stale_row in existing_by_concept.values():
+        session.delete(stale_row)
+    return len(hits_by_concept)
+
+
+def _delete_chunk_concept_rows(session: Session, chunks: list[Chunk]) -> None:
+    chunk_ids = [chunk.id for chunk in chunks if chunk.id is not None]
+    if not chunk_ids:
+        return
+    rows = session.exec(
+        select(ChunkConcept).where(ChunkConcept.chunk_id.in_(chunk_ids))
+    ).all()
+    for row in rows:
+        session.delete(row)
+    session.flush()
 
 
 def _split_long_paragraph(paragraph: str, target: int) -> list[str]:
@@ -349,6 +457,7 @@ def index_text(
     indexed = 0
     skipped = 0
     changed_chunks: list[Chunk] = []
+    active_chunks: list[Chunk] = []
 
     for piece in pieces:
         piece_heading = piece.heading or heading
@@ -370,6 +479,7 @@ def index_text(
                 embedder is not None and existing.embedding_model != embedder.name
             ):
                 changed_chunks.append(existing)
+            active_chunks.append(existing)
             skipped += 1
             continue
 
@@ -400,11 +510,18 @@ def index_text(
             existing.source_mtime = source_mtime
             session.add(existing)
         changed_chunks.append(existing)
+        active_chunks.append(existing)
         indexed += 1
 
     orphans = [chunk for chunk in existing_chunks if chunk.ordinal >= len(pieces)]
+    _delete_chunk_concept_rows(session, orphans)
     for chunk in orphans:
         session.delete(chunk)
+    session.flush()
+
+    names = concept_name_index(session, topic_id) if topic_id is not None else []
+    for chunk in active_chunks:
+        tag_chunk_concepts(session, chunk, names)
 
     on_index = getattr(retriever, "on_index", None)
     if callable(on_index):
@@ -431,6 +548,7 @@ def index_text(
 def remove_source(session: Session, source_ref: str) -> int:
     """Delete every chunk for one source without committing the session."""
     chunks = session.exec(select(Chunk).where(Chunk.source_ref == source_ref)).all()
+    _delete_chunk_concept_rows(session, chunks)
     for chunk in chunks:
         session.delete(chunk)
     return len(chunks)
