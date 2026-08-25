@@ -16,6 +16,45 @@ from typing import Any
 from adaptive_academy.jsonout import extract_json
 
 
+SCOUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "minLength": 1},
+                    "rationale": {"type": "string"},
+                    "candidate_kind": {
+                        "type": "string",
+                        "enum": ["frontier", "orphan_term", "orphan_note", "extension"],
+                    },
+                    "evidence_indexes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "uniqueItems": True,
+                        "items": {"type": "integer", "minimum": 0},
+                    },
+                    "score": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+                "required": [
+                    "title",
+                    "rationale",
+                    "candidate_kind",
+                    "evidence_indexes",
+                    "score",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
+
 def structured_json(
     llm: Any,
     system: str,
