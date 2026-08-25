@@ -82,5 +82,5 @@ def test_migration_applies_to_populated_referenced_tables(tmp_path):
 
     assert "archived" in milestone_cols
     assert "added_by" in link_cols
-    assert version == "ba15f4c29e71"  # head as of the memory-chunks migration
+    assert version == "c9a7b3e1f204"  # head as of the concept-graph migration
     assert milestone_count == 1 and link_count == 1
