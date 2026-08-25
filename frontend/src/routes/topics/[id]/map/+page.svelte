@@ -3,7 +3,8 @@
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { Concept, Foundation } from '$lib/types';
+  import { EDGE_LEGEND, edgeToLink } from '$lib/graph';
+  import type { Concept, GraphLink } from '$lib/types';
   import { conceptSignalsMap, VERDICT_COLOR, VERDICT_LABEL, VERDICT_RANK, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge } from '$lib/ui';
@@ -14,24 +15,20 @@
   let concepts = $state<Concept[]>([]);
   let verdicts = $state<Record<number, Verdict>>({});
   let nodes = $state<{ id: number; name: string; verdict: Verdict; loadBearing: boolean; hasAnchor: boolean }[]>([]);
-  let links = $state<{ source: number; target: number }[]>([]);
-  let edgeCount = $state(0);
+  let links = $state<GraphLink[]>([]);
+  let selected = $state<number | null>(null);
+  let ancestorIds = $state<number[]>([]);
 
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const VERDICTS: Verdict[] = ['solid', 'verified', 'unverified', 'shaky', 'untested'];
 
   onMount(async () => {
-    let foundation: Foundation | null = null;
     try {
-      const cur = await api.getCurriculum(topicId);
-      concepts = cur.concepts;
+      const graph = await api.getGraph(topicId);
+      concepts = graph.nodes;
+      links = graph.edges.map(edgeToLink);
     } catch {
       concepts = [];
-    }
-    try {
-      foundation = await api.getFoundation(topicId);
-    } catch {
-      foundation = null;
+      links = [];
     }
     const vmap = await conceptSignalsMap(concepts.map((c) => c.id));
     verdicts = Object.fromEntries(Object.entries(vmap).map(([k, v]) => [Number(k), v.verdict]));
@@ -43,28 +40,18 @@
       loadBearing: c.is_load_bearing,
       hasAnchor: !!c.has_anchor
     }));
-
-    // Build prerequisite edges from the foundation's concept map, matching names leniently.
-    const byNorm = new Map(concepts.map((c) => [norm(c.name), c.id]));
-    const out: { source: number; target: number }[] = [];
-    if (foundation?.prerequisite_map) {
-      for (const [name, prereqs] of Object.entries(foundation.prerequisite_map)) {
-        const targetId = byNorm.get(norm(name));
-        if (targetId == null || !Array.isArray(prereqs)) continue;
-        for (const pre of prereqs as string[]) {
-          const sourceId = byNorm.get(norm(String(pre)));
-          if (sourceId != null && sourceId !== targetId) out.push({ source: sourceId, target: targetId });
-        }
-      }
-    }
-    links = out;
-    edgeCount = out.length;
     loading = false;
   });
 
-  let selected = $state<number | null>(null);
   const selectedConcept = $derived(concepts.find((c) => c.id === selected) ?? null);
   const selectedVerdict = $derived<Verdict>(selected != null ? (verdicts[selected] ?? 'untested') : 'untested');
+
+  async function selectConcept(id: number) {
+    selected = id;
+    ancestorIds = [];
+    const ancestors = await api.getAncestors(id, 6).catch(() => []);
+    if (selected === id) ancestorIds = ancestors.map(([conceptId]) => conceptId);
+  }
 
   function openTutor(id: number) {
     goto(`/topics/${topicId}/tutor?concept=${id}`);
@@ -89,7 +76,7 @@
   {:else}
     <div class="grid gap-4 lg:grid-cols-[1fr_280px]">
       <div class="rise">
-        <Constellation {nodes} {links} onselect={(id) => (selected = id)} />
+        <Constellation {nodes} {links} {selected} highlighted={ancestorIds} onselect={selectConcept} />
       </div>
 
       <div class="flex flex-col gap-4">
@@ -102,7 +89,23 @@
                 <span class="nums text-muted">{n}</span>
               </div>
             {/each}
-            <div class="mt-1 border-t border-border pt-2 text-xs text-faint">{edgeCount} prerequisite links</div>
+            <div class="mt-1 border-t border-border pt-2">
+              <div class="mb-2 text-xs text-faint">{links.length} concept links</div>
+              <div class="flex flex-col gap-1.5">
+                {#each EDGE_LEGEND as edge}
+                  <div class="flex items-center gap-2 text-xs text-muted">
+                    <span
+                      class="w-7 border-t"
+                      class:border-dashed={edge.kind === 'related'}
+                      class:border-info={edge.kind === 'related'}
+                      class:border-border-strong={edge.kind === 'prerequisite'}
+                    ></span>
+                    <span class="flex-1">{edge.label}</span>
+                    <span class="nums text-faint">{links.filter((link) => link.kind === edge.kind).length}</span>
+                  </div>
+                {/each}
+              </div>
+            </div>
           </div>
         </Card>
 
@@ -117,6 +120,9 @@
               {#if selectedConcept.is_load_bearing}<Badge tone="accent" mono>load-bearing</Badge>{/if}
               {#if selectedConcept.has_anchor}<Badge tone="info" mono>has quiz</Badge>{/if}
             </div>
+            {#if ancestorIds.length}
+              <p class="mt-3 text-xs text-muted">{ancestorIds.length} prerequisite ancestor{ancestorIds.length === 1 ? '' : 's'} highlighted</p>
+            {/if}
             <div class="mt-4 flex flex-col gap-2">
               <Button size="sm" onclick={() => openTutor(selectedConcept.id)}>Tutor on this →</Button>
               <Button size="sm" variant="outline" href="/topics/{topicId}/assess">Assess it</Button>
