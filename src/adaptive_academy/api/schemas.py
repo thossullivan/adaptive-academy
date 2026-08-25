@@ -62,6 +62,7 @@ class MemoryReindexOut(BaseModel):
     removed: int
     truncated: bool
     ms: int
+    note: str = ""
 
 
 class MemoryStatsOut(BaseModel):

@@ -157,7 +157,6 @@ def test_reindex_without_topic_preserves_vault_chunk_owners(
     session.commit()
     session.refresh(second_topic)
     (tmp_path / "a.md").write_text("# Alpha\n\nFirst note.", encoding="utf-8")
-    (tmp_path / "b.md").write_text("# Beta\n\nSecond note.", encoding="utf-8")
     seeded = client.post(
         "/api/memory/reindex",
         json={
@@ -167,6 +166,19 @@ def test_reindex_without_topic_preserves_vault_chunk_owners(
         },
     )
     assert seeded.status_code == 200
+    # b.md belongs to the second topic only (indexed directly, not via a sweep).
+    b_path = tmp_path / "b.md"
+    b_path.write_text("# Beta\n\nSecond note.", encoding="utf-8")
+    index_text(
+        session,
+        kind="vault_note",
+        text=b_path.read_text(encoding="utf-8"),
+        source_ref=b_path.resolve().as_uri(),
+        doc_title="Beta",
+        topic_id=second_topic.id,
+        source_mtime=b_path.stat().st_mtime,
+    )
+    session.commit()
     before = {
         chunk.source_ref: chunk.topic_id
         for chunk in session.exec(
@@ -174,7 +186,7 @@ def test_reindex_without_topic_preserves_vault_chunk_owners(
         ).all()
     }
     assert len(before) == 2
-    assert set(before.values()) == {first_topic.id}
+    assert set(before.values()) == {first_topic.id, second_topic.id}
 
     response = client.post(
         "/api/memory/reindex",
@@ -261,3 +273,19 @@ def test_stats_counts_match_topic(session, memory_api):
     assert response.json()["by_kind"] == {"question": 1, "vault_note": 2}
     assert response.json()["last_indexed_at"] is not None
     assert response.json()["retriever"] == "scripted"
+
+
+def test_reindex_without_topic_on_fresh_db_reports_note(memory_api, tmp_path):
+    client, _, _ = memory_api
+    (tmp_path / "a.md").write_text("# Alpha\n\nFirst note.", encoding="utf-8")
+    response = client.post("/api/memory/reindex", json={"vault_path": str(tmp_path)})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["indexed"] == 0
+    assert "pass topic_id" in body["note"]
+
+
+def test_search_unknown_topic_or_concept_is_404(memory_api):
+    client, _, _ = memory_api
+    assert client.get("/api/memory/search", params={"q": "x", "topic_id": 99999}).status_code == 404
+    assert client.get("/api/memory/search", params={"q": "x", "concept_id": 99999}).status_code == 404

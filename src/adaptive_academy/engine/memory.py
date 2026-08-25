@@ -672,8 +672,12 @@ def reindex_topic(
     fetch: Callable[[str], str | None],
     kinds: tuple[str, ...] = REINDEX_KINDS,
     deadline_s: float = REINDEX_DEADLINE_S,
+    vault_only_refs: set[str] | None = None,
 ) -> ReindexResult:
-    """Reindex one topic and return partial counts when the deadline expires."""
+    """Reindex one topic and return partial counts when the deadline expires.
+
+    ``vault_only_refs`` restricts the vault sweep to notes this topic already owns.
+    """
     from adaptive_academy.engine.vault import reindex_vault
 
     started = time.perf_counter()
@@ -688,7 +692,7 @@ def reindex_topic(
         if time.perf_counter() >= deadline:
             truncated = True
         else:
-            result = reindex_vault(session, topic_id, vault_path)
+            result = reindex_vault(session, topic_id, vault_path, only_refs=vault_only_refs)
             indexed += result.indexed
             skipped += result.skipped
             removed += result.removed

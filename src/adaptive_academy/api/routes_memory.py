@@ -27,7 +27,7 @@ from adaptive_academy.engine.memory import (
     retrieve,
 )
 from adaptive_academy.llm.retriever_types import Hit, Retriever
-from adaptive_academy.models import Chunk, Topic
+from adaptive_academy.models import Chunk, Concept, Topic
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 
@@ -71,6 +71,10 @@ def search_memory(
     query = q.strip()
     if not query:
         raise HTTPException(400, "memory search query is blank")
+    if topic_id is not None and session.get(Topic, topic_id) is None:
+        raise HTTPException(404, "topic not found")
+    if concept_id is not None and session.get(Concept, concept_id) is None:
+        raise HTTPException(404, "concept not found")
     event_target = {"topic_id": topic_id} if topic_id is not None else None
     hits = retrieve(
         session,
@@ -108,15 +112,21 @@ def reindex_memory(
     if body.topic_id is not None and not topics:
         raise HTTPException(404, "topic not found")
 
-    vault_topic_ids: set[int] | None = None
+    # All-topic sweeps re-index only the notes each topic already owns; a topic never
+    # claims another topic's notes, and new notes need an explicit topic_id.
+    vault_refs_by_topic: dict[int, set[str]] | None = None
+    note = ""
     if body.topic_id is None and "vault_note" in kinds:
-        vault_topic_ids = {
-            topic_id
-            for topic_id in session.exec(
-                select(Chunk.topic_id).where(Chunk.kind == "vault_note").distinct()
-            ).all()
-            if topic_id is not None
-        }
+        vault_refs_by_topic = {}
+        for owner_id, source_ref in session.exec(
+            select(Chunk.topic_id, Chunk.source_ref)
+            .where(Chunk.kind == "vault_note")
+            .distinct()
+        ).all():
+            if owner_id is not None:
+                vault_refs_by_topic.setdefault(owner_id, set()).add(source_ref)
+        if not vault_refs_by_topic:
+            note = "no topic owns vault notes yet; pass topic_id to index new vault notes"
 
     started = time.perf_counter()
     indexed = 0
@@ -128,11 +138,12 @@ def reindex_memory(
             kind
             for kind in kinds
             if kind != "vault_note"
-            or vault_topic_ids is None
-            or topic.id in vault_topic_ids
+            or vault_refs_by_topic is None
+            or topic.id in vault_refs_by_topic
         )
         if not topic_kinds:
             continue
+        only_refs = None if vault_refs_by_topic is None else vault_refs_by_topic.get(topic.id)
         remaining = REINDEX_DEADLINE_S - (time.perf_counter() - started)
         if remaining <= 0:
             truncated = True
@@ -145,6 +156,7 @@ def reindex_memory(
                 fetch=fetch,
                 kinds=topic_kinds,
                 deadline_s=remaining,
+                vault_only_refs=only_refs,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -162,6 +174,7 @@ def reindex_memory(
         removed=removed,
         truncated=truncated,
         ms=elapsed_ms,
+        note=note,
     )
 
 
