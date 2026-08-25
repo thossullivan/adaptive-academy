@@ -6,7 +6,7 @@ import hashlib
 import re
 import time
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -18,17 +18,22 @@ from adaptive_academy.engine.vault import parse_frontmatter
 from adaptive_academy.llm.retriever_types import Hit
 from adaptive_academy.models import (
     AgentEvent,
+    Assessment,
     Chunk,
     Concept,
     ConceptAlias,
+    Message,
     PaperProbe,
+    PaperProbeAnswer,
     ProgramTopicLink,
+    RoleplayTurn,
     SourceDoc,
     Track,
     VaultLink,
 )
 
 if TYPE_CHECKING:
+    from adaptive_academy.engine.levels import Levels
     from adaptive_academy.llm.retriever_types import Retriever
 
 DEFAULT_K = 6
@@ -384,6 +389,173 @@ def remove_source(session: Session, source_ref: str) -> int:
     for chunk in chunks:
         session.delete(chunk)
     return len(chunks)
+
+
+def topic_id_for_concept(session: Session, concept_id: int) -> int:
+    """Resolve the owning topic for one persisted concept."""
+    concept = session.get(Concept, concept_id)
+    if concept is None:
+        raise ValueError("concept not found")
+    track = session.get(Track, concept.track_id)
+    if track is None:
+        raise ValueError("concept track not found")
+    return track.topic_id
+
+
+def index_message(
+    session: Session,
+    msg: Message,
+    *,
+    concept_id: int,
+    topic_id: int,
+    levels: Levels | None = None,
+) -> IndexResult:
+    """Index one persisted learner or tutor conversation message."""
+    if msg.id is None:
+        raise ValueError("message must be flushed before indexing")
+    source_ref = f"message:{msg.id}"
+    if msg.role == "user":
+        return index_text(
+            session,
+            kind="learner_output",
+            text=msg.content,
+            source_ref=source_ref,
+            topic_id=topic_id,
+            concept_id=concept_id,
+        )
+    if msg.role == "tutor" and len(msg.content) >= TUTOR_TURN_MIN_CHARS:
+        metadata = {}
+        if levels is not None:
+            metadata = {
+                "assistance": levels.assistance,
+                "challenge": levels.challenge,
+            }
+        return index_text(
+            session,
+            kind="tutor_turn",
+            text=msg.content,
+            source_ref=source_ref,
+            topic_id=topic_id,
+            concept_id=concept_id,
+            meta=metadata,
+        )
+
+    removed = remove_source(session, source_ref)
+    return IndexResult(indexed=0, skipped=0, removed=removed)
+
+
+def index_assessment(
+    session: Session,
+    a: Assessment,
+    *,
+    topic_id: int,
+) -> IndexResult:
+    """Index an assessment prompt and the learner response as separate sources."""
+    if a.id is None:
+        raise ValueError("assessment must be flushed before indexing")
+    question = index_text(
+        session,
+        kind="question",
+        text=a.prompt,
+        source_ref=f"assessment:{a.id}#q",
+        topic_id=topic_id,
+        concept_id=a.concept_id,
+    )
+    response = index_text(
+        session,
+        kind="learner_output",
+        text=a.response,
+        source_ref=f"assessment:{a.id}#r",
+        topic_id=topic_id,
+        concept_id=a.concept_id,
+        meta={
+            "assessment_kind": a.kind,
+            "score": a.score,
+            "verdict": a.verdict,
+        },
+    )
+    return _combine_index_results(question, response)
+
+
+def index_roleplay_turn(
+    session: Session,
+    t: RoleplayTurn,
+    *,
+    topic_id: int,
+    concept_ids: Iterable[int],
+) -> IndexResult:
+    """Index one learner or persona roleplay turn."""
+    if t.id is None:
+        raise ValueError("roleplay turn must be flushed before indexing")
+    kind_by_role = {"user": "learner_output", "persona": "tutor_turn"}
+    kind = kind_by_role.get(t.role)
+    source_ref = f"roleplayturn:{t.id}"
+    if kind is None:
+        removed = remove_source(session, source_ref)
+        return IndexResult(indexed=0, skipped=0, removed=removed)
+    return index_text(
+        session,
+        kind=kind,
+        text=t.content,
+        source_ref=source_ref,
+        topic_id=topic_id,
+        concept_id=_single_concept_id(concept_ids),
+    )
+
+
+def index_question(
+    session: Session,
+    *,
+    text: str,
+    source_ref: str,
+    topic_id: int | None,
+    concept_id: int | None,
+) -> IndexResult:
+    """Index one generated question."""
+    return index_text(
+        session,
+        kind="question",
+        text=text,
+        source_ref=source_ref,
+        topic_id=topic_id,
+        concept_id=concept_id,
+    )
+
+
+def index_paper_answer(
+    session: Session,
+    answer: PaperProbeAnswer,
+    *,
+    topic_id: int,
+    concept_ids: Iterable[int],
+    role: str = "",
+) -> IndexResult:
+    """Index one persisted paper-probe answer."""
+    if answer.id is None:
+        raise ValueError("paper answer must be flushed before indexing")
+    metadata = {"role": role} if role else None
+    return index_text(
+        session,
+        kind="learner_output",
+        text=answer.content,
+        source_ref=f"paperprobe:{answer.probe_id}#{answer.question_index}",
+        topic_id=topic_id,
+        concept_id=_single_concept_id(concept_ids),
+        meta=metadata,
+    )
+
+
+def _single_concept_id(concept_ids: Iterable[int]) -> int | None:
+    unique_ids = list(dict.fromkeys(concept_ids))
+    return unique_ids[0] if len(unique_ids) == 1 else None
+
+
+def _combine_index_results(*results: IndexResult) -> IndexResult:
+    return IndexResult(
+        indexed=sum(result.indexed for result in results),
+        skipped=sum(result.skipped for result in results),
+        removed=sum(result.removed for result in results),
+    )
 
 
 def index_source_doc(

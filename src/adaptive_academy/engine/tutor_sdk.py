@@ -23,12 +23,13 @@ from claude_agent_sdk import (
 from sqlmodel import Session
 
 from adaptive_academy.engine.levels import compute_levels
-from adaptive_academy.prompts import build_tutor_system_prompt
+from adaptive_academy.engine.memory import index_message
 from adaptive_academy.engine.tools import reveal_gate
 from adaptive_academy.engine.tutor import TurnResult, _FALLBACK
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.types import AgentSDKError
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
+from adaptive_academy.prompts import build_tutor_system_prompt
 
 _MAX_TURNS = 6
 
@@ -79,7 +80,15 @@ def run_tutor_turn_sdk(
         session.add(ev)
         events.append(ev)
 
-    session.add(Message(conversation_id=convo.id, role="user", content=user_text))
+    user_message = Message(conversation_id=convo.id, role="user", content=user_text)
+    session.add(user_message)
+    session.flush()
+    index_message(
+        session,
+        user_message,
+        concept_id=convo.concept_id,
+        topic_id=convo.topic_id,
+    )
     session.commit()
     session.refresh(convo)
 
@@ -123,6 +132,15 @@ def run_tutor_turn_sdk(
         emit("max_steps_exhausted")
         reply = _FALLBACK
 
-    session.add(Message(conversation_id=convo.id, role="tutor", content=reply))
+    tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply)
+    session.add(tutor_message)
+    session.flush()
+    index_message(
+        session,
+        tutor_message,
+        concept_id=convo.concept_id,
+        topic_id=convo.topic_id,
+        levels=levels,
+    )
     session.commit()
     return TurnResult(reply=reply, events=events)

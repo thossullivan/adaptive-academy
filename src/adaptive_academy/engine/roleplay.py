@@ -6,6 +6,11 @@ from sqlmodel import Session, select
 from adaptive_academy.engine.assess import assess_concept
 from adaptive_academy.engine.gates import milestone_load_bearing
 from adaptive_academy.engine.levels import compute_levels
+from adaptive_academy.engine.memory import (
+    index_question,
+    index_roleplay_turn,
+    topic_id_for_concept,
+)
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
@@ -43,6 +48,15 @@ def direct(session: Session, rp: RoleplaySession, *, llm: LLMClient) -> Roleplay
     rp.status = "active"
     _emit(session, rp, "roleplay:brief", brief.get("persona", ""))
     session.add(rp)
+    concept_ids = [concept.id for concept in concepts if concept.id is not None]
+    topic_id = topic_id_for_concept(session, concept_ids[0]) if concept_ids else None
+    index_question(
+        session,
+        text=str(brief.get("situation", "")),
+        source_ref=f"roleplaysession:{rp.id}#opening",
+        topic_id=topic_id,
+        concept_id=concept_ids[0] if len(concept_ids) == 1 else None,
+    )
     session.commit()
     session.refresh(rp)
     return rp
@@ -64,7 +78,20 @@ def _history(session: Session, rp: RoleplaySession) -> list[dict]:
 
 def run_roleplay_turn(session: Session, rp: RoleplaySession, user_text: str, *,
                       llm: LLMClient) -> TurnResult:
-    session.add(RoleplayTurn(session_id=rp.id, role="user", content=user_text))
+    milestone = session.get(Milestone, rp.milestone_id)
+    concepts = milestone_load_bearing(session, milestone)
+    concept_ids = [concept.id for concept in concepts if concept.id is not None]
+    topic_id = topic_id_for_concept(session, concept_ids[0])
+
+    user_turn = RoleplayTurn(session_id=rp.id, role="user", content=user_text)
+    session.add(user_turn)
+    session.flush()
+    index_roleplay_turn(
+        session,
+        user_turn,
+        topic_id=topic_id,
+        concept_ids=concept_ids,
+    )
     session.commit()
 
     system = build_roleplay_persona_prompt(rp.persona_brief)
@@ -77,7 +104,15 @@ def run_roleplay_turn(session: Session, rp: RoleplaySession, user_text: str, *,
         reply = reply.replace(_END, "").strip()
         ended = True
 
-    session.add(RoleplayTurn(session_id=rp.id, role="persona", content=reply))
+    persona_turn = RoleplayTurn(session_id=rp.id, role="persona", content=reply)
+    session.add(persona_turn)
+    session.flush()
+    index_roleplay_turn(
+        session,
+        persona_turn,
+        topic_id=topic_id,
+        concept_ids=concept_ids,
+    )
 
     user_turns = len(session.exec(
         select(RoleplayTurn).where(RoleplayTurn.session_id == rp.id,

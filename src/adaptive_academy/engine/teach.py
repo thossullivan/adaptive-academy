@@ -11,11 +11,12 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from adaptive_academy.jsonout import extract_json
+from adaptive_academy.engine.memory import index_assessment, topic_id_for_concept
 from adaptive_academy.engine.trace import trace_prompt
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.models import Assessment, Concept
 from adaptive_academy.prompts import TEACH
-from adaptive_academy.models import Assessment, Concept, Track
 
 
 
@@ -49,8 +50,8 @@ def grade_teaching(session: Session, concept: Concept, explanation: str, *, llm:
     """Grade a public explanation under a teaching expectancy; persist as a teach assessment."""
     user = (f"CONCEPT: {concept.name}\n\n<<<TEACHING>>>\n"
             f"{explanation or '(empty)'}\n<<<END_TEACHING>>>")
-    track = session.get(Track, concept.track_id)
-    trace_prompt(session, TEACH, topic_id=track.topic_id if track else None)
+    topic_id = topic_id_for_concept(session, concept.id)
+    trace_prompt(session, TEACH, topic_id=topic_id)
     resp = llm.complete(system=TEACH, messages=[{"role": "user", "content": user}], tools=[])
     score, feedback, strengths, gaps = parse_teaching_json(resp.text)
 
@@ -64,6 +65,8 @@ def grade_teaching(session: Session, concept: Concept, explanation: str, *, llm:
         gaps=gaps,
     )
     session.add(assessment)
+    session.flush()
+    index_assessment(session, assessment, topic_id=topic_id)
     session.commit()
     session.refresh(assessment)
     return TeachResult(

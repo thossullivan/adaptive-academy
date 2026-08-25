@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from adaptive_academy.engine.assess import assess_concept
 from adaptive_academy.engine.gates import milestone_load_bearing
 from adaptive_academy.engine.levels import compute_levels
+from adaptive_academy.engine.memory import index_question, topic_id_for_concept
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
@@ -42,6 +43,26 @@ def direct(session: Session, pp: PaperProbe, *, llm: LLMClient) -> PaperProbe:
     pp.status = "answering"
     _emit(session, pp, "paper_probe:questions", f"{len(questions)} question(s)")
     session.add(pp)
+    concept_ids = [concept.id for concept in concepts if concept.id is not None]
+    topic_id = topic_id_for_concept(session, concept_ids[0]) if concept_ids else None
+    for question in questions:
+        question_concept_ids = question["concept_ids"]
+        question_topic_id = (
+            topic_id_for_concept(session, question_concept_ids[0])
+            if question_concept_ids
+            else topic_id
+        )
+        index_question(
+            session,
+            text=question["prompt"],
+            source_ref=f"paperprobe:{pp.id}#q:{question['index']}",
+            topic_id=question_topic_id,
+            concept_id=(
+                question_concept_ids[0]
+                if len(question_concept_ids) == 1
+                else None
+            ),
+        )
     session.commit()
     session.refresh(pp)
     return pp

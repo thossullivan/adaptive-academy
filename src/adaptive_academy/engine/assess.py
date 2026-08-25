@@ -5,7 +5,6 @@ from sqlmodel import Session, select
 
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
-from adaptive_academy.prompts import GRADE, PROBE_TEXT, RUBRIC
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
@@ -17,8 +16,8 @@ from adaptive_academy.models import (
     Rubric,
     SourceDoc,
     TopicFoundation,
-    Track,
 )
+from adaptive_academy.prompts import GRADE, PROBE_TEXT, RUBRIC
 
 # Deterministic band ceilings (a missing required element or a present misconception means the
 # explanation cannot be graded "solid"). Applied as a CEILING, not a subtraction, so the LLM's
@@ -122,10 +121,6 @@ def parse_grade_json(text: str) -> GradeDraft:
     )
 
 
-def _topic_id_for(session: Session, concept: Concept) -> int:
-    return session.get(Track, concept.track_id).topic_id
-
-
 def build_rubric_prompt(concept_name: str, foundation: TopicFoundation | None,
                         sources: list[SourceDoc]) -> tuple[str, str]:
     lines = [f"CONCEPT: {concept_name}"]
@@ -141,10 +136,12 @@ def build_rubric_prompt(concept_name: str, foundation: TopicFoundation | None,
 
 def ensure_rubric(session: Session, concept: Concept, *, llm: LLMClient) -> Rubric:
     """Get the concept's rubric, generating + caching it on first use (§2.1)."""
+    from adaptive_academy.engine.memory import topic_id_for_concept
+
     existing = session.exec(select(Rubric).where(Rubric.concept_id == concept.id)).first()
     if existing is not None:
         return existing
-    topic_id = _topic_id_for(session, concept)
+    topic_id = topic_id_for_concept(session, concept.id)
     foundation = session.exec(
         select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)).first()
     sources = session.exec(
@@ -220,8 +217,10 @@ def assess_concept(
     anchor_id: int | None = None,
 ) -> AssessmentResult:
     """Run an anchored probe, persist an Assessment, and update the KnowledgeEstimate."""
+    from adaptive_academy.engine.memory import index_assessment, topic_id_for_concept
+
     events: list[AgentEvent] = []
-    topic_id = _topic_id_for(session, concept)
+    topic_id = topic_id_for_concept(session, concept.id)
 
     def emit(k: str, detail: str = "") -> None:
         ev = AgentEvent(topic_id=topic_id, kind=k, detail=detail)
@@ -281,6 +280,8 @@ def assess_concept(
         rubric_id=rubric_id, anchor_id=anchor_ref_id,
         baseline_assessment_id=baseline_id, delta=delta)
     session.add(assessment)
+    session.flush()
+    index_assessment(session, assessment, topic_id=topic_id)
 
     level, conf = level_from_score(final_score)
     estimate = session.exec(

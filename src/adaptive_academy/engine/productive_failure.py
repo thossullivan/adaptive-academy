@@ -12,11 +12,17 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
-from adaptive_academy.jsonout import extract_json
+from adaptive_academy.engine.memory import (
+    content_hash,
+    index_assessment,
+    index_question,
+    topic_id_for_concept,
+)
 from adaptive_academy.engine.trace import trace_prompt
+from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.models import Assessment, Concept, KnowledgeEstimate, TopicFoundation
 from adaptive_academy.prompts import PF_CONSOLIDATE, PF_GENERATE
-from adaptive_academy.models import Assessment, Concept, KnowledgeEstimate, TopicFoundation, Track
 
 
 
@@ -33,10 +39,6 @@ class ConsolidateResult:
     canonical: str
     feedback: str
     score: float
-
-
-def _topic_id_for(session: Session, concept: Concept) -> int:
-    return session.get(Track, concept.track_id).topic_id
 
 
 def build_generate_prompt(
@@ -64,7 +66,7 @@ def parse_consolidation_json(text: str) -> tuple[str, str, float]:
 
 def generate_challenge(session: Session, concept: Concept, *, llm: LLMClient) -> str:
     """Generate a novel, method-withholding problem for the concept."""
-    topic_id = _topic_id_for(session, concept)
+    topic_id = topic_id_for_concept(session, concept.id)
     foundation = session.exec(
         select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)
     ).first()
@@ -74,7 +76,15 @@ def generate_challenge(session: Session, concept: Concept, *, llm: LLMClient) ->
     system, user = build_generate_prompt(concept.name, foundation, est.level if est else "unknown")
     trace_prompt(session, PF_GENERATE, topic_id=topic_id)
     resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
-    return parse_problem_json(resp.text)
+    problem = parse_problem_json(resp.text)
+    index_question(
+        session,
+        text=problem,
+        source_ref=f"productive_failure:{concept.id}:{content_hash(problem)}",
+        topic_id=topic_id,
+        concept_id=concept.id,
+    )
+    return problem
 
 
 def consolidate(
@@ -83,7 +93,8 @@ def consolidate(
     """Grade the generative attempt and teach the canonical approach; persist the record."""
     user = (f"CONCEPT: {concept.name}\n\n<<<PROBLEM>>>\n{problem}\n<<<END_PROBLEM>>>\n\n"
             f"<<<ATTEMPT>>>\n{attempt or '(none)'}\n<<<END_ATTEMPT>>>")
-    trace_prompt(session, PF_CONSOLIDATE, topic_id=_topic_id_for(session, concept))
+    topic_id = topic_id_for_concept(session, concept.id)
+    trace_prompt(session, PF_CONSOLIDATE, topic_id=topic_id)
     resp = llm.complete(
         system=PF_CONSOLIDATE, messages=[{"role": "user", "content": user}], tools=[]
     )
@@ -99,6 +110,8 @@ def consolidate(
         gaps=[],
     )
     session.add(assessment)
+    session.flush()
+    index_assessment(session, assessment, topic_id=topic_id)
     session.commit()
     session.refresh(assessment)
     return ConsolidateResult(
