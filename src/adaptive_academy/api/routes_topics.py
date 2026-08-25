@@ -53,10 +53,8 @@ from adaptive_academy.models import (
     AgentEvent,
     Assessment,
     Concept,
-    ConceptAlias,
     Deliverable,
     Item,
-    KnowledgeEstimate,
     Milestone,
     Phase,
     Program,
@@ -388,41 +386,41 @@ def import_curriculum(
     if topic is None:
         raise HTTPException(404, "topic not found")
     view = markdown_to_track(body.markdown)
-    # Replace any existing track for this topic.
-    old = session.exec(select(Track).where(Track.topic_id == topic_id)).all()
-    for t in old:
-        for p in session.exec(select(Phase).where(Phase.track_id == t.id)).all():
+    # Policy: import replaces the track's phases/items/deliverables/sidebars ONLY.
+    # Concepts, KnowledgeEstimates, ConceptAliases, Assessments and ConceptEdges are
+    # competence evidence and graph history; they are never deleted by an import.
+    # The oldest track is reused (title/overview updated); other tracks lose their
+    # phase content and are removed only when they own no concepts.
+    old = session.exec(select(Track).where(Track.topic_id == topic_id).order_by(Track.id)).all()
+    track = None
+    for old_track in old:
+        for p in session.exec(select(Phase).where(Phase.track_id == old_track.id)).all():
             for it in session.exec(select(Item).where(Item.phase_id == p.id)).all():
                 session.delete(it)
             d = session.exec(select(Deliverable).where(Deliverable.phase_id == p.id)).first()
             if d:
                 session.delete(d)
             session.delete(p)
-        for s in session.exec(select(Sidebar).where(Sidebar.track_id == t.id)).all():
+        for s in session.exec(select(Sidebar).where(Sidebar.track_id == old_track.id)).all():
             session.delete(s)
-        # Concepts (and their estimates + program aliases) belong to the track too —
-        # delete them before the track, or the default cascade NULLs concept.track_id
-        # and violates NOT NULL. ConceptAlias.concept_id is also a NOT NULL FK (program
-        # topics get one alias row per concept via apply_program_aliases after curriculum
-        # generation), so it must go before the concept too or foreign_keys=ON raises.
-        for c in session.exec(select(Concept).where(Concept.track_id == t.id)).all():
-            est = session.exec(
-                select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == c.id)
-            ).first()
-            if est:
-                session.delete(est)
-            for alias in session.exec(
-                select(ConceptAlias).where(ConceptAlias.concept_id == c.id)
-            ).all():
-                session.delete(alias)
-            session.delete(c)
-        session.delete(t)
+        if track is None:
+            track = old_track
+            track.title = view.title
+            track.overview = view.overview
+            session.add(track)
+            continue
+        owns_concepts = session.exec(
+            select(Concept).where(Concept.track_id == old_track.id)
+        ).first() is not None
+        if not owns_concepts:
+            session.delete(old_track)
     session.commit()
 
-    track = Track(topic_id=topic_id, title=view.title, overview=view.overview)
-    session.add(track)
-    session.commit()
-    session.refresh(track)
+    if track is None:
+        track = Track(topic_id=topic_id, title=view.title, overview=view.overview)
+        session.add(track)
+        session.commit()
+        session.refresh(track)
     for pi, pv in enumerate(view.phases):
         phase = Phase(track_id=track.id, title=pv.title, position=pi,
                       est_hours=pv.est_hours, flags=pv.flags)

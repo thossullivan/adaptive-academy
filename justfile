@@ -6,6 +6,9 @@ install:
 seed:
 	uv run aa seed
 
+graph-backfill:
+	uv run aa graph-backfill
+
 api:
 	uv run uvicorn adaptive_academy.api.app:app --reload --port 8000
 

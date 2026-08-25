@@ -227,11 +227,14 @@ def test_curriculum_import_survives_program_aliases(session):
     r = client.post(f"/api/topics/{topic_id}/curriculum/import", json={"markdown": md})
     assert r.status_code == 200
 
-    # Old concepts (and their aliases) are gone; no IntegrityError was raised.
+    # Import replaces phases only: concepts and their program aliases survive (they are
+    # competence evidence + graph history), and no IntegrityError was raised.
     assert session.exec(
         select(ConceptAlias).where(ConceptAlias.concept_id.in_(old_concept_ids))
-    ).all() == []
-    assert session.exec(select(Concept).where(Concept.id.in_(old_concept_ids))).all() == []
+    ).all()
+    assert len(
+        session.exec(select(Concept).where(Concept.id.in_(old_concept_ids))).all()
+    ) == len(old_concept_ids)
 
 
 def test_program_context_orphaned_link_is_404(session):

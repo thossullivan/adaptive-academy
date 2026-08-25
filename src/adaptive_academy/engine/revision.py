@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine import graph
 from adaptive_academy.engine.aliases import group_level
 from adaptive_academy.engine.fanout import fan_out_with_retry
 from adaptive_academy.engine.gates import evaluate_concept, milestone_load_bearing
@@ -19,6 +20,7 @@ from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
+    Concept,
     ConceptAlias,
     MapChange,
     MapRevision,
@@ -26,6 +28,7 @@ from adaptive_academy.models import (
     Program,
     ProgramIntent,
     ProgramTopicLink,
+    Track,
 )
 from adaptive_academy.prompts import PROGRAM_REVISION
 
@@ -364,6 +367,11 @@ def apply_change(session: Session, program: Program, change: MapChange) -> None:
         session.add(m)
     elif change.kind == "prune_topic":
         link = session.get(ProgramTopicLink, payload["link_id"])
+        concepts = session.exec(select(Concept).join(Track).where(Track.topic_id == link.topic_id)).all()
+        invalidated = graph.invalidate_concept_edges(
+            session, (concept.id for concept in concepts if concept.id is not None))
+        session.add(AgentEvent(program_id=program.id, kind="graph:invalidate",
+                               detail=f"{invalidated} edges, mapchange:{change.id}"))
         link.status = "pruned"
         session.add(link)
     elif change.kind == "prune_milestone":

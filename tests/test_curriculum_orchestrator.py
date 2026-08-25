@@ -7,7 +7,7 @@ from adaptive_academy.engine.curriculum import CurriculumResult, generate_curric
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
-    AgentEvent, Concept, Deliverable, Item, KnowledgeEstimate, Phase, Sidebar,
+    AgentEvent, Concept, ConceptEdge, Deliverable, Item, KnowledgeEstimate, Phase, Sidebar,
     SourceDoc, Topic, TopicFoundation, TopicIntent, Track,
 )
 
@@ -68,6 +68,7 @@ def test_generate_persists_full_track_and_traces(session: Session):
     assert by_name["self-attention"].is_load_bearing is False
     estimates = session.exec(select(KnowledgeEstimate)).all()
     assert len(estimates) == len(concepts) and all(e.level == "high" for e in estimates)
+    assert len(session.exec(select(ConceptEdge)).all()) == 1
 
     # Spaced revisit: linear algebra referenced only in P1 -> injected into a later phase
     items = session.exec(select(Item)).all()
