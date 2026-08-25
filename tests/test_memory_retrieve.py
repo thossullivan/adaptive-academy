@@ -15,6 +15,7 @@ from adaptive_academy.models import (
     Chunk,
     Concept,
     ConceptAlias,
+    ConceptEdge,
     Program,
     Topic,
     Track,
@@ -237,6 +238,51 @@ def test_expand_query_appends_concept_name_and_alias(session):
     expanded = expand_query(session, "transformers", concept_id=concept.id)
 
     assert expanded == "transformers Attention Self Attention"
+
+
+def test_expand_query_appends_up_to_three_neighbor_names_after_alias(session):
+    topic = Topic(title="Graph expansion")
+    program = Program(title="Program")
+    session.add_all([topic, program])
+    session.flush()
+    track = Track(topic_id=topic.id, title="Track")
+    session.add(track)
+    session.flush()
+    concept = Concept(track_id=track.id, name="Attention")
+    neighbor_names = [
+        "Softmax",
+        "Residual Streams",
+        "Layer Normalization",
+        "Optimization",
+    ]
+    neighbors = [Concept(track_id=track.id, name=name) for name in neighbor_names]
+    session.add_all([concept, *neighbors])
+    session.flush()
+    session.add(
+        ConceptAlias(
+            program_id=program.id,
+            concept_id=concept.id,
+            canonical_name="Self Attention",
+        )
+    )
+    session.add_all(
+        ConceptEdge(
+            src_concept_id=concept.id,
+            dst_concept_id=neighbor.id,
+            kind="related",
+            origin="researcher",
+        )
+        for neighbor in neighbors
+    )
+    session.flush()
+
+    expanded = expand_query(session, "transformers", concept_id=concept.id)
+
+    assert expanded == (
+        "transformers Attention Self Attention Softmax Residual Streams "
+        "Layer Normalization"
+    )
+    assert "Optimization" not in expanded
 
 
 def test_expand_links_adds_best_neighbor_below_direct_hits(session):
