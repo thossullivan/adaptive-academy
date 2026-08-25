@@ -131,7 +131,8 @@ def generate_challenge(
     trace_prompt(session, PF_GENERATE, topic_id=topic_id)
     resp = llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[])
     problem = parse_problem_json(resp.text)
-    duplicate = is_near_duplicate(problem, prior_questions)
+    embedder = getattr(retriever, "embedder", None)
+    duplicate = is_near_duplicate(problem, prior_questions, embedder=embedder)
     if duplicate is not None:
         session.add(
             AgentEvent(
@@ -165,6 +166,7 @@ def generate_challenge(
         source_ref=f"productive_failure:{concept.id}:{content_hash(problem)}",
         topic_id=topic_id,
         concept_id=concept.id,
+        retriever=retriever,
     )
     session.commit()
     return problem

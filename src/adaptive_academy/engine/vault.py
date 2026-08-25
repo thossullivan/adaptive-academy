@@ -41,6 +41,7 @@ from adaptive_academy.models import (
 
 if TYPE_CHECKING:
     from adaptive_academy.engine.memory import IndexResult
+    from adaptive_academy.llm.retriever_types import Retriever
 
 # We own this subfolder for exports; ingest skips it to avoid a feedback loop.
 EXPORT_FOLDER = "Adaptive Academy"
@@ -292,6 +293,7 @@ def reindex_vault(
     *,
     subfolder: str = "",
     only_refs: set[str] | None = None,
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index vault note text and wikilinks with one transaction per file.
 
@@ -365,6 +367,7 @@ def reindex_vault(
                 meta=metadata,
                 source_mtime=source_mtime,
                 splitter=split_markdown,
+                retriever=retriever,
             )
             indexed += result.indexed
             skipped += result.skipped

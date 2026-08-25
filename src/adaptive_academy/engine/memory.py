@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import time
 import unicodedata
@@ -11,7 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from adaptive_academy.engine.fetch import fetch_artifact_text
 from adaptive_academy.engine.vault import parse_frontmatter
@@ -35,6 +36,7 @@ from adaptive_academy.models import (
 
 if TYPE_CHECKING:
     from adaptive_academy.engine.levels import Levels
+    from adaptive_academy.llm.embedder_types import Embedder
     from adaptive_academy.llm.retriever_types import Retriever
 
 DEFAULT_K = 6
@@ -52,6 +54,11 @@ CHUNK_TARGET_CHARS = 1200
 MAX_INDEX_CHARS = 2_000_000
 TUTOR_TURN_MIN_CHARS = 200
 NEARDUP_JACCARD = 0.6
+NEARDUP_COSINE = 0.86
+VECTOR_DIM = 384
+HYBRID_CANDIDATE_K = 20
+RRF_K = 60
+HYBRID_FILTER_BATCH = 500
 
 _HEADING_RE = re.compile(r"^(#{1,3})[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$")
 _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
@@ -329,6 +336,7 @@ def index_text(
     meta: dict[str, Any] | None = None,
     source_mtime: float | None = None,
     splitter: Callable[[str], list[Piece]] | None = None,
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Insert or update chunks for one source without committing the session."""
     pieces = (splitter or split_plain)(text)
@@ -339,40 +347,46 @@ def index_text(
     metadata = meta or {}
     indexed = 0
     skipped = 0
+    changed_chunks: list[Chunk] = []
 
     for piece in pieces:
         piece_heading = piece.heading or heading
         piece_hash = content_hash(piece.text)
         existing = existing_by_ordinal.get(piece.ordinal)
+        context = make_context(doc_title, piece_heading)
         if existing is not None and existing.content_hash == piece_hash:
+            embedding_changed = existing.context != context
             existing.kind = kind
             existing.topic_id = topic_id
             existing.concept_id = concept_id
             existing.heading = piece_heading
-            existing.context = make_context(doc_title, piece_heading)
+            existing.context = context
             existing.meta = dict(metadata)
             existing.source_mtime = source_mtime
             session.add(existing)
+            embedder = getattr(retriever, "embedder", None)
+            if embedding_changed or (
+                embedder is not None and existing.embedding_model != embedder.name
+            ):
+                changed_chunks.append(existing)
             skipped += 1
             continue
 
-        context = make_context(doc_title, piece_heading)
         if existing is None:
-            session.add(
-                Chunk(
-                    kind=kind,
-                    topic_id=topic_id,
-                    concept_id=concept_id,
-                    source_ref=source_ref,
-                    ordinal=piece.ordinal,
-                    heading=piece_heading,
-                    text=piece.text,
-                    context=context,
-                    content_hash=piece_hash,
-                    meta=dict(metadata),
-                    source_mtime=source_mtime,
-                )
+            existing = Chunk(
+                kind=kind,
+                topic_id=topic_id,
+                concept_id=concept_id,
+                source_ref=source_ref,
+                ordinal=piece.ordinal,
+                heading=piece_heading,
+                text=piece.text,
+                context=context,
+                content_hash=piece_hash,
+                meta=dict(metadata),
+                source_mtime=source_mtime,
             )
+            session.add(existing)
         else:
             existing.kind = kind
             existing.topic_id = topic_id
@@ -384,11 +398,18 @@ def index_text(
             existing.meta = dict(metadata)
             existing.source_mtime = source_mtime
             session.add(existing)
+        changed_chunks.append(existing)
         indexed += 1
 
     orphans = [chunk for chunk in existing_chunks if chunk.ordinal >= len(pieces)]
     for chunk in orphans:
         session.delete(chunk)
+
+    on_index = getattr(retriever, "on_index", None)
+    if callable(on_index):
+        session.flush()
+        changed_ids = [chunk.id for chunk in changed_chunks if chunk.id is not None]
+        on_index(session, changed_ids)
 
     return IndexResult(indexed=indexed, skipped=skipped, removed=len(orphans))
 
@@ -419,6 +440,7 @@ def index_message(
     concept_id: int,
     topic_id: int,
     levels: Levels | None = None,
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index one persisted learner or tutor conversation message."""
     if msg.id is None:
@@ -432,6 +454,7 @@ def index_message(
             source_ref=source_ref,
             topic_id=topic_id,
             concept_id=concept_id,
+            retriever=retriever,
         )
     if msg.role == "tutor" and len(msg.content) >= TUTOR_TURN_MIN_CHARS:
         metadata = {}
@@ -448,6 +471,7 @@ def index_message(
             topic_id=topic_id,
             concept_id=concept_id,
             meta=metadata,
+            retriever=retriever,
         )
 
     removed = remove_source(session, source_ref)
@@ -520,6 +544,7 @@ def index_question(
     source_ref: str,
     topic_id: int | None,
     concept_id: int | None,
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index one generated question."""
     return index_text(
@@ -529,6 +554,7 @@ def index_question(
         source_ref=source_ref,
         topic_id=topic_id,
         concept_id=concept_id,
+        retriever=retriever,
     )
 
 
@@ -573,6 +599,7 @@ def index_source_doc(
     doc: SourceDoc,
     *,
     fetch: Callable[[str], str | None] = fetch_artifact_text,
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Fetch and index one accepted source without changing the source row."""
     if doc.id is None:
@@ -615,6 +642,7 @@ def index_source_doc(
         source_ref=f"sourcedoc:{doc.id}",
         topic_id=doc.topic_id,
         heading=doc.title,
+        retriever=retriever,
     )
 
 
@@ -673,6 +701,7 @@ def reindex_topic(
     kinds: tuple[str, ...] = REINDEX_KINDS,
     deadline_s: float = REINDEX_DEADLINE_S,
     vault_only_refs: set[str] | None = None,
+    retriever: Retriever | None = None,
 ) -> ReindexResult:
     """Reindex one topic and return partial counts when the deadline expires.
 
@@ -692,7 +721,13 @@ def reindex_topic(
         if time.perf_counter() >= deadline:
             truncated = True
         else:
-            result = reindex_vault(session, topic_id, vault_path, only_refs=vault_only_refs)
+            result = reindex_vault(
+                session,
+                topic_id,
+                vault_path,
+                only_refs=vault_only_refs,
+                retriever=retriever,
+            )
             indexed += result.indexed
             skipped += result.skipped
             removed += result.removed
@@ -710,11 +745,18 @@ def reindex_topic(
             if time.perf_counter() >= deadline:
                 truncated = True
                 break
-            result = index_source_doc(session, doc, fetch=fetch)
+            result = index_source_doc(session, doc, fetch=fetch, retriever=retriever)
             indexed += result.indexed
             skipped += result.skipped
             removed += result.removed
             session.commit()
+
+    _reembed_stale_chunks(
+        session,
+        retriever,
+        topic_id=topic_id,
+        kinds=kinds,
+    )
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     session.add(
@@ -735,6 +777,35 @@ def reindex_topic(
         truncated=truncated,
         ms=elapsed_ms,
     )
+
+
+def _reembed_stale_chunks(
+    session: Session,
+    retriever: Retriever | None,
+    *,
+    topic_id: int,
+    kinds: tuple[str, ...],
+) -> None:
+    """Refresh stale vectors and let the retriever remove deleted vector rows."""
+    on_index = getattr(retriever, "on_index", None)
+    if not callable(on_index):
+        return
+
+    embedder = getattr(retriever, "embedder", None)
+    chunk_ids: list[int] = []
+    if embedder is not None and kinds:
+        chunks = session.exec(
+            select(Chunk).where(
+                Chunk.topic_id == topic_id,
+                col(Chunk.kind).in_(kinds),
+            )
+        ).all()
+        chunk_ids = [
+            chunk.id
+            for chunk in chunks
+            if chunk.id is not None and chunk.embedding_model != embedder.name
+        ]
+    on_index(session, chunk_ids)
 
 
 def jaccard(a: str, b: str) -> float:
@@ -930,12 +1001,39 @@ def is_near_duplicate(
     hits: list[Hit],
     *,
     threshold: float = NEARDUP_JACCARD,
+    embedder: Embedder | None = None,
+    cosine_threshold: float = NEARDUP_COSINE,
 ) -> Hit | None:
-    """Return the first prior chunk meeting the normalized Jaccard threshold."""
+    """Return the first prior chunk meeting the Jaccard or cosine threshold."""
     for hit in hits:
         if jaccard(text, hit.chunk.text) >= threshold:
             return hit
+
+    if embedder is None or not hits:
+        return None
+    try:
+        vectors = embedder.embed([text, *(hit.chunk.text for hit in hits)])
+        if len(vectors) != len(hits) + 1:
+            return None
+        query_vector = vectors[0]
+        for hit, vector in zip(hits, vectors[1:], strict=True):
+            if _cosine_similarity(query_vector, vector) >= cosine_threshold:
+                return hit
+    except Exception:
+        return None
     return None
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b) or not a:
+        return 0.0
+    a_magnitude = math.sqrt(sum(value * value for value in a))
+    b_magnitude = math.sqrt(sum(value * value for value in b))
+    if a_magnitude == 0.0 or b_magnitude == 0.0:
+        return 0.0
+    return sum(left * right for left, right in zip(a, b, strict=True)) / (
+        a_magnitude * b_magnitude
+    )
 
 
 def retrieve(

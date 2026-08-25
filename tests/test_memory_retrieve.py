@@ -331,6 +331,7 @@ def test_get_retriever_accepts_vec_as_hybrid_alias(monkeypatch):
 
     monkeypatch.setattr(deps.settings, "retriever", "vec")
     monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
+    monkeypatch.setattr(deps, "ensure_vec", lambda _engine: False)
     deps.reset_retriever_cache()
 
     assert isinstance(deps.get_retriever(), FtsRetriever)

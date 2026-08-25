@@ -5,7 +5,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AA_", env_file=".env", extra="ignore")
 
     database_url: str = "sqlite:///./adaptive_academy.db"
-    retriever: str = "fts"
+    retriever: str = "hybrid"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
     # Default Obsidian vault path (env AA_OBSIDIAN_VAULT_PATH); API calls may override per-request.
     obsidian_vault_path: str = ""
     # Static frontend build to serve at / (env AA_FRONTEND_DIST). The Docker image
