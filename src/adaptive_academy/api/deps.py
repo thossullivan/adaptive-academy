@@ -1,10 +1,11 @@
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from sqlmodel import Session
 
 from adaptive_academy.db import engine, ensure_fts
+from adaptive_academy.engine.fetch import fetch_artifact_text
 from adaptive_academy.llm.anchor_types import AnchorClient
 from adaptive_academy.llm.anthropic_anchor import AnthropicAnchorClient
 from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
@@ -54,6 +55,11 @@ def get_anchor_client() -> AnchorClient:
         from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
         return AnthropicAnchorClient(llm=AgentSDKLLMClient(role="reasoning"))
     return AnthropicAnchorClient(role="reasoning")
+
+
+def get_fetcher() -> Callable[[str], str | None]:
+    """Return the SSRF-guarded source-document text fetcher."""
+    return fetch_artifact_text
 
 
 def get_retriever() -> Retriever:

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine.fetch import fetch_artifact_text
 from adaptive_academy.engine.vault import parse_frontmatter
 from adaptive_academy.llm.retriever_types import Hit
 from adaptive_academy.models import (
@@ -20,6 +21,9 @@ from adaptive_academy.models import (
     Chunk,
     Concept,
     ConceptAlias,
+    PaperProbe,
+    ProgramTopicLink,
+    SourceDoc,
     Track,
     VaultLink,
 )
@@ -58,6 +62,15 @@ class IndexResult:
     indexed: int
     skipped: int
     removed: int
+
+
+@dataclass(frozen=True)
+class ReindexResult:
+    indexed: int
+    skipped: int
+    removed: int
+    truncated: bool
+    ms: int
 
 
 @dataclass(frozen=True)
@@ -317,6 +330,14 @@ def index_text(
         piece_hash = content_hash(piece.text)
         existing = existing_by_ordinal.get(piece.ordinal)
         if existing is not None and existing.content_hash == piece_hash:
+            existing.kind = kind
+            existing.topic_id = topic_id
+            existing.concept_id = concept_id
+            existing.heading = piece_heading
+            existing.context = make_context(doc_title, piece_heading)
+            existing.meta = dict(metadata)
+            existing.source_mtime = source_mtime
+            session.add(existing)
             skipped += 1
             continue
 
@@ -363,6 +384,171 @@ def remove_source(session: Session, source_ref: str) -> int:
     for chunk in chunks:
         session.delete(chunk)
     return len(chunks)
+
+
+def index_source_doc(
+    session: Session,
+    doc: SourceDoc,
+    *,
+    fetch: Callable[[str], str | None] = fetch_artifact_text,
+) -> IndexResult:
+    """Fetch and index one accepted source without changing the source row."""
+    if doc.id is None:
+        raise ValueError("source document must be flushed before indexing")
+
+    if doc.url.startswith("file://"):
+        vault_chunks = session.exec(
+            select(Chunk).where(
+                Chunk.kind == "vault_note",
+                Chunk.source_ref == doc.url,
+            )
+        ).all()
+        if vault_chunks:
+            return IndexResult(indexed=0, skipped=len(vault_chunks), removed=0)
+
+    try:
+        text = fetch(doc.url)
+    except Exception as exc:
+        _add_memory_event(
+            session,
+            kind="memory:fetch_skipped",
+            detail=f"sourcedoc:{doc.id} {type(exc).__name__}: {exc}",
+            event_target={"topic_id": doc.topic_id},
+        )
+        return IndexResult(indexed=0, skipped=1, removed=0)
+
+    if not text or not text.strip():
+        _add_memory_event(
+            session,
+            kind="memory:fetch_skipped",
+            detail=f"sourcedoc:{doc.id} empty response",
+            event_target={"topic_id": doc.topic_id},
+        )
+        return IndexResult(indexed=0, skipped=1, removed=0)
+
+    return index_text(
+        session,
+        kind="source_doc",
+        text=text,
+        source_ref=f"sourcedoc:{doc.id}",
+        topic_id=doc.topic_id,
+        heading=doc.title,
+    )
+
+
+def index_paper(session: Session, pp: PaperProbe) -> IndexResult:
+    """Index a paper probe under the milestone's first materialized topic."""
+    if pp.id is None:
+        raise ValueError("paper probe must be flushed before indexing")
+
+    topic_id = None
+    links = session.exec(
+        select(ProgramTopicLink)
+        .where(ProgramTopicLink.milestone_id == pp.milestone_id)
+        .order_by(ProgramTopicLink.id)
+    ).all()
+    for link in links:
+        if link.topic_id is not None:
+            topic_id = link.topic_id
+            break
+
+    return index_text(
+        session,
+        kind="paper",
+        text=pp.paper_text,
+        source_ref=f"paperprobe:{pp.id}",
+        doc_title=pp.paper_title,
+        topic_id=topic_id,
+        meta={
+            "arxiv_id": _arxiv_id(pp.paper_url),
+            "url": pp.paper_url,
+            "title": pp.paper_title,
+        },
+        splitter=split_markdown,
+    )
+
+
+def _arxiv_id(url: str) -> str:
+    """New-style arXiv id from an arxiv.org URL; "" for any other host."""
+    from urllib.parse import urlsplit
+
+    from adaptive_academy.engine.paper import _ARXIV_ID_RE
+
+    parts = urlsplit(url or "")
+    host = (parts.hostname or "").lower()
+    if not (host == "arxiv.org" or host.endswith(".arxiv.org")):
+        return ""
+    match = _ARXIV_ID_RE.search(parts.path)
+    return match.group(1) if match else ""
+
+
+def reindex_topic(
+    session: Session,
+    topic_id: int,
+    *,
+    vault_path: str,
+    fetch: Callable[[str], str | None],
+    kinds: tuple[str, ...] = ("vault_note", "source_doc"),
+    deadline_s: float = 60,
+) -> ReindexResult:
+    """Reindex one topic and return partial counts when the deadline expires."""
+    from adaptive_academy.engine.vault import reindex_vault
+
+    started = time.perf_counter()
+    deadline = started + max(deadline_s, 0)
+    indexed = 0
+    skipped = 0
+    removed = 0
+    truncated = False
+    selected = set(kinds)
+
+    if "vault_note" in selected:
+        if time.perf_counter() >= deadline:
+            truncated = True
+        else:
+            result = reindex_vault(session, topic_id, vault_path)
+            indexed += result.indexed
+            skipped += result.skipped
+            removed += result.removed
+
+    if "source_doc" in selected and not truncated:
+        docs = session.exec(
+            select(SourceDoc)
+            .where(
+                SourceDoc.topic_id == topic_id,
+                SourceDoc.status == "accepted",
+            )
+            .order_by(SourceDoc.id)
+        ).all()
+        for doc in docs:
+            if time.perf_counter() >= deadline:
+                truncated = True
+                break
+            result = index_source_doc(session, doc, fetch=fetch)
+            indexed += result.indexed
+            skipped += result.skipped
+            removed += result.removed
+            session.commit()
+
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    session.add(
+        AgentEvent(
+            topic_id=topic_id,
+            kind="memory:reindex_topic",
+            detail=(
+                f"kinds={','.join(kinds)} indexed={indexed} skipped={skipped} "
+                f"removed={removed} truncated={str(truncated).lower()} ms={elapsed_ms}"
+            ),
+        )
+    )
+    session.commit()
+    return ReindexResult(
+        indexed=indexed,
+        skipped=skipped,
+        removed=removed,
+        truncated=truncated,
+        ms=elapsed_ms,
+    )
 
 
 def jaccard(a: str, b: str) -> float:

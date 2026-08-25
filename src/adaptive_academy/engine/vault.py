@@ -5,9 +5,12 @@ honoring local-first (no external services, no data egress). Orchestration that 
 lives in the API layer; this module stays side-effect-light and unit-testable.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlmodel import Session, select
 
@@ -23,6 +26,7 @@ from adaptive_academy.engine.track_markdown import (
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
+    Chunk,
     Concept,
     Deliverable,
     Item,
@@ -32,7 +36,11 @@ from adaptive_academy.models import (
     SourceDoc,
     Topic,
     Track,
+    VaultLink,
 )
+
+if TYPE_CHECKING:
+    from adaptive_academy.engine.memory import IndexResult
 
 # We own this subfolder for exports; ingest skips it to avoid a feedback loop.
 EXPORT_FOLDER = "Adaptive Academy"
@@ -122,6 +130,47 @@ def scan_notes(root: Path, *, skip_dirs: frozenset[str] = frozenset({EXPORT_FOLD
     return out
 
 
+def _frontmatter_list(value: object) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    raw = str(value).strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    values = []
+    for item in raw.split(","):
+        cleaned = item.strip().strip("'\"")
+        if cleaned:
+            values.append(cleaned)
+    return values
+
+
+def _read_index_text(path: Path) -> str:
+    from adaptive_academy.engine.memory import MAX_INDEX_CHARS
+
+    with path.open(encoding="utf-8", errors="strict") as handle:
+        return handle.read(MAX_INDEX_CHARS)
+
+
+def build_title_index(root: Path | str) -> dict[str, str]:
+    """Build a case-folded title and frontmatter-alias map for one vault sweep."""
+    resolved_root = Path(root).resolve()
+    titles: dict[str, str] = {}
+    for path in scan_notes(resolved_root):
+        try:
+            text = _read_index_text(path)
+        except (OSError, UnicodeError):
+            continue
+        frontmatter, _ = parse_frontmatter(text)
+        names = [note_title(text, path.stem), *_frontmatter_list(frontmatter.get("aliases"))]
+        for name in names:
+            key = name.strip().casefold()
+            if key:
+                titles.setdefault(key, path.resolve().as_uri())
+    return titles
+
+
 def safe_vault_dir(path: str) -> Path:
     if not path or not path.strip():
         raise ValueError("vault path is empty")
@@ -199,6 +248,149 @@ class ExportAllResult:
     written: list[str] = field(default_factory=list)
 
 
+def _sync_vault_links(
+    session: Session,
+    source_ref: str,
+    text: str,
+    title_index: dict[str, str],
+) -> None:
+    from adaptive_academy.engine.memory import extract_wikilinks
+
+    desired = [
+        (title_index.get(link.target.casefold(), ""), link.target)
+        for link in extract_wikilinks(text)
+    ]
+    existing = session.exec(
+        select(VaultLink).where(VaultLink.src_ref == source_ref).order_by(VaultLink.id)
+    ).all()
+    current = [(link.dst_ref, link.dst_title) for link in existing]
+    if current == desired:
+        return
+    for link in existing:
+        session.delete(link)
+    for dst_ref, dst_title in desired:
+        session.add(
+            VaultLink(src_ref=source_ref, dst_ref=dst_ref, dst_title=dst_title)
+        )
+
+
+def _remove_vault_source(session: Session, source_ref: str) -> int:
+    from adaptive_academy.engine.memory import remove_source
+
+    removed = remove_source(session, source_ref)
+    for link in session.exec(
+        select(VaultLink).where(VaultLink.src_ref == source_ref)
+    ).all():
+        session.delete(link)
+    return removed
+
+
+def reindex_vault(
+    session: Session,
+    topic_id: int,
+    vault_path: str,
+    *,
+    subfolder: str = "",
+) -> IndexResult:
+    """Index vault note text and wikilinks with one transaction per file."""
+    from adaptive_academy.engine.memory import (
+        IndexResult,
+        content_hash,
+        index_text,
+        make_context,
+        split_markdown,
+    )
+
+    vault = safe_vault_dir(vault_path)
+    root = safe_child(vault, subfolder) if subfolder else vault
+    paths = scan_notes(root)
+    current_refs = {path.resolve().as_uri() for path in paths}
+    title_index = build_title_index(vault)
+    indexed = 0
+    skipped = 0
+    removed = 0
+
+    for path in paths:
+        source_ref = path.resolve().as_uri()
+        try:
+            text = _read_index_text(path)
+            source_mtime = path.stat().st_mtime
+        except (OSError, UnicodeError) as exc:
+            skipped += 1
+            session.add(AgentEvent(
+                topic_id=topic_id, kind="memory:reindex_skipped",
+                detail=f"{source_ref} {type(exc).__name__}"))
+            session.commit()
+            continue
+
+        frontmatter, _ = parse_frontmatter(text)
+        title = note_title(text, path.stem)
+        metadata = {
+            "tags": _frontmatter_list(frontmatter.get("tags")),
+            "aliases": _frontmatter_list(frontmatter.get("aliases")),
+        }
+        pieces = split_markdown(text)
+        existing = session.exec(
+            select(Chunk)
+            .where(Chunk.source_ref == source_ref)
+            .order_by(Chunk.ordinal)
+        ).all()
+        unchanged = len(existing) == len(pieces) and all(
+            chunk.kind == "vault_note"
+            and chunk.topic_id == topic_id
+            and chunk.source_mtime == source_mtime
+            and chunk.content_hash == content_hash(piece.text)
+            and chunk.heading == piece.heading
+            and chunk.context == make_context(title, piece.heading)
+            and chunk.meta == metadata
+            for chunk, piece in zip(existing, pieces, strict=True)
+        )
+        if unchanged:
+            skipped += len(pieces)
+        else:
+            result = index_text(
+                session,
+                kind="vault_note",
+                text=text,
+                source_ref=source_ref,
+                doc_title=title,
+                topic_id=topic_id,
+                meta=metadata,
+                source_mtime=source_mtime,
+                splitter=split_markdown,
+            )
+            indexed += result.indexed
+            skipped += result.skipped
+            removed += result.removed
+        _sync_vault_links(session, source_ref, text, title_index)
+        session.commit()
+
+    root_prefix = root.resolve().as_uri().rstrip("/") + "/"
+    existing_refs = {
+        chunk.source_ref
+        for chunk in session.exec(
+            select(Chunk).where(
+                Chunk.kind == "vault_note",
+                Chunk.topic_id == topic_id,
+            )
+        ).all()
+        if chunk.source_ref.startswith(root_prefix)
+    }
+    for source_ref in sorted(existing_refs - current_refs):
+        removed += _remove_vault_source(session, source_ref)
+        session.commit()
+
+    session.add(
+        AgentEvent(
+            topic_id=topic_id,
+            kind="memory:reindex",
+            detail=f"indexed={indexed} skipped={skipped} removed={removed}",
+        )
+    )
+    session.commit()
+    return IndexResult(indexed=indexed, skipped=skipped, removed=removed)
+
+
 def _track_markdown(session: Session, track: Track) -> str:
     """Build a TrackView from the DB and render it (mirrors the curriculum.md route)."""
     phases = session.exec(
@@ -271,6 +463,7 @@ def ingest_vault(
         session.add(AgentEvent(
             topic_id=topic_id, kind="vault:ingest", detail=f"{len(titles)} note(s) from vault"))
     session.commit()
+    reindex_vault(session, topic_id, vault_path, subfolder=subfolder)
     return IngestResult(count=len(titles), titles=titles)
 
 

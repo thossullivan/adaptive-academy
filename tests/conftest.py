@@ -3,7 +3,14 @@ from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
+from adaptive_academy.api import deps as api_deps
 from adaptive_academy.db import ensure_fts
+
+
+@pytest.fixture(autouse=True)
+def _block_live_source_fetch(monkeypatch):
+    """Keep route tests offline unless they explicitly override the fetch dependency."""
+    monkeypatch.setattr(api_deps, "fetch_artifact_text", lambda _: None)
 
 
 @pytest.fixture

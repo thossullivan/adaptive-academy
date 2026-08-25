@@ -7,6 +7,7 @@ from adaptive_academy.api.schemas import (
     PaperProbeStartIn, PaperQuestionRow, ScorecardRow,
 )
 from adaptive_academy.engine.gates import milestone_load_bearing
+from adaptive_academy.engine.memory import index_paper
 from adaptive_academy.engine.paper import PaperIngestError, ingest_paper
 from adaptive_academy.engine.paper_probe import direct, grade_paper_probe
 from adaptive_academy.llm.types import LLMClient
@@ -68,6 +69,8 @@ def start_paper_probe(program_id: int, milestone_id: int, body: PaperProbeStartI
                     paper_url=body.url or "", paper_text=extract.text, source=extract.source,
                     status="drafting")
     session.add(pp)
+    session.flush()
+    index_paper(session, pp)
     session.commit()
     session.refresh(pp)
     direct(session, pp, llm=llm)

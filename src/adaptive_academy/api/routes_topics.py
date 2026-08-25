@@ -1,10 +1,11 @@
+from collections.abc import Callable
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
 
-from adaptive_academy.api.deps import get_llm, get_researcher, get_session
+from adaptive_academy.api.deps import get_fetcher, get_llm, get_researcher, get_session
 from adaptive_academy.api.schemas import (
     ConceptOut,
     CreateTopicIn,
@@ -27,6 +28,7 @@ from adaptive_academy.api.schemas import (
 from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone_gate
+from adaptive_academy.engine.memory import index_source_doc
 from adaptive_academy.engine.research import research_topic
 from adaptive_academy.engine.revision import revision_suggested
 from adaptive_academy.engine.track_markdown import (
@@ -231,15 +233,21 @@ def review_sources(
     topic_id: int,
     body: ReviewSourcesIn,
     session: Session = Depends(get_session),
+    fetch: Callable[[str], str | None] = Depends(get_fetcher),
 ) -> list[SourceDocOut]:
     rows = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
     by_id = {s.id: s for s in rows}
+    newly_accepted: list[SourceDoc] = []
     for sid in body.accepted_ids:
-        if sid in by_id:
+        if sid in by_id and by_id[sid].status != "accepted":
             by_id[sid].status = "accepted"
+            newly_accepted.append(by_id[sid])
     for sid in body.pruned_ids:
         if sid in by_id:
             by_id[sid].status = "pruned"
+    for source in newly_accepted:
+        if source.status == "accepted":
+            index_source_doc(session, source, fetch=fetch)
     session.commit()
     for s in rows:
         session.refresh(s)
