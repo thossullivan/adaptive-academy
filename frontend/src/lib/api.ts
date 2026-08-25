@@ -1,4 +1,4 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext, MapRevisionInfo, RoleplaySession, RoleplayTurnResult, PaperProbe } from './types';
+import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, MemorySearchResult, MemoryReindexBody, MemoryReindexResult, MemoryStats, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext, MapRevisionInfo, RoleplaySession, RoleplayTurnResult, PaperProbe } from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
@@ -134,6 +134,26 @@ export const api = {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ vault_path })
     }).then(j<VaultExportAllResult>),
+  searchMemory: (
+    q: string,
+    opts: { topic_id?: number; concept_id?: number; kinds?: string[]; k?: number } = {}
+  ) => {
+    const params = new URLSearchParams({ q });
+    if (opts.topic_id != null) params.set('topic_id', String(opts.topic_id));
+    if (opts.concept_id != null) params.set('concept_id', String(opts.concept_id));
+    if (opts.kinds?.length) params.set('kinds', opts.kinds.join(','));
+    if (opts.k != null) params.set('k', String(opts.k));
+    return fetch(`/api/memory/search?${params}`).then(j<MemorySearchResult>);
+  },
+  reindexMemory: (body: MemoryReindexBody) =>
+    fetch('/api/memory/reindex', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(j<MemoryReindexResult>),
+  memoryStats: (topicId?: number) => {
+    const suffix = topicId == null ? '' : `?topic_id=${topicId}`;
+    return fetch(`/api/memory/stats${suffix}`).then(j<MemoryStats>);
+  },
   getFleet: () => fetch('/api/fleet').then(j<WindState[]>),
   getWind: (topicId: number) => fetch(`/api/topics/${topicId}/wind`).then(j<WindState>),
   getComeback: (topicId: number) => fetch(`/api/topics/${topicId}/comeback`).then(j<Comeback>),

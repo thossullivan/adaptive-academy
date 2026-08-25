@@ -2,7 +2,9 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult } from '$lib/types';
+  import { groupByKind, trimSnippet } from '$lib/memory';
+  import { toasts } from '$lib/toast.svelte';
+  import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Input, Badge } from '$lib/ui';
 
@@ -18,11 +20,17 @@
   let exportRes = $state<VaultExportResult | null>(null);
   let exportAllRes = $state<VaultExportAllResult | null>(null);
   let ingestRes = $state<VaultIngestResult | null>(null);
+  let query = $state('');
+  let searchHits = $state<MemoryHit[]>([]);
+  let searching = $state(false);
+  let reindexing = $state(false);
+  let stats = $state<MemoryStats | null>(null);
   let error = $state('');
 
   onMount(() => {
     path = localStorage.getItem(STORE_KEY) ?? '';
     if (path) check();
+    loadStats();
   });
 
   async function check() {
@@ -39,6 +47,48 @@
   }
 
   const ready = $derived(!!status?.is_dir);
+  const searchGroups = $derived(groupByKind(searchHits));
+
+  async function loadStats() {
+    stats = await api.memoryStats(topicId).catch(() => null);
+  }
+
+  async function search() {
+    if (!query.trim() || searching) return;
+    error = '';
+    searching = true;
+    try {
+      const result = await api.searchMemory(query.trim(), { topic_id: topicId });
+      searchHits = result.hits;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      searching = false;
+    }
+  }
+
+  async function reindex() {
+    if (reindexing) return;
+    error = '';
+    reindexing = true;
+    try {
+      const result = await api.reindexMemory({
+        topic_id: topicId,
+        vault_path: path.trim() || undefined
+      });
+      const prefix = result.truncated ? 'Reindex stopped at the time limit' : 'Reindex complete';
+      toasts.show(
+        `${prefix}: ${result.indexed} indexed, ${result.skipped} skipped, ${result.removed} removed.`
+      );
+      await loadStats();
+      if (query.trim()) await search();
+    } catch (e) {
+      error = String(e);
+      toasts.show('Memory reindex failed.', 'error');
+    } finally {
+      reindexing = false;
+    }
+  }
 
   async function runExport() {
     error = '';
@@ -166,6 +216,56 @@
         {/if}
       </Card>
     </div>
+
+    <Card eyebrow="Memory index" title="Search what Adaptive Academy remembers">
+      <form
+        class="flex flex-col gap-2 sm:flex-row"
+        onsubmit={(e) => {
+          e.preventDefault();
+          search();
+        }}
+      >
+        <Input bind:value={query} placeholder="Search vault notes, sources, and prior learning…" />
+        <Button type="submit" size="sm" disabled={searching || !query.trim()}>
+          {searching ? 'Searching…' : 'Search'}
+        </Button>
+        <Button variant="outline" size="sm" onclick={reindex} disabled={!ready || reindexing}>
+          {reindexing ? 'Reindexing…' : 'Reindex'}
+        </Button>
+      </form>
+
+      {#if stats}
+        <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-faint">
+          <Badge mono tone="neutral">{stats.retriever}</Badge>
+          {#each Object.entries(stats.by_kind) as [kind, count] (kind)}
+            <span>{kind.replaceAll('_', ' ')} <span class="nums text-fg-dim">{count}</span></span>
+          {/each}
+        </div>
+      {/if}
+
+      {#if searchGroups.length}
+        <div class="mt-5 flex flex-col gap-5">
+          {#each searchGroups as group (group.kind)}
+            <section>
+              <div class="mb-2 flex items-center gap-2">
+                <Badge mono tone="neutral">{group.kind.replaceAll('_', ' ')}</Badge>
+                <span class="nums text-xs text-faint">{group.hits.length}</span>
+              </div>
+              <ul class="flex flex-col divide-y divide-border rounded-[var(--radius-md)] border border-border bg-surface-2">
+                {#each group.hits as hit (hit.chunk_id)}
+                  <li class="px-4 py-3">
+                    <div class="text-sm font-medium text-fg-dim">{hit.heading || hit.source_ref}</div>
+                    <p class="mt-1 text-xs leading-relaxed text-faint">{trimSnippet(hit.snippet)}</p>
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          {/each}
+        </div>
+      {:else if query.trim() && !searching}
+        <p class="mt-4 text-sm text-faint">No indexed memory matches this search.</p>
+      {/if}
+    </Card>
 
     {#if error}
       <p class="text-sm" style:color="var(--danger)">{error}</p>
