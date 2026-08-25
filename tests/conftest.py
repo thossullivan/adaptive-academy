@@ -3,6 +3,8 @@ from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.pool import StaticPool
 
+from adaptive_academy.db import ensure_fts
+
 
 @pytest.fixture
 def session():
@@ -19,5 +21,6 @@ def session():
         cursor.close()
 
     SQLModel.metadata.create_all(engine)
+    ensure_fts(engine)
     with Session(engine) as s:
         yield s

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, Index, JSON, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -165,6 +165,47 @@ class SourceDoc(SQLModel, table=True):
     status: str = "proposed"  # proposed | accepted | pruned
     added_by: str = "researcher"
     created_at: datetime = Field(default_factory=_now)
+
+
+class Chunk(SQLModel, table=True):
+    """One indexed span of text used for retrieval and deduplication."""
+
+    __table_args__ = (
+        UniqueConstraint("source_ref", "ordinal", name="uq_chunk_source_ref_ordinal"),
+        Index("ix_chunk_kind_topic_id", "kind", "topic_id"),
+        Index("ix_chunk_kind_concept_id", "kind", "concept_id"),
+        Index("ix_chunk_source_ref", "source_ref"),
+        Index("ix_chunk_created_at", "created_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str
+    topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
+    concept_id: Optional[int] = Field(default=None, foreign_key="concept.id")
+    source_ref: str
+    ordinal: int = 0
+    heading: str = ""
+    text: str
+    context: str = ""
+    content_hash: str
+    meta: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    source_mtime: Optional[float] = None
+    embedding_model: Optional[str] = None
+    created_at: datetime = Field(default_factory=_now)
+
+
+class VaultLink(SQLModel, table=True):
+    """One resolved or unresolved wikilink from a vault note."""
+
+    __table_args__ = (
+        Index("ix_vaultlink_src_ref", "src_ref"),
+        Index("ix_vaultlink_dst_ref", "dst_ref"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    src_ref: str
+    dst_ref: str
+    dst_title: str
 
 
 class TopicFoundation(SQLModel, table=True):
