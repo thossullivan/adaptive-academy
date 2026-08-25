@@ -15,7 +15,14 @@ from sqlmodel import Session, select
 
 from adaptive_academy.engine.vault import parse_frontmatter
 from adaptive_academy.llm.retriever_types import Hit
-from adaptive_academy.models import AgentEvent, Chunk, Concept, ConceptAlias, VaultLink
+from adaptive_academy.models import (
+    AgentEvent,
+    Chunk,
+    Concept,
+    ConceptAlias,
+    Track,
+    VaultLink,
+)
 
 if TYPE_CHECKING:
     from adaptive_academy.llm.retriever_types import Retriever
@@ -63,6 +70,20 @@ class ChunkFilter:
     exclude_source_refs: tuple[str, ...] = ()
     since: datetime | None = None
     source_refs: tuple[str, ...] = ()
+
+
+def resolve_chunk_filter(session: Session, where: ChunkFilter) -> ChunkFilter:
+    """Derive a concept's topic when the caller omits the topic filter."""
+    if where.concept_id is None or where.topic_id is not None:
+        return where
+
+    concept = session.get(Concept, where.concept_id)
+    if concept is None:
+        return where
+    track = session.get(Track, concept.track_id)
+    if track is None:
+        return where
+    return replace(where, topic_id=track.topic_id)
 
 
 def normalize(text: str) -> str:
@@ -371,12 +392,15 @@ def retrieve(
             raise ValueError(f"unsupported retrieval order: {order}")
 
         expanded_query = expand_query(session, query, concept_id=concept_id)
-        where = ChunkFilter(
-            kinds=kinds,
-            topic_id=topic_id,
-            concept_id=concept_id,
-            exclude_source_refs=exclude_source_refs,
-            since=since,
+        where = resolve_chunk_filter(
+            session,
+            ChunkFilter(
+                kinds=kinds,
+                topic_id=topic_id,
+                concept_id=concept_id,
+                exclude_source_refs=exclude_source_refs,
+                since=since,
+            ),
         )
         search_k = max(k * 3, 0) if order == "recency" else max(k, 0)
         ranked = retriever.search(session, expanded_query, where=where, k=search_k)
@@ -452,6 +476,7 @@ def _load_ranked_chunks(
     *,
     where: ChunkFilter,
 ) -> list[Hit]:
+    where = resolve_chunk_filter(session, where)
     hits: list[Hit] = []
     seen_ids: set[int] = set()
     for chunk_id, score in ranked:

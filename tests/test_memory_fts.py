@@ -4,6 +4,7 @@ from sqlalchemy import text
 
 from adaptive_academy.engine.memory import ChunkFilter, content_hash, sanitize_fts_query
 from adaptive_academy.llm.fts_retriever import FtsRetriever
+from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
 from adaptive_academy.models import Chunk, Concept, Topic, Track
 
 
@@ -195,3 +196,70 @@ def test_fts_applies_all_filters_before_ranking(session):
         k=10,
     )
     assert [chunk_id for chunk_id, _ in other_topic_hits] == [wrong_topic.id]
+
+
+def test_retrievers_include_exact_since_and_derive_topic_from_concept(session):
+    topic = Topic(title="Concept topic")
+    other_topic = Topic(title="Other topic")
+    session.add_all([topic, other_topic])
+    session.flush()
+    track = Track(topic_id=topic.id, title="Track")
+    session.add(track)
+    session.flush()
+    concept = Concept(track_id=track.id, name="Concept")
+    session.add(concept)
+    session.flush()
+
+    since = datetime(2026, 8, 24, 12, 0, 0, 500000, tzinfo=timezone.utc)
+    exact = _chunk(
+        "retrieval",
+        "source:exact-since",
+        topic_id=topic.id,
+        concept_id=concept.id,
+        created_at=since,
+    )
+    topic_wide = _chunk(
+        "retrieval",
+        "vault:topic-wide",
+        topic_id=topic.id,
+        created_at=since,
+    )
+    too_old = _chunk(
+        "retrieval",
+        "vault:too-old",
+        topic_id=topic.id,
+        created_at=since - timedelta(microseconds=1),
+    )
+    wrong_topic = _chunk(
+        "retrieval",
+        "vault:wrong-topic-exact",
+        topic_id=other_topic.id,
+        created_at=since,
+    )
+    session.add_all([exact, topic_wide, too_old, wrong_topic])
+    session.flush()
+
+    where = ChunkFilter(concept_id=concept.id, since=since)
+    scripted = ScriptedRetriever(
+        {"retrieval": [wrong_topic.id, too_old.id, topic_wide.id, exact.id]}
+    )
+    fts_ids = {
+        chunk_id
+        for chunk_id, _ in FtsRetriever().search(
+            session,
+            "retrieval",
+            where=where,
+            k=10,
+        )
+    }
+    scripted_ids = {
+        chunk_id
+        for chunk_id, _ in scripted.search(
+            session,
+            "retrieval",
+            where=where,
+            k=10,
+        )
+    }
+
+    assert fts_ids == scripted_ids == {exact.id, topic_wide.id}

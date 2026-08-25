@@ -63,8 +63,14 @@ def get_retriever() -> Retriever:
     configured = settings.retriever.strip().lower()
     if configured == "scripted":
         return ScriptedRetriever()
+    if configured == "vec":
+        configured = "hybrid"
     if configured not in {"fts", "hybrid"}:
-        raise ValueError(f"unsupported retriever: {settings.retriever}")
+        _warn_retriever_degradation_once(
+            f"unsupported:{configured}",
+            f"Unsupported retriever {settings.retriever!r}; using FTS5.",
+        )
+        configured = "fts"
     if configured == "hybrid":
         _warn_retriever_degradation_once(
             "hybrid",

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import DateTime, bindparam, text
 from sqlmodel import Session
 
-from adaptive_academy.engine.memory import ChunkFilter, sanitize_fts_query
+from adaptive_academy.engine.memory import (
+    ChunkFilter,
+    resolve_chunk_filter,
+    sanitize_fts_query,
+)
 
 
 class FtsRetriever:
@@ -26,6 +30,7 @@ class FtsRetriever:
         if k <= 0:
             return []
 
+        where = resolve_chunk_filter(session, where)
         clauses: list[str] = []
         parameters: dict[str, Any] = {
             "query": sanitize_fts_query(query),
@@ -84,6 +89,8 @@ class FtsRetriever:
             "ORDER BY rank ASC, chunk_fts.rowid ASC "
             "LIMIT :limit"
         )
+        if where.since is not None:
+            statement = statement.bindparams(bindparam("since", type_=DateTime()))
         rows = session.execute(statement, parameters).all()
         if not rows:
             return []

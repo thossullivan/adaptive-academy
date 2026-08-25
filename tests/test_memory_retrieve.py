@@ -8,6 +8,7 @@ from adaptive_academy.engine.memory import (
     expand_query,
     retrieve,
 )
+from adaptive_academy.llm.fts_retriever import FtsRetriever
 from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
 from adaptive_academy.models import (
     AgentEvent,
@@ -75,6 +76,23 @@ def test_retrieve_deduplicates_caps_and_emits_targeted_event(session):
     assert "k=3 hits=2 links=0" in event.detail
 
 
+def test_retrieve_caps_three_distinct_candidates_to_one(session):
+    chunks = [
+        _chunk(f"distinct {index}", f"vault:{index}")
+        for index in range(3)
+    ]
+    session.add_all(chunks)
+    session.flush()
+    retriever = ScriptedRetriever(
+        {"memory": [chunk.id for chunk in chunks if chunk.id is not None]}
+    )
+
+    hits = retrieve(session, retriever, "memory", k=1)
+
+    assert len(hits) == 1
+    assert hits[0].chunk.id == chunks[0].id
+
+
 def test_retrieve_converts_backend_failure_to_error_event(session):
     topic = Topic(title="Errors")
     session.add(topic)
@@ -114,9 +132,14 @@ def test_scripted_retriever_honors_where(session):
     session.add_all([concept, other_concept])
     session.flush()
 
-    exact = _chunk("memory", "exact", topic_id=topic.id, concept_id=concept.id)
-    topic_wide = _chunk("memory", "topic", topic_id=topic.id)
-    wrong = _chunk("memory", "wrong", topic_id=topic.id, concept_id=other_concept.id)
+    exact = _chunk("memory exact", "exact", topic_id=topic.id, concept_id=concept.id)
+    topic_wide = _chunk("memory topic", "topic", topic_id=topic.id)
+    wrong = _chunk(
+        "memory wrong",
+        "wrong",
+        topic_id=topic.id,
+        concept_id=other_concept.id,
+    )
     session.add_all([exact, topic_wide, wrong])
     session.flush()
 
@@ -134,6 +157,17 @@ def test_scripted_retriever_honors_where(session):
     )
 
     assert [chunk_id for chunk_id, _ in hits] == [topic_wide.id]
+
+    retriever.hits["memory Concept"] = [wrong.id, topic_wide.id, exact.id]
+    concept_only_hits = retrieve(
+        session,
+        retriever,
+        "memory",
+        concept_id=concept.id,
+        k=10,
+    )
+
+    assert [hit.chunk.id for hit in concept_only_hits] == [topic_wide.id, exact.id]
 
 
 def test_retrieve_recency_and_since(session):
@@ -217,11 +251,47 @@ def test_expand_links_adds_best_neighbor_below_direct_hits(session):
 
 
 def test_retriever_setting_uses_aa_environment(monkeypatch):
-    monkeypatch.setenv("AA_RETRIEVER", "scripted")
+    from adaptive_academy.api import deps
 
+    monkeypatch.setenv("AA_RETRIEVER", "scripted")
     configured = Settings(_env_file=None)
+    monkeypatch.setattr(deps, "settings", configured)
+
+    def fail_if_called(_engine):
+        raise AssertionError("scripted retrieval must not inspect the engine")
+
+    monkeypatch.setattr(deps, "ensure_fts", fail_if_called)
 
     assert configured.retriever == "scripted"
+    assert isinstance(deps.get_retriever(), ScriptedRetriever)
+
+
+def test_get_retriever_accepts_vec_as_hybrid_alias(monkeypatch):
+    from adaptive_academy.api import deps
+
+    monkeypatch.setattr(deps.settings, "retriever", "vec")
+    monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
+
+    assert isinstance(deps.get_retriever(), FtsRetriever)
+
+
+def test_get_retriever_warns_once_and_uses_fts_for_unknown_value(
+    monkeypatch,
+    caplog,
+):
+    from adaptive_academy.api import deps
+
+    monkeypatch.setattr(deps.settings, "retriever", "unknown")
+    monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
+    monkeypatch.setattr(deps, "_logged_retriever_degradations", set())
+
+    with caplog.at_level("WARNING"):
+        first = deps.get_retriever()
+        second = deps.get_retriever()
+
+    assert isinstance(first, FtsRetriever)
+    assert isinstance(second, FtsRetriever)
+    assert caplog.messages.count("Unsupported retriever 'unknown'; using FTS5.") == 1
 
 
 def test_get_retriever_degrades_to_scripted_without_fts(monkeypatch):

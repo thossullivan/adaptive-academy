@@ -7,7 +7,7 @@ import re
 from sqlalchemy import and_, or_
 from sqlmodel import Session, col, select
 
-from adaptive_academy.engine.memory import ChunkFilter
+from adaptive_academy.engine.memory import ChunkFilter, resolve_chunk_filter
 from adaptive_academy.models import Chunk
 
 _TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
@@ -32,6 +32,7 @@ class ScriptedRetriever:
         if k <= 0:
             return []
 
+        where = resolve_chunk_filter(session, where)
         statement = select(Chunk)
         if where.kinds:
             statement = statement.where(col(Chunk.kind).in_(where.kinds))
