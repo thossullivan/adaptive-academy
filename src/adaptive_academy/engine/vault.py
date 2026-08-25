@@ -41,6 +41,7 @@ from adaptive_academy.models import (
 
 if TYPE_CHECKING:
     from adaptive_academy.engine.memory import IndexResult
+    from adaptive_academy.llm.retriever_types import Retriever
 
 # We own this subfolder for exports; ingest skips it to avoid a feedback loop.
 EXPORT_FOLDER = "Adaptive Academy"
@@ -292,6 +293,7 @@ def reindex_vault(
     *,
     subfolder: str = "",
     only_refs: set[str] | None = None,
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index vault note text and wikilinks with one transaction per file.
 
@@ -365,6 +367,7 @@ def reindex_vault(
                 meta=metadata,
                 source_mtime=source_mtime,
                 splitter=split_markdown,
+                retriever=retriever,
             )
             indexed += result.indexed
             skipped += result.skipped
@@ -447,7 +450,12 @@ def _concept_verdict_summary(session: Session, concept: Concept) -> tuple[str, s
 
 
 def ingest_vault(
-    session: Session, topic_id: int, vault_path: str, *, subfolder: str = ""
+    session: Session,
+    topic_id: int,
+    vault_path: str,
+    *,
+    subfolder: str = "",
+    retriever: Retriever | None = None,
 ) -> IngestResult:
     """Scan a vault for markdown notes and register them as `proposed` SourceDocs for the topic.
     Already-ingested notes (same file URL) are skipped, so re-running is safe."""
@@ -472,7 +480,13 @@ def ingest_vault(
         session.add(AgentEvent(
             topic_id=topic_id, kind="vault:ingest", detail=f"{len(titles)} note(s) from vault"))
     session.commit()
-    reindex_vault(session, topic_id, vault_path, subfolder=subfolder)
+    reindex_vault(
+        session,
+        topic_id,
+        vault_path,
+        subfolder=subfolder,
+        retriever=retriever,
+    )
     return IngestResult(count=len(titles), titles=titles)
 
 

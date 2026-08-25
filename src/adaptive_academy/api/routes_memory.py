@@ -96,6 +96,7 @@ def reindex_memory(
     body: MemoryReindexIn,
     session: Session = Depends(get_session),
     fetch: Callable[[str], str | None] = Depends(get_fetcher),
+    retriever: Retriever = Depends(get_retriever),
 ) -> MemoryReindexOut:
     kinds = REINDEX_KINDS if body.kinds is None else _parse_kinds(body.kinds)
     unsupported_kinds = sorted(set(kinds) - set(REINDEX_KINDS))
@@ -157,6 +158,7 @@ def reindex_memory(
                 kinds=topic_kinds,
                 deadline_s=remaining,
                 vault_only_refs=only_refs,
+                retriever=retriever,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc

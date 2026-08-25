@@ -90,6 +90,7 @@ def run_tutor_turn_sdk(
         user_message,
         concept_id=convo.concept_id,
         topic_id=convo.topic_id,
+        retriever=retriever,
     )
     session.commit()
     session.refresh(convo)
@@ -159,6 +160,7 @@ def run_tutor_turn_sdk(
         concept_id=convo.concept_id,
         topic_id=convo.topic_id,
         levels=levels,
+        retriever=retriever,
     )
     session.commit()
     return TurnResult(reply=reply, events=events, memory=memory_hits)

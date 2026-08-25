@@ -249,6 +249,7 @@ def review_sources(
     body: ReviewSourcesIn,
     session: Session = Depends(get_session),
     fetch: Callable[[str], str | None] = Depends(get_fetcher),
+    retriever: Retriever = Depends(get_retriever),
 ) -> list[SourceDocOut]:
     rows = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
     by_id = {s.id: s for s in rows}
@@ -262,7 +263,7 @@ def review_sources(
             by_id[sid].status = "pruned"
     for source in newly_accepted:
         if source.status == "accepted":
-            index_source_doc(session, source, fetch=fetch)
+            index_source_doc(session, source, fetch=fetch, retriever=retriever)
     session.commit()
     for s in rows:
         session.refresh(s)

@@ -1,10 +1,16 @@
 from collections.abc import Iterator
+import sqlite3
 
 from sqlalchemy import Engine, event
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlmodel import Session, SQLModel, create_engine
 
 from adaptive_academy.settings import settings
+
+try:
+    import sqlite_vec
+except ImportError:
+    sqlite_vec = None
 
 engine = create_engine(
     settings.database_url,
@@ -55,6 +61,7 @@ def _set_sqlite_pragma(dbapi_connection, _):
 def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
     ensure_fts(engine)
+    ensure_vec(engine)
 
 
 def ensure_fts(db_engine: Engine) -> bool:
@@ -69,8 +76,40 @@ def ensure_fts(db_engine: Engine) -> bool:
 
 
 def ensure_vec(db_engine: Engine) -> bool:
-    """Return vector-index availability after Task 9 implements setup."""
-    return False
+    """Load sqlite-vec and create its chunk vector table when available."""
+    if sqlite_vec is None:
+        return False
+
+    newly_registered = not event.contains(db_engine, "connect", _load_vec_extension)
+    if newly_registered:
+        event.listen(db_engine, "connect", _load_vec_extension)
+    try:
+        with db_engine.begin() as connection:
+            raw_connection = connection.connection.driver_connection
+            _load_vec_extension(raw_connection, None)
+            connection.exec_driver_sql(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec "
+                "USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[384])"
+            )
+            connection.exec_driver_sql(
+                "CREATE TRIGGER IF NOT EXISTS chunk_vec_ad AFTER DELETE ON chunk BEGIN "
+                "DELETE FROM chunk_vec WHERE chunk_id = old.id; END"
+            )
+    except (AttributeError, OSError, sqlite3.Error, SQLAlchemyError):
+        if newly_registered:
+            event.remove(db_engine, "connect", _load_vec_extension)
+        return False
+    return True
+
+
+def _load_vec_extension(dbapi_connection, _) -> None:
+    if sqlite_vec is None:
+        return
+    dbapi_connection.enable_load_extension(True)
+    try:
+        sqlite_vec.load(dbapi_connection)
+    finally:
+        dbapi_connection.enable_load_extension(False)
 
 
 def get_session() -> Iterator[Session]:

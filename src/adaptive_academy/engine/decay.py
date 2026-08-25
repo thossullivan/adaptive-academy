@@ -15,6 +15,7 @@ from sqlmodel import Session, select
 
 from adaptive_academy.engine.assess import assess_concept
 from adaptive_academy.engine.memory import index_question, topic_id_for_concept
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import Assessment, Concept, RecallPrompt, Track
 from adaptive_academy.prompts import DECAY_RECALL
@@ -43,7 +44,13 @@ class DecayResult:
     held: bool
 
 
-def schedule_decay_check(session: Session, concept_id: int, *, days: int = 3) -> RecallPrompt:
+def schedule_decay_check(
+    session: Session,
+    concept_id: int,
+    *,
+    days: int = 3,
+    retriever: Retriever | None = None,
+) -> RecallPrompt:
     """Schedule (or push out) a delayed recall probe for a concept. Idempotent: one active
     prompt per concept; fresh engagement re-arms its due date."""
     due = _now_naive() + timedelta(days=days)
@@ -63,6 +70,7 @@ def schedule_decay_check(session: Session, concept_id: int, *, days: int = 3) ->
             source_ref=f"recallprompt:{existing.id}",
             topic_id=topic_id,
             concept_id=concept_id,
+            retriever=retriever,
         )
         session.commit()
         session.refresh(existing)
@@ -81,6 +89,7 @@ def schedule_decay_check(session: Session, concept_id: int, *, days: int = 3) ->
         source_ref=f"recallprompt:{prompt.id}",
         topic_id=topic_id,
         concept_id=concept_id,
+        retriever=retriever,
     )
     session.commit()
     session.refresh(prompt)

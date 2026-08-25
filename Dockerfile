@@ -15,11 +15,11 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 
 # Dependencies first (cache-friendly), project second.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --extra memory
 COPY src ./src
 COPY alembic ./alembic
 COPY alembic.ini ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra memory
 
 COPY --from=frontend /fe/build ./frontend/build
 COPY docker/entrypoint.sh /entrypoint.sh

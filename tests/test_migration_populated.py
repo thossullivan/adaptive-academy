@@ -9,6 +9,7 @@ revision, then upgrades to head — reproducing the exact prod condition.
 """
 
 import subprocess
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,10 +17,16 @@ PRIOR_REVISION = "5e252d8109c0"  # program-layer head, before map-revision
 
 
 def _alembic(db_url: str, *args: str) -> subprocess.CompletedProcess:
+    environment = {
+        "PATH": os.environ["PATH"],
+        "AA_DATABASE_URL": db_url,
+    }
+    if cache_dir := os.environ.get("UV_CACHE_DIR"):
+        environment["UV_CACHE_DIR"] = cache_dir
     return subprocess.run(
-        ["uv", "run", "alembic", *args],
+        ["uv", "run", "--offline", "alembic", *args],
         cwd=REPO_ROOT,
-        env={"PATH": __import__("os").environ["PATH"], "AA_DATABASE_URL": db_url},
+        env=environment,
         capture_output=True,
         text=True,
     )

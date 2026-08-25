@@ -91,7 +91,12 @@ def direct(
     resp = llm.complete(system=ROLEPLAY_DIRECTOR,
                         messages=[{"role": "user", "content": user}], tools=[])
     brief = json.loads(extract_json(resp.text))
-    duplicate = is_near_duplicate(str(brief.get("situation", "")), prior_questions)
+    embedder = getattr(retriever, "embedder", None)
+    duplicate = is_near_duplicate(
+        str(brief.get("situation", "")),
+        prior_questions,
+        embedder=embedder,
+    )
     if duplicate is not None:
         _emit(
             session,
@@ -123,6 +128,7 @@ def direct(
         source_ref=f"roleplaysession:{rp.id}#opening",
         topic_id=topic_id,
         concept_id=concept_ids[0] if len(concept_ids) == 1 else None,
+        retriever=retriever,
     )
     session.commit()
     session.refresh(rp)

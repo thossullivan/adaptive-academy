@@ -4,12 +4,13 @@ from collections.abc import Callable, Iterator
 
 from sqlmodel import Session
 
-from adaptive_academy.db import engine, ensure_fts
+from adaptive_academy.db import engine, ensure_fts, ensure_vec
 from adaptive_academy.engine.fetch import fetch_artifact_text
 from adaptive_academy.llm.anchor_types import AnchorClient
 from adaptive_academy.llm.anthropic_anchor import AnthropicAnchorClient
 from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
 from adaptive_academy.llm.anthropic_researcher import AnthropicResearcherClient
+from adaptive_academy.llm.embedder_types import Embedder
 from adaptive_academy.llm.researcher_types import ResearcherClient
 from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
@@ -18,6 +19,8 @@ from adaptive_academy.settings import settings
 logger = logging.getLogger(__name__)
 _logged_retriever_degradations: set[str] = set()
 _fts_available: bool | None = None
+_vec_available: bool | None = None
+_embedder: Embedder | None = None
 
 
 def use_agent_sdk() -> bool:
@@ -62,6 +65,23 @@ def get_fetcher() -> Callable[[str], str | None]:
     return fetch_artifact_text
 
 
+def get_embedder() -> Embedder:
+    """Resolve the deterministic test embedder or the local ONNX embedder."""
+    global _embedder
+    if _embedder is not None:
+        return _embedder
+    if settings.retriever.strip().lower() == "scripted":
+        from adaptive_academy.llm.scripted_embedder import ScriptedEmbedder
+
+        _embedder = ScriptedEmbedder()
+        return _embedder
+
+    from adaptive_academy.llm.onnx_embedder import OnnxEmbedder
+
+    _embedder = OnnxEmbedder()
+    return _embedder
+
+
 def get_retriever() -> Retriever:
     """Resolve the configured local retriever with safe staged fallbacks."""
     from adaptive_academy.llm.fts_retriever import FtsRetriever
@@ -78,27 +98,45 @@ def get_retriever() -> Retriever:
             f"Unsupported retriever {settings.retriever!r}; using FTS5.",
         )
         configured = "fts"
-    if configured == "hybrid":
-        _warn_retriever_degradation_once(
-            "hybrid",
-            "Hybrid retrieval is not available yet; using FTS5.",
-        )
     global _fts_available
     if _fts_available is None:
         _fts_available = ensure_fts(engine)
-    if _fts_available:
-        return FtsRetriever()
+    if not _fts_available:
+        _warn_retriever_degradation_once(
+            "fts",
+            "FTS5 is unavailable; using scripted token-overlap retrieval.",
+        )
+        return ScriptedRetriever()
+
+    fts = FtsRetriever()
+    if configured == "fts":
+        return fts
+
+    global _vec_available
+    if _vec_available is None:
+        _vec_available = ensure_vec(engine)
+    if _vec_available:
+        try:
+            embedder = get_embedder()
+            from adaptive_academy.llm.hybrid_retriever import HybridRetriever
+
+            return HybridRetriever(fts, embedder)
+        except (ImportError, ValueError):
+            pass
+
     _warn_retriever_degradation_once(
-        "fts",
-        "FTS5 is unavailable; using scripted token-overlap retrieval.",
+        "hybrid",
+        "Hybrid retrieval is unavailable; using FTS5.",
     )
-    return ScriptedRetriever()
+    return fts
 
 
 def reset_retriever_cache() -> None:
-    """Clear the cached FTS5 availability result."""
-    global _fts_available
+    """Clear the cached FTS5 and sqlite-vec availability results."""
+    global _embedder, _fts_available, _vec_available
+    _embedder = None
     _fts_available = None
+    _vec_available = None
 
 
 def _warn_retriever_degradation_once(key: str, message: str) -> None:

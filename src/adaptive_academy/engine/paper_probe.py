@@ -64,9 +64,10 @@ def direct(
                         messages=[{"role": "user", "content": user}], tools=[])
     data = json.loads(extract_json(resp.text))
     rejected: list[str] = []
+    embedder = getattr(retriever, "embedder", None)
     for question in data.get("questions", []):
         prompt = str(question.get("prompt", ""))
-        duplicate = is_near_duplicate(prompt, prior_questions)
+        duplicate = is_near_duplicate(prompt, prior_questions, embedder=embedder)
         if duplicate is None:
             continue
         rejected.append(prompt)
@@ -120,6 +121,7 @@ def direct(
                 if len(question_concept_ids) == 1
                 else None
             ),
+            retriever=retriever,
         )
     session.commit()
     session.refresh(pp)
