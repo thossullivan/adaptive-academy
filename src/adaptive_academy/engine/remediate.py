@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from sqlmodel import Session, select
 
 from adaptive_academy.engine import graph
+from adaptive_academy.engine.assess import level_from_score
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import REMEDIATE
@@ -13,7 +14,6 @@ from adaptive_academy.models import (
     Assessment,
     Concept,
     Item,
-    KnowledgeEstimate,
     Phase,
     SourceDoc,
     TopicFoundation,
@@ -186,32 +186,21 @@ def remediate_concept(session: Session, concept: Concept, *,
     if not phases:
         raise RemediationError("track has no phases to remediate into")
 
-    estimate = session.exec(
-        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
-    level = estimate.level if estimate else "high"
+    level = level_from_score(assessment.score)[0]
     ancestor_name = ""
     ancestor_target: tuple[list[Phase], int] | None = None
     weakest = graph.weakest_ancestor(session, concept.id)
     if weakest is not None:
         ancestor = session.get(Concept, weakest[0])
-        ancestor_estimate = session.exec(
-            select(KnowledgeEstimate).where(
-                KnowledgeEstimate.concept_id == weakest[0]
-            )
-        ).first()
-        ancestor_level = ancestor_estimate.level if ancestor_estimate else None
-        target_rank = graph.LEVEL_ORDER.get(level, len(graph.LEVEL_ORDER))
-        ancestor_rank = (
-            graph.LEVEL_ORDER.get(ancestor_level, -1)
-            if ancestor_level is not None
-            else -1
-        )
-        if ancestor is not None and ancestor_rank < target_rank:
+        ancestor_level = level_from_score(weakest[1])[0]
+        target_strength = (graph.LEVEL_ORDER[level], assessment.score)
+        ancestor_strength = (graph.LEVEL_ORDER[ancestor_level], weakest[1])
+        if ancestor is not None and ancestor_strength < target_strength:
             ancestor_name = ancestor.name
             ancestor_target = _earliest_concept_phase(session, ancestor)
             emit(
                 "remediate:ancestor",
-                f"{ancestor.name} (concept {ancestor.id}, level {ancestor_level or 'unknown'})",
+                f"{ancestor.name} (concept {ancestor.id}, level {ancestor_level})",
             )
     foundation = session.exec(
         select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)).first()

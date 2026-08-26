@@ -123,6 +123,68 @@ def test_reindex_vault_skips_non_utf8_and_emits_event(session, tmp_path):
     assert skipped_events[0].detail.endswith("invalid.md UnicodeDecodeError")
 
 
+def test_reindex_vault_skips_outside_file_symlink_and_indexes_normal_note(
+    session,
+    tmp_path,
+):
+    topic = _topic(session)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text("# Secret\n\nOutside vault text.", encoding="utf-8")
+    leaked = vault / "leaked.md"
+    leaked.symlink_to(outside)
+    normal = vault / "normal.md"
+    normal.write_text("# Normal\n\nInside vault text.", encoding="utf-8")
+
+    result = reindex_vault(session, topic.id, str(vault))
+
+    chunks = session.exec(select(Chunk).where(Chunk.kind == "vault_note")).all()
+    assert result.indexed == 1
+    assert result.skipped == 1
+    assert [chunk.source_ref for chunk in chunks] == [normal.resolve().as_uri()]
+    skipped_events = session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:reindex_skipped")
+    ).all()
+    assert len(skipped_events) == 1
+    assert skipped_events[0].detail == (
+        f"{leaked.absolute().as_uri()} outside-vault-or-symlink"
+    )
+
+
+def test_ingest_vault_does_not_follow_symlinked_directory(session, tmp_path):
+    topic = _topic(session)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    (outside_dir / "secret.md").write_text(
+        "# Secret\n\nOutside directory text.",
+        encoding="utf-8",
+    )
+    linked_dir = vault / "linked"
+    linked_dir.symlink_to(outside_dir, target_is_directory=True)
+    normal = vault / "normal.md"
+    normal.write_text("# Normal\n\nInside vault text.", encoding="utf-8")
+
+    result = ingest_vault(session, topic.id, str(vault))
+
+    assert result.count == 1
+    assert [doc.url for doc in session.exec(select(SourceDoc)).all()] == [
+        normal.resolve().as_uri()
+    ]
+    assert [chunk.source_ref for chunk in session.exec(select(Chunk)).all()] == [
+        normal.resolve().as_uri()
+    ]
+    skipped_events = session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:reindex_skipped")
+    ).all()
+    assert len(skipped_events) == 1
+    assert skipped_events[0].detail == (
+        f"{linked_dir.absolute().as_uri()} outside-vault-or-symlink"
+    )
+
+
 def test_ingest_vault_registers_and_indexes_source_docs(session, tmp_path):
     topic = _topic(session)
     note = tmp_path / "note.md"
@@ -153,3 +215,34 @@ def test_unchanged_reindex_of_200_notes_is_fast(session, tmp_path):
     assert second.indexed == 0
     assert second.skipped == 200
     assert elapsed < 2
+
+
+def test_explicit_topic_reindex_preserves_note_owned_by_another_topic(
+    session,
+    tmp_path,
+):
+    first_topic = _topic(session)
+    second_topic = Topic(title="Second owner")
+    session.add(second_topic)
+    session.commit()
+    session.refresh(second_topic)
+    note = tmp_path / "owned.md"
+    note.write_text("# Owned\n\nKeep the first owner.", encoding="utf-8")
+    seeded = reindex_vault(session, first_topic.id, str(tmp_path))
+    assert seeded.indexed == 1
+
+    result = reindex_vault(session, second_topic.id, str(tmp_path))
+
+    chunk = session.exec(
+        select(Chunk).where(Chunk.source_ref == note.resolve().as_uri())
+    ).one()
+    assert result.indexed == 0
+    assert result.skipped == 1
+    assert chunk.topic_id == first_topic.id
+    event = session.exec(
+        select(AgentEvent).where(
+            AgentEvent.kind == "memory:reindex_owned_elsewhere",
+            AgentEvent.topic_id == second_topic.id,
+        )
+    ).one()
+    assert event.detail == note.resolve().as_uri()

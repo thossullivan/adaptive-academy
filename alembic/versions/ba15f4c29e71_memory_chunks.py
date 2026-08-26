@@ -5,6 +5,8 @@ Revises: d3b9f1c274ae
 Create Date: 2026-08-25
 """
 
+import sqlite3
+
 import sqlalchemy as sa
 from alembic import op
 
@@ -62,6 +64,23 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # sqlite-vec virtual tables require the optional extension during DROP. Hosts
+    # without it skip these objects; ensure_vec removes stale rows after re-upgrade.
+    try:
+        import sqlite_vec
+
+        connection = op.get_bind()
+        raw_connection = connection.connection.driver_connection
+        raw_connection.enable_load_extension(True)
+        try:
+            sqlite_vec.load(raw_connection)
+        finally:
+            raw_connection.enable_load_extension(False)
+    except (ImportError, AttributeError, OSError, sqlite3.Error):
+        pass
+    else:
+        op.execute("DROP TRIGGER IF EXISTS chunk_vec_ad")
+        op.execute("DROP TABLE IF EXISTS chunk_vec")
     op.execute("DROP TRIGGER IF EXISTS chunk_au")
     op.execute("DROP TRIGGER IF EXISTS chunk_ad")
     op.execute("DROP TRIGGER IF EXISTS chunk_ai")

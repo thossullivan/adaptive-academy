@@ -86,6 +86,7 @@ uv sync --extra memory        # optional: sqlite-vec + fastembed for hybrid (BM2
 > **Hybrid retrieval** needs the `memory` extra. The `bge-small` embedding model (~130 MB)
 > downloads once into `AA_EMBEDDING_CACHE_DIR` (the container keeps it on the data volume).
 > Without the extra, retrieval is FTS5/BM25 only — everything still works.
+> Set `AA_EMBEDDING_ALLOW_DOWNLOAD=false` on strict offline hosts to require a cached model.
 
 > Hybrid memory needs `uv sync --extra memory`. Compose caches the model at
 > `/data/fastembed_cache`. The download happens once per `aa-data` volume.

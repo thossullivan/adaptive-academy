@@ -126,19 +126,14 @@ def test_neighbors_honors_edge_kinds(session):
     assert neighbors(session, a.id, kinds=("alias",)) == [f.id]
 
 
-def test_weakest_ancestor_orders_level_before_latest_score(session):
-    a, b, c, d, e, f = _six_node_graph(session)
-    session.add(KnowledgeEstimate(concept_id=b.id, level="low"))
-    session.add(KnowledgeEstimate(concept_id=c.id, level="medium"))
-    session.add(KnowledgeEstimate(concept_id=d.id, level="high"))
-    session.add(KnowledgeEstimate(concept_id=e.id, level="high"))
-    session.add(KnowledgeEstimate(concept_id=f.id, level="high"))
+def test_weakest_ancestor_orders_assessment_level_before_latest_score(session):
+    a, b, c, _d, _e, _f = _six_node_graph(session)
     session.add(
         Assessment(
             concept_id=b.id,
             kind="self_explanation",
             prompt="earlier",
-            score=0.2,
+            score=0.9,
         )
     )
     session.add(
@@ -146,7 +141,7 @@ def test_weakest_ancestor_orders_level_before_latest_score(session):
             concept_id=b.id,
             kind="self_explanation",
             prompt="latest",
-            score=0.9,
+            score=0.2,
         )
     )
     session.add(
@@ -154,25 +149,32 @@ def test_weakest_ancestor_orders_level_before_latest_score(session):
             concept_id=c.id,
             kind="self_explanation",
             prompt="latest",
-            score=0.1,
+            score=0.6,
         )
     )
     session.flush()
 
-    assert weakest_ancestor(session, a.id) == (b.id, 0.9)
+    assert weakest_ancestor(session, a.id) == (b.id, 0.2)
 
 
-def test_weakest_ancestor_treats_missing_estimate_as_weakest(session):
-    _, (target, estimated, unestimated) = _track(
+def test_weakest_ancestor_excludes_unassessed_default_high_estimate(session):
+    _, (target, unassessed) = _track(
         session,
-        ["Target", "Estimated", "Unestimated"],
+        ["Target", "Unassessed prerequisite"],
     )
-    _edge(session, target, estimated)
-    _edge(session, target, unestimated)
-    session.add(KnowledgeEstimate(concept_id=estimated.id, level="high"))
+    _edge(session, target, unassessed)
+    session.add(KnowledgeEstimate(concept_id=unassessed.id, level="high"))
+    session.add(
+        Assessment(
+            concept_id=target.id,
+            kind="self_explanation",
+            prompt="latest",
+            score=0.6,
+        )
+    )
     session.flush()
 
-    assert weakest_ancestor(session, target.id) == (unestimated.id, 0.0)
+    assert weakest_ancestor(session, target.id) is None
 
 
 def test_frontier_returns_only_verified_concepts_with_outside_neighbors(session):

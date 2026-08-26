@@ -167,9 +167,9 @@ the Program page exactly like a revision-added topic. Dismiss → `status="dismi
 Both emit `AgentEvent(program_id=...)`.
 
 "Solid" for the frontier means `gates.evaluate_concept(...)` returns a passing
-`ConceptEvidence` (same rule the milestone gate uses); "weakest" for `weakest_ancestor`
-orders by `KnowledgeEstimate.level` (`low < medium < high`) then by the latest
-`Assessment.score`.
+`ConceptEvidence` (same rule the milestone gate uses). `weakest_ancestor` excludes
+unassessed ancestors and orders assessed ancestors by the latest `Assessment` score's
+derived level (`low < medium < high`), then by that score.
 
 ## API
 

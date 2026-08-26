@@ -11,6 +11,7 @@ from adaptive_academy.engine.memory import (
     ReindexResult,
     index_paper,
     index_source_doc,
+    index_text,
     reindex_topic,
 )
 from adaptive_academy.engine.paper import PaperExtract
@@ -193,6 +194,63 @@ def test_review_sources_indexes_only_newly_accepted_docs(session):
     assert session.exec(
         select(Chunk).where(Chunk.source_ref == f"sourcedoc:{doc.id}")
     ).one()
+
+
+def test_review_sources_prune_removes_accepted_source_chunks(session):
+    doc = _source_doc(session)
+    doc.status = "proposed"
+    session.add(doc)
+    session.commit()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_fetcher] = lambda: lambda _: "Fetched source text."
+    client = TestClient(app)
+
+    accepted = client.post(
+        f"/api/topics/{doc.topic_id}/sources/review",
+        json={"accepted_ids": [doc.id], "pruned_ids": []},
+    )
+    assert accepted.status_code == 200
+    assert session.exec(
+        select(Chunk).where(Chunk.source_ref == f"sourcedoc:{doc.id}")
+    ).one()
+
+    pruned = client.post(
+        f"/api/topics/{doc.topic_id}/sources/review",
+        json={"accepted_ids": [], "pruned_ids": [doc.id]},
+    )
+
+    assert pruned.status_code == 200
+    assert not session.exec(
+        select(Chunk).where(Chunk.source_ref == f"sourcedoc:{doc.id}")
+    ).all()
+
+
+def test_reindex_topic_removes_stale_chunk_for_nonaccepted_source(session):
+    doc = _source_doc(session)
+    doc.status = "pruned"
+    session.add(doc)
+    index_text(
+        session,
+        kind="source_doc",
+        text="Stale source text.",
+        source_ref=f"sourcedoc:{doc.id}",
+        topic_id=doc.topic_id,
+    )
+    session.commit()
+
+    result = reindex_topic(
+        session,
+        doc.topic_id,
+        vault_path="",
+        fetch=lambda _: pytest.fail("non-accepted sources must not be fetched"),
+        kinds=("source_doc",),
+    )
+
+    assert result.removed == 1
+    assert not session.exec(
+        select(Chunk).where(Chunk.source_ref == f"sourcedoc:{doc.id}")
+    ).all()
 
 
 def test_start_paper_probe_indexes_arxiv_and_pasted_text(session, monkeypatch):

@@ -92,6 +92,9 @@ def ensure_vec(db_engine: Engine) -> bool:
                 "USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[384])"
             )
             connection.exec_driver_sql(
+                "DELETE FROM chunk_vec WHERE chunk_id NOT IN (SELECT id FROM chunk)"
+            )
+            connection.exec_driver_sql(
                 "CREATE TRIGGER IF NOT EXISTS chunk_vec_ad AFTER DELETE ON chunk BEGIN "
                 "DELETE FROM chunk_vec WHERE chunk_id = old.id; END"
             )

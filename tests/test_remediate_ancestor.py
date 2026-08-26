@@ -38,6 +38,7 @@ def _seed_remediation_graph(
     *,
     target_level: str,
     ancestor_level: str,
+    assess_ancestor: bool = True,
 ) -> tuple[Concept, Concept, Phase, Phase]:
     topic = Topic(title="Graph learning")
     session.add(topic)
@@ -73,25 +74,34 @@ def _seed_remediation_graph(
             concept_refs=[target.name],
         )
     )
-    session.add_all(
-        [
-            KnowledgeEstimate(concept_id=target.id, level=target_level),
-            KnowledgeEstimate(concept_id=ancestor.id, level=ancestor_level),
+    score_by_level = {"low": 0.2, "medium": 0.6, "high": 0.9}
+    rows = [
+        KnowledgeEstimate(concept_id=target.id, level=target_level),
+        KnowledgeEstimate(concept_id=ancestor.id, level=ancestor_level),
+        Assessment(
+            concept_id=target.id,
+            kind="self_explanation",
+            prompt="Explain attention",
+            score=score_by_level[target_level],
+            gaps=["matrix composition"],
+        ),
+        ConceptEdge(
+            src_concept_id=target.id,
+            dst_concept_id=ancestor.id,
+            kind="prerequisite",
+            origin="researcher",
+        ),
+    ]
+    if assess_ancestor:
+        rows.append(
             Assessment(
-                concept_id=target.id,
+                concept_id=ancestor.id,
                 kind="self_explanation",
-                prompt="Explain attention",
-                score=0.4,
-                gaps=["matrix composition"],
-            ),
-            ConceptEdge(
-                src_concept_id=target.id,
-                dst_concept_id=ancestor.id,
-                kind="prerequisite",
-                origin="researcher",
-            ),
-        ]
-    )
+                prompt="Explain linear algebra",
+                score=score_by_level[ancestor_level],
+            )
+        )
+    session.add_all(rows)
     session.commit()
     return target, ancestor, early, current
 
@@ -129,3 +139,22 @@ def test_no_weaker_ancestor_keeps_current_phase_behavior(session):
         select(AgentEvent).where(AgentEvent.kind == "remediate:ancestor")
     ).first() is None
     assert ancestor.name not in llm.calls[0]["messages"][0]["content"]
+
+
+def test_unassessed_default_high_ancestor_does_not_redirect_remediation(session):
+    target, ancestor, _early, current = _seed_remediation_graph(
+        session,
+        target_level="medium",
+        ancestor_level="high",
+        assess_ancestor=False,
+    )
+    llm = _llm()
+
+    result = remediate_concept(session, target, llm=llm)
+
+    assert result.items[0].phase_id == current.id
+    assert "ANCESTOR:" not in llm.calls[0]["messages"][0]["content"]
+    assert ancestor.name not in llm.calls[0]["messages"][0]["content"]
+    assert session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "remediate:ancestor")
+    ).first() is None

@@ -34,7 +34,7 @@ from adaptive_academy.api.schemas import (
 from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone_gate
-from adaptive_academy.engine.memory import index_source_doc
+from adaptive_academy.engine.memory import index_source_doc, remove_source
 from adaptive_academy.engine.research import research_topic
 from adaptive_academy.engine.revision import revision_suggested
 from adaptive_academy.engine.track_markdown import (
@@ -259,6 +259,9 @@ def review_sources(
     for sid in body.pruned_ids:
         if sid in by_id:
             by_id[sid].status = "pruned"
+    for source in rows:
+        if source.status != "accepted" and source.id is not None:
+            remove_source(session, f"sourcedoc:{source.id}")
     for source in newly_accepted:
         if source.status == "accepted":
             index_source_doc(session, source, fetch=fetch, retriever=retriever)

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlmodel import Session, select
 
 from adaptive_academy.api.deps import get_fetcher, get_retriever, get_session
@@ -30,6 +33,8 @@ from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.models import Chunk, Concept, Topic
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
+_reindex_lock = threading.Lock()
+_REINDEX_LOCK_TIMEOUT_S = 0.5
 
 
 def memory_hit_out(hit: Hit) -> MemoryHitOut:
@@ -97,7 +102,21 @@ def reindex_memory(
     session: Session = Depends(get_session),
     fetch: Callable[[str], str | None] = Depends(get_fetcher),
     retriever: Retriever = Depends(get_retriever),
-) -> MemoryReindexOut:
+) -> MemoryReindexOut | JSONResponse:
+    if not _reindex_lock.acquire(timeout=_REINDEX_LOCK_TIMEOUT_S):
+        raise HTTPException(409, "reindex already running")
+    try:
+        return _reindex_memory_locked(body, session, fetch, retriever)
+    finally:
+        _reindex_lock.release()
+
+
+def _reindex_memory_locked(
+    body: MemoryReindexIn,
+    session: Session,
+    fetch: Callable[[str], str | None],
+    retriever: Retriever,
+) -> MemoryReindexOut | JSONResponse:
     kinds = REINDEX_KINDS if body.kinds is None else _parse_kinds(body.kinds)
     unsupported_kinds = sorted(set(kinds) - set(REINDEX_KINDS))
     if unsupported_kinds:
@@ -162,6 +181,24 @@ def reindex_memory(
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        except (IntegrityError, OperationalError):
+            session.rollback()
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            output = MemoryReindexOut(
+                indexed=indexed,
+                skipped=skipped,
+                removed=removed,
+                truncated=True,
+                ms=elapsed_ms,
+                note=(
+                    "database conflict; partial counts: "
+                    f"indexed={indexed} skipped={skipped} removed={removed}"
+                ),
+            )
+            return JSONResponse(
+                status_code=409,
+                content=output.model_dump(mode="json"),
+            )
         indexed += result.indexed
         skipped += result.skipped
         removed += result.removed
