@@ -143,7 +143,9 @@ def test_accept_requires_a_current_program_milestone(session):
     session.add(other)
     session.flush()
     wrong_milestone = Milestone(program_id=other.id, title="Other milestone")
+    archived = Milestone(program_id=program.id, title="Archived", archived=True)
     session.add(wrong_milestone)
+    session.add(archived)
     session.commit()
     client = _client(session)
 
@@ -155,8 +157,14 @@ def test_accept_requires_a_current_program_milestone(session):
         json={"milestone_id": wrong_milestone.id},
     )
 
+    archived_resp = client.post(
+        f"/api/suggestions/{suggestion.id}/accept",
+        json={"milestone_id": archived.id},
+    )
+
     assert missing.status_code == 400
     assert wrong.status_code == 400
+    assert archived_resp.status_code == 400
     assert session.exec(select(ProgramTopicLink)).all() == []
 
 

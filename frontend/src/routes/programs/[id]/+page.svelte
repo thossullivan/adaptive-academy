@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { api, evidenceLabel, groupSuggestionsByKind, scoutCardTitle } from '$lib/api';
+  import { api, scoutCardTitle } from '$lib/api';
   import { changeSummary, gateBadge } from '$lib/programs';
   import type {
     GateReport,
@@ -12,7 +12,7 @@
     TopicSuggestion
   } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Input, Select, Textarea } from '$lib/ui';
+  import { Card, Button, Badge, Input, Select, Textarea, ScoutCard } from '$lib/ui';
 
   const programId = Number($page.params.id);
   let detail = $state<ProgramDetail | null>(null);
@@ -37,7 +37,6 @@
   const inReview = $derived(
     detail?.milestones.some((m) => m.links.some((l) => l.status === 'proposed')) ?? false
   );
-  const scoutGroups = $derived(groupSuggestionsByKind(suggestions));
   const scoutTitle = $derived(scoutCardTitle(suggestions) ?? 'Scout');
 
   async function load() {
@@ -419,7 +418,8 @@
                       <span class={l.status === 'pruned' ? 'text-muted line-through' : 'text-fg'}>
                         {l.proposed_title}
                       </span>
-                      {#if l.added_by === 'revision'}<Badge tone="accent">revision</Badge>{/if}
+                      {#if l.added_by === 'revision'}<Badge tone="accent">revision</Badge>
+                      {:else if l.added_by === 'scout'}<Badge tone="info">scout</Badge>{/if}
                     </div>
                     {#if l.why}<p class="mt-0.5 text-muted">{l.why}</p>{/if}
                   </div>
@@ -562,67 +562,29 @@
       </button>
     {/if}
 
-    <Card accent class="mt-4" eyebrow="Evidence-backed topics" title={scoutTitle}>
+    <ScoutCard
+      {suggestions}
+      title={scoutTitle}
+      {busy}
+      note={scoutNote}
+      emptyText="No proposed suggestions."
+      showScore
+      class="mt-4"
+      onaccept={(id) => resolveSuggestion(id, true)}
+      ondismiss={(id) => resolveSuggestion(id, false)}
+    >
       {#snippet header()}
         <Button size="sm" onclick={runScout} disabled={busy}
           >{busy ? 'Running…' : 'Run scout'}</Button
         >
       {/snippet}
-      {#if scoutNote}<p class="mb-3 text-xs text-muted">{scoutNote}</p>{/if}
-      {#if scoutGroups.length === 0}
-        <p class="text-sm text-muted">No proposed suggestions.</p>
-      {:else}
-        <div class="grid gap-5">
-          {#each scoutGroups as group (group.kind)}
-            <div>
-              <Badge mono tone="neutral">{group.kind.replaceAll('_', ' ')}</Badge>
-              <ul class="mt-2 grid gap-3">
-                {#each group.suggestions as suggestion (suggestion.id)}
-                  <li class="grid gap-3 border-t border-border/50 pt-3 text-sm lg:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)]">
-                    <div class="min-w-0">
-                      <div class="flex flex-wrap items-baseline gap-2">
-                        <p class="font-medium text-fg">{suggestion.title}</p>
-                        <span class="nums text-xs text-faint"
-                          >{Math.round(suggestion.score * 100)}%</span
-                        >
-                      </div>
-                      <p class="mt-1 text-muted">{suggestion.rationale}</p>
-                      <details class="mt-2 text-xs text-faint">
-                        <summary class="cursor-pointer">Evidence ({suggestion.evidence.length})</summary>
-                        <ul class="mt-1 grid gap-1 pl-3">
-                          {#each suggestion.evidence as evidence}
-                            <li>{evidenceLabel(evidence)}</li>
-                          {/each}
-                        </ul>
-                      </details>
-                    </div>
-                    <div class="grid content-start gap-2">
-                      <Select bind:value={suggestionMilestones[suggestion.id]} disabled={busy}>
-                        {#each detail.milestones.filter((milestone) => !milestone.archived) as milestone (milestone.id)}
-                          <option value={milestone.id}>{milestone.title}</option>
-                        {/each}
-                      </Select>
-                      <div class="flex gap-2">
-                        <Button
-                          size="sm"
-                          onclick={() => resolveSuggestion(suggestion.id, true)}
-                          disabled={busy}
-                        >Accept</Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onclick={() => resolveSuggestion(suggestion.id, false)}
-                          disabled={busy}
-                        >Dismiss</Button>
-                      </div>
-                    </div>
-                  </li>
-                {/each}
-              </ul>
-            </div>
+      {#snippet controls(suggestion)}
+        <Select bind:value={suggestionMilestones[suggestion.id]} disabled={busy}>
+          {#each (detail?.milestones ?? []).filter((milestone) => !milestone.archived) as milestone (milestone.id)}
+            <option value={milestone.id}>{milestone.title}</option>
           {/each}
-        </div>
-      {/if}
-    </Card>
+        </Select>
+      {/snippet}
+    </ScoutCard>
   {/if}
 </Page>

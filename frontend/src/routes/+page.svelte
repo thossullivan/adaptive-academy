@@ -1,11 +1,11 @@
 <script lang="ts">
   import { topics } from '$lib/topics.svelte';
-  import { api, evidenceLabel, groupSuggestionsByKind, scoutCardTitle } from '$lib/api';
+  import { api, scoutCardTitle } from '$lib/api';
   import type { Curriculum, Assessment, EventOut, Concept, TopicSuggestion } from '$lib/types';
   import { conceptSignals, conceptVerdict, VERDICT_RANK, type ConceptSignals, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
-  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing } from '$lib/ui';
+  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing, ScoutCard } from '$lib/ui';
   import ScoreTrend from '$lib/charts/ScoreTrend.svelte';
   import CalibrationPlot from '$lib/charts/CalibrationPlot.svelte';
 
@@ -22,6 +22,7 @@
   let cardCount = $state(0);
   let scoutSuggestions = $state<TopicSuggestion[]>([]);
   let scoutMilestoneId = $state<number | null>(null);
+  let scoutMilestoneTitle = $state('');
   let scoutBusy = $state(false);
   let scoutError = $state('');
 
@@ -42,15 +43,16 @@
     trend.length >= 2 ? trend[trend.length - 1].score - trend[trend.length - 2].score : null
   );
   const scoutTitle = $derived(scoutCardTitle(scoutSuggestions));
-  const scoutGroups = $derived(groupSuggestionsByKind(scoutSuggestions));
 
   async function loadScout(topicId: number) {
     scoutSuggestions = [];
     scoutMilestoneId = null;
+    scoutMilestoneTitle = '';
     scoutError = '';
     const context = await api.programContext(topicId).catch(() => null);
     if (!context) return;
     scoutMilestoneId = context.milestone_id;
+    scoutMilestoneTitle = context.milestone_title;
     scoutSuggestions = await api
       .listSuggestions(context.program_id, 'proposed')
       .catch(() => [] as TopicSuggestion[]);
@@ -175,47 +177,16 @@
     {/snippet}
 
     {#if scoutTitle}
-      <Card accent class="mb-4 rise" eyebrow="Evidence-backed topics" title={scoutTitle}>
-        <div class="grid gap-4">
-          {#each scoutGroups as group (group.kind)}
-            <div>
-              <Badge mono tone="neutral">{group.kind.replaceAll('_', ' ')}</Badge>
-              <ul class="mt-2 grid gap-3">
-                {#each group.suggestions as suggestion (suggestion.id)}
-                  <li class="flex flex-wrap items-start justify-between gap-3 border-t border-border/50 pt-3 text-sm">
-                    <div class="min-w-0 flex-1">
-                      <p class="font-medium text-fg">{suggestion.title}</p>
-                      <p class="mt-1 text-muted">{suggestion.rationale}</p>
-                      <details class="mt-2 text-xs text-faint">
-                        <summary class="cursor-pointer">Evidence ({suggestion.evidence.length})</summary>
-                        <ul class="mt-1 grid gap-1 pl-3">
-                          {#each suggestion.evidence as evidence}
-                            <li>{evidenceLabel(evidence)}</li>
-                          {/each}
-                        </ul>
-                      </details>
-                    </div>
-                    <div class="flex shrink-0 gap-2">
-                      <Button
-                        size="sm"
-                        onclick={() => resolveScoutSuggestion(suggestion.id, true)}
-                        disabled={scoutBusy}
-                      >Accept</Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onclick={() => resolveScoutSuggestion(suggestion.id, false)}
-                        disabled={scoutBusy}
-                      >Dismiss</Button>
-                    </div>
-                  </li>
-                {/each}
-              </ul>
-            </div>
-          {/each}
-        </div>
-        {#if scoutError}<p class="mt-3 text-sm text-danger">{scoutError}</p>{/if}
-      </Card>
+      <ScoutCard
+        suggestions={scoutSuggestions}
+        title={scoutTitle}
+        busy={scoutBusy}
+        error={scoutError}
+        targetLabel={scoutMilestoneTitle}
+        class="mb-4 rise"
+        onaccept={(id) => resolveScoutSuggestion(id, true)}
+        ondismiss={(id) => resolveScoutSuggestion(id, false)}
+      />
     {/if}
 
     {#if loading}
