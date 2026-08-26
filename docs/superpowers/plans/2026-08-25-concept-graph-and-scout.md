@@ -71,6 +71,8 @@
 
 ### Task 3: Population hooks (curriculum, aliases, revision) + `just graph-backfill`
 
+> **Decision (2026-08-25, during build):** curriculum **import** keeps concepts, `KnowledgeEstimate`s, `ConceptAlias`es, `Assessment`s, and `ConceptEdge`s; it replaces phases/items/deliverables/sidebars only, on the oldest track. The pre-graph delete path already failed under `PRAGMA foreign_keys=ON` for any concept with an assessment. Pinned by `tests/test_api_curriculum.py` and `tests/test_api_programs.py`.
+
 **Files:**
 - Modify: `src/adaptive_academy/engine/curriculum.py` (after `Concept` rows are created and committed), `engine/aliases.py` (`apply_program_aliases`, after registering), `engine/revision.py` (`apply_change`, `prune_topic` branch), `src/adaptive_academy/cli.py` (`graph-backfill` command), `justfile`
 - Test: `tests/test_graph_population.py`, `tests/test_revision_edges.py`, extend `tests/test_curriculum_orchestrator.py` and `tests/test_aliases.py` with one assertion each

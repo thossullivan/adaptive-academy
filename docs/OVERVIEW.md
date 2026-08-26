@@ -37,6 +37,13 @@ On top of that loop sit the research-grounded mechanics that make learning *stic
   independent of competence, so a slump never reads as failure.
 - **Local-first interop** — ingest your Obsidian vault notes as grounding sources, and export
   concepts/tracks back out as linked markdown.
+- **Memory & retrieval** — one local index (SQLite FTS5, optional `sqlite-vec` hybrid) over
+  vault notes, sources, papers, your answers, tutor turns, and generated questions; the Tutor
+  grounds on it and never restates what it already explained; generators reject near-duplicate
+  questions in code.
+- **Concept graph + Scout** — bi-temporal `ConceptEdge`s traversed with recursive CTEs (no graph
+  DB) drive remediation-by-ancestor and the map; a Scout turns frontier concepts, orphan terms,
+  unlinked notes, and paper "extend" answers into reviewable topic suggestions.
 
 ## Architecture
 
@@ -53,7 +60,9 @@ On top of that loop sit the research-grounded mechanics that make learning *stic
 │                                                              │
 │  engine/   research · curriculum · tutor · assess ·          │
 │            decay · productive_failure · teach · momentum ·   │
-│            progress · remediate · retention · story · vault  │
+│            progress · remediate · retention · story · vault ·│
+│            memory (FTS5 + sqlite-vec hybrid, anti-repeat) ·  │
+│            graph (bi-temporal edges, recursive CTE) · scout  │
 │                                                              │
 │  llm/      pluggable client registry — Anthropic SDK /       │
 │            agent-SDK / scripted (deterministic tests).       │
