@@ -1,11 +1,11 @@
 <script lang="ts">
   import { topics } from '$lib/topics.svelte';
-  import { api } from '$lib/api';
-  import type { Curriculum, Assessment, EventOut, Concept } from '$lib/types';
+  import { api, scoutCardTitle } from '$lib/api';
+  import type { Curriculum, Assessment, EventOut, Concept, TopicSuggestion } from '$lib/types';
   import { conceptSignals, conceptVerdict, VERDICT_RANK, type ConceptSignals, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
-  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing } from '$lib/ui';
+  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing, ScoutCard } from '$lib/ui';
   import ScoreTrend from '$lib/charts/ScoreTrend.svelte';
   import CalibrationPlot from '$lib/charts/CalibrationPlot.svelte';
 
@@ -20,6 +20,11 @@
   let events = $state<EventOut[]>([]);
   let dueCount = $state(0);
   let cardCount = $state(0);
+  let scoutSuggestions = $state<TopicSuggestion[]>([]);
+  let scoutMilestoneId = $state<number | null>(null);
+  let scoutMilestoneTitle = $state('');
+  let scoutBusy = $state(false);
+  let scoutError = $state('');
 
   let itemsDone = $state(0);
   let itemsTotal = $state(0);
@@ -37,10 +42,26 @@
   const lastDelta = $derived(
     trend.length >= 2 ? trend[trend.length - 1].score - trend[trend.length - 2].score : null
   );
+  const scoutTitle = $derived(scoutCardTitle(scoutSuggestions));
+
+  async function loadScout(topicId: number) {
+    scoutSuggestions = [];
+    scoutMilestoneId = null;
+    scoutMilestoneTitle = '';
+    scoutError = '';
+    const context = await api.programContext(topicId).catch(() => null);
+    if (!context) return;
+    scoutMilestoneId = context.milestone_id;
+    scoutMilestoneTitle = context.milestone_title;
+    scoutSuggestions = await api
+      .listSuggestions(context.program_id, 'proposed')
+      .catch(() => [] as TopicSuggestion[]);
+  }
 
   async function load(topicId: number) {
     loading = true;
     hasCurriculum = false;
+    await loadScout(topicId);
     try {
       cur = await api.getCurriculum(topicId);
       hasCurriculum = true;
@@ -95,6 +116,26 @@
     loading = false;
   }
 
+  async function resolveScoutSuggestion(suggestionId: number, accept: boolean) {
+    if (accept && scoutMilestoneId == null) {
+      scoutError = 'Choose a Program milestone from the Program page.';
+      return;
+    }
+    scoutBusy = true;
+    scoutError = '';
+    try {
+      if (accept) {
+        await api.acceptSuggestion(suggestionId, scoutMilestoneId!);
+      } else {
+        await api.dismissSuggestion(suggestionId);
+      }
+      scoutSuggestions = scoutSuggestions.filter((item) => item.id !== suggestionId);
+    } catch (e) {
+      scoutError = e instanceof Error ? e.message : String(e);
+    }
+    scoutBusy = false;
+  }
+
   $effect(() => {
     const id = topics.current?.id;
     if (id != null) load(id);
@@ -134,6 +175,19 @@
       <Button variant="outline" href="/topics/{tid}/map">Constellation</Button>
       <Button href="/topics/{tid}/today">Start today's session →</Button>
     {/snippet}
+
+    {#if scoutTitle}
+      <ScoutCard
+        suggestions={scoutSuggestions}
+        title={scoutTitle}
+        busy={scoutBusy}
+        error={scoutError}
+        targetLabel={scoutMilestoneTitle}
+        class="mb-4 rise"
+        onaccept={(id) => resolveScoutSuggestion(id, true)}
+        ondismiss={(id) => resolveScoutSuggestion(id, false)}
+      />
+    {/if}
 
     {#if loading}
       <div class="grid place-items-center py-24 text-muted">

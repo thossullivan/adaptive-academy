@@ -400,7 +400,7 @@ class ProgramTopicLink(SQLModel, table=True):
     proposed_title: str = ""
     why: str = ""
     sources: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    added_by: str = "research"  # "research" | "revision"
+    added_by: str = "research"  # "research" | "revision" | "scout"
     created_at: datetime = Field(default_factory=_now)
 
 

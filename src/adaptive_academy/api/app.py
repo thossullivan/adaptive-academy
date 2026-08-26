@@ -34,12 +34,13 @@ from adaptive_academy.api.routes_decay import (
 from adaptive_academy.api.routes_paper_probe import router as paper_probe_router
 from adaptive_academy.api.routes_programs import router as programs_router
 from adaptive_academy.api.routes_remediate import router as remediate_router
-from adaptive_academy.api.routes_roleplay import router as roleplay_router
 from adaptive_academy.api.routes_retention import (
     card_router as retention_card_router,
     ops_router as retention_ops_router,
     topic_router as retention_topic_router,
 )
+from adaptive_academy.api.routes_roleplay import router as roleplay_router
+from adaptive_academy.api.routes_scout import router as scout_router
 from adaptive_academy.db import create_db_and_tables
 from adaptive_academy.llm.types import AgentSDKError
 
@@ -142,6 +143,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_memory.router)
     app.include_router(routes_momentum.router)
     app.include_router(programs_router)
+    app.include_router(scout_router)
     app.include_router(roleplay_router)
     app.include_router(paper_probe_router)
     _mount_spa(app)

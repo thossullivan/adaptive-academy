@@ -24,6 +24,25 @@ class GraphOut(BaseModel):
     edges: list[EdgeOut]
 
 
+class TopicSuggestionOut(BaseModel):
+    id: int
+    program_id: int
+    title: str
+    rationale: str
+    candidate_kind: str
+    evidence: list[dict]
+    score: float
+    status: str
+    created_at: datetime
+    decided_at: Optional[datetime]
+
+
+class ScoutOut(BaseModel):
+    suggestions: list[TopicSuggestionOut]
+    candidates: dict[str, int]
+    truncated: bool
+
+
 class IntentOut(BaseModel):
     goal: str
     prior_knowledge: str

@@ -2,11 +2,17 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
+  import { api, scoutCardTitle } from '$lib/api';
   import { changeSummary, gateBadge } from '$lib/programs';
-  import type { GateReport, MapRevisionInfo, MilestoneInfo, ProgramDetail } from '$lib/types';
+  import type {
+    GateReport,
+    MapRevisionInfo,
+    MilestoneInfo,
+    ProgramDetail,
+    TopicSuggestion
+  } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Input, Textarea } from '$lib/ui';
+  import { Card, Button, Badge, Input, Select, Textarea, ScoutCard } from '$lib/ui';
 
   const programId = Number($page.params.id);
   let detail = $state<ProgramDetail | null>(null);
@@ -24,14 +30,31 @@
   let pendingSave: Promise<unknown> | null = null;
   let revision = $state<MapRevisionInfo | null>(null);
   let showArchived = $state(false);
+  let suggestions = $state<TopicSuggestion[]>([]);
+  let suggestionMilestones = $state<Record<number, number>>({});
+  let scoutNote = $state('');
 
   const inReview = $derived(
     detail?.milestones.some((m) => m.links.some((l) => l.status === 'proposed')) ?? false
   );
+  const scoutTitle = $derived(scoutCardTitle(suggestions) ?? 'Scout');
 
   async function load() {
     try {
-      detail = await api.getProgram(programId);
+      const [nextDetail, nextSuggestions] = await Promise.all([
+        api.getProgram(programId),
+        api.listSuggestions(programId, 'proposed')
+      ]);
+      detail = nextDetail;
+      suggestions = nextSuggestions;
+      const firstMilestone = detail.milestones.find((milestone) => !milestone.archived);
+      const nextChoices = { ...suggestionMilestones };
+      for (const suggestion of suggestions) {
+        if (nextChoices[suggestion.id] == null && firstMilestone) {
+          nextChoices[suggestion.id] = firstMilestone.id;
+        }
+      }
+      suggestionMilestones = nextChoices;
       revision = detail?.has_open_revision ? await api.getOpenRevision(programId).catch(() => null) : null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -40,6 +63,53 @@
     }
   }
   onMount(load);
+
+  async function runScout() {
+    busy = true;
+    error = '';
+    scoutNote = '';
+    try {
+      const result = await api.runScout(programId);
+      const count = Object.values(result.candidates).reduce((total, value) => total + value, 0);
+      scoutNote = `Scout reviewed ${count} candidate${count === 1 ? '' : 's'}${
+        result.truncated ? ' within its time limit' : ''
+      }.`;
+      suggestions = await api.listSuggestions(programId, 'proposed');
+      const firstMilestone = detail?.milestones.find((milestone) => !milestone.archived);
+      if (firstMilestone) {
+        const nextChoices = { ...suggestionMilestones };
+        for (const suggestion of suggestions) {
+          nextChoices[suggestion.id] ??= firstMilestone.id;
+        }
+        suggestionMilestones = nextChoices;
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    busy = false;
+  }
+
+  async function resolveSuggestion(suggestionId: number, accept: boolean) {
+    const milestoneId = suggestionMilestones[suggestionId];
+    if (accept && milestoneId == null) {
+      error = 'Select a milestone before accepting this suggestion.';
+      return;
+    }
+    busy = true;
+    error = '';
+    try {
+      if (accept) {
+        await api.acceptSuggestion(suggestionId, milestoneId);
+        detail = await api.getProgram(programId);
+      } else {
+        await api.dismissSuggestion(suggestionId);
+      }
+      suggestions = suggestions.filter((suggestion) => suggestion.id !== suggestionId);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    busy = false;
+  }
 
   async function revise() {
     busy = true;
@@ -348,7 +418,8 @@
                       <span class={l.status === 'pruned' ? 'text-muted line-through' : 'text-fg'}>
                         {l.proposed_title}
                       </span>
-                      {#if l.added_by === 'revision'}<Badge tone="accent">revision</Badge>{/if}
+                      {#if l.added_by === 'revision'}<Badge tone="accent">revision</Badge>
+                      {:else if l.added_by === 'scout'}<Badge tone="info">scout</Badge>{/if}
                     </div>
                     {#if l.why}<p class="mt-0.5 text-muted">{l.why}</p>{/if}
                   </div>
@@ -490,5 +561,30 @@
         {showArchived ? 'Hide archived' : `Show ${archivedCount} archived`}
       </button>
     {/if}
+
+    <ScoutCard
+      {suggestions}
+      title={scoutTitle}
+      {busy}
+      note={scoutNote}
+      emptyText="No proposed suggestions."
+      showScore
+      class="mt-4"
+      onaccept={(id) => resolveSuggestion(id, true)}
+      ondismiss={(id) => resolveSuggestion(id, false)}
+    >
+      {#snippet header()}
+        <Button size="sm" onclick={runScout} disabled={busy}
+          >{busy ? 'Running…' : 'Run scout'}</Button
+        >
+      {/snippet}
+      {#snippet controls(suggestion)}
+        <Select bind:value={suggestionMilestones[suggestion.id]} disabled={busy}>
+          {#each (detail?.milestones ?? []).filter((milestone) => !milestone.archived) as milestone (milestone.id)}
+            <option value={milestone.id}>{milestone.title}</option>
+          {/each}
+        </Select>
+      {/snippet}
+    </ScoutCard>
   {/if}
 </Page>
