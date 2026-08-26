@@ -865,6 +865,25 @@ def reindex_topic(
             removed += result.removed
 
     if "source_doc" in selected and not truncated:
+        source_chunks = session.exec(
+            select(Chunk).where(
+                Chunk.kind == "source_doc",
+                Chunk.topic_id == topic_id,
+            )
+        ).all()
+        stale_refs: set[str] = set()
+        for chunk in source_chunks:
+            prefix, separator, raw_id = chunk.source_ref.partition(":")
+            try:
+                source_id = int(raw_id) if prefix == "sourcedoc" and separator else None
+            except ValueError:
+                source_id = None
+            source = session.get(SourceDoc, source_id) if source_id is not None else None
+            if source is None or source.status != "accepted":
+                stale_refs.add(chunk.source_ref)
+        for source_ref in sorted(stale_refs):
+            removed += remove_source(session, source_ref)
+
         docs = session.exec(
             select(SourceDoc)
             .where(
@@ -972,6 +991,11 @@ def jaccard(a: str, b: str) -> float:
     return len(a_tokens & b_tokens) / len(union)
 
 
+def escape_markers(text: str) -> str:
+    """Neutralize prompt-block delimiter sequences in untrusted text."""
+    return text.replace("<<<", "‹‹‹").replace(">>>", "›››")
+
+
 def render_block(
     hits: list[Hit],
     *,
@@ -989,7 +1013,11 @@ def render_block(
     closing = f"<<<END_{marker_name}>>>"
     entries: list[str] = []
     for hit in hits:
-        entry = f"{_provenance_line(hit)}\n{hit.chunk.text}"
+        lines = [escape_markers(_provenance_line(hit))]
+        if hit.chunk.context:
+            lines.append(escape_markers(hit.chunk.context))
+        lines.append(escape_markers(hit.chunk.text))
+        entry = "\n".join(lines)
         candidate = f"{opening}\n{'\n\n'.join([*entries, entry])}\n{closing}"
         if len(candidate) > budget:
             break
@@ -1036,7 +1064,7 @@ def append_block_entry(
         marker_name = marker_name[4:]
     opening = f"<<<{marker_name}>>>"
     closing = f"<<<END_{marker_name}>>>"
-    entry = f"[{label}]\n{text}"
+    entry = f"[{escape_markers(label)}]\n{escape_markers(text)}"
     if block.endswith(closing):
         candidate = f"{block[:-len(closing)].rstrip()}\n\n{entry}\n{closing}"
     else:

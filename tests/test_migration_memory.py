@@ -1,9 +1,13 @@
 import os
+import struct
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine, text
+
+from adaptive_academy.db import ensure_vec
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRIOR_REVISION = "d3b9f1c274ae"
@@ -122,3 +126,45 @@ def test_memory_migration_upgrades_populated_database_and_downgrades(tmp_path):
     downgraded = _alembic(url, "downgrade", "-1")
     assert downgraded.returncode == 0, downgraded.stderr
     assert MEMORY_OBJECTS.isdisjoint(_schema_objects(url))
+
+
+def test_memory_migration_downgrade_upgrade_clears_chunk_vectors(tmp_path):
+    pytest.importorskip("sqlite_vec")
+    db_path = tmp_path / "vectors.db"
+    url = f"sqlite:///{db_path}"
+
+    upgraded = _alembic(url, "upgrade", "ba15f4c29e71")
+    assert upgraded.returncode == 0, upgraded.stderr
+    engine = create_engine(url)
+    assert ensure_vec(engine) is True
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO chunk "
+                "(id, kind, source_ref, ordinal, heading, text, context, content_hash, "
+                "meta, created_at) VALUES "
+                "(1, 'source_doc', 'sourcedoc:1', 0, '', 'stale', '', :hash, '{}', :now)"
+            ),
+            {"hash": "e" * 64, "now": "2026-08-25 00:00:00"},
+        )
+        connection.execute(
+            text(
+                "INSERT INTO chunk_vec(chunk_id, embedding) "
+                "VALUES (1, :embedding)"
+            ),
+            {"embedding": struct.pack("<384f", *([0.0] * 384))},
+        )
+        assert connection.execute(text("SELECT count(*) FROM chunk_vec")).scalar_one() == 1
+    engine.dispose()
+
+    downgraded = _alembic(url, "downgrade", "-1")
+    assert downgraded.returncode == 0, downgraded.stderr
+    assert "chunk_vec" not in _schema_objects(url)
+
+    reupgraded = _alembic(url, "upgrade", "ba15f4c29e71")
+    assert reupgraded.returncode == 0, reupgraded.stderr
+    engine = create_engine(url)
+    assert ensure_vec(engine) is True
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT count(*) FROM chunk_vec")).scalar_one() == 0
+    engine.dispose()

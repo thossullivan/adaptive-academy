@@ -10,13 +10,13 @@ from sqlalchemy import and_, func, literal, or_
 from sqlmodel import Session, col, select
 
 from adaptive_academy.engine.aliases import normalize_name
+from adaptive_academy.engine.assess import level_from_score
 from adaptive_academy.engine.gates import evaluate_concept
 from adaptive_academy.models import (
     Assessment,
     Concept,
     ConceptAlias,
     ConceptEdge,
-    KnowledgeEstimate,
     TopicFoundation,
     Track,
     now_utc,
@@ -353,7 +353,7 @@ def weakest_ancestor(
     session: Session,
     concept_id: int,
 ) -> tuple[int, float] | None:
-    """Return the weakest ancestor, treating an unestimated ancestor as weakest."""
+    """Return the weakest assessed ancestor; exclude ancestors without assessments."""
     ancestor_ids = [
         ancestor_id
         for ancestor_id, _depth in ancestors(
@@ -365,12 +365,6 @@ def weakest_ancestor(
     if not ancestor_ids:
         return None
 
-    estimates = session.exec(
-        select(KnowledgeEstimate).where(
-            KnowledgeEstimate.concept_id.in_(ancestor_ids)
-        )
-    ).all()
-    estimate_by_concept = {estimate.concept_id: estimate for estimate in estimates}
     assessments = session.exec(
         select(Assessment)
         .where(Assessment.concept_id.in_(ancestor_ids))
@@ -379,14 +373,19 @@ def weakest_ancestor(
     latest_score: dict[int, float] = {}
     for assessment in assessments:
         latest_score[assessment.concept_id] = assessment.score
+    assessed_ids = [
+        ancestor_id for ancestor_id in ancestor_ids if ancestor_id in latest_score
+    ]
+    if not assessed_ids:
+        return None
 
     def weakness_key(ancestor_id: int) -> tuple[int, float, int]:
-        estimate = estimate_by_concept.get(ancestor_id)
-        level_rank = LEVEL_ORDER.get(estimate.level, -1) if estimate else -1
-        return level_rank, float(latest_score.get(ancestor_id, 0.0)), ancestor_id
+        score = float(latest_score[ancestor_id])
+        level = level_from_score(score)[0]
+        return LEVEL_ORDER[level], score, ancestor_id
 
-    weakest_id = min(ancestor_ids, key=weakness_key)
-    return weakest_id, float(latest_score.get(weakest_id, 0.0))
+    weakest_id = min(assessed_ids, key=weakness_key)
+    return weakest_id, float(latest_score[weakest_id])
 
 
 def frontier(session: Session, track_id: int) -> list[tuple[int, list[str]]]:

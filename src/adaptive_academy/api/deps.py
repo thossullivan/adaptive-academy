@@ -121,7 +121,7 @@ def get_retriever() -> Retriever:
             from adaptive_academy.llm.hybrid_retriever import HybridRetriever
 
             return HybridRetriever(fts, embedder)
-        except (ImportError, ValueError):
+        except (ImportError, RuntimeError, ValueError):
             pass
 
     _warn_retriever_degradation_once(

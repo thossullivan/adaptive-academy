@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
 from adaptive_academy.api import routes_memory
@@ -229,6 +230,43 @@ def test_reindex_reports_truncation_when_deadline_is_exhausted(
 
     assert response.status_code == 200
     assert response.json()["truncated"] is True
+
+
+def test_reindex_returns_409_while_another_reindex_holds_lock(memory_api):
+    client, topic, _ = memory_api
+    assert routes_memory._reindex_lock.acquire(timeout=0.1)
+    try:
+        response = client.post(
+            "/api/memory/reindex",
+            json={"topic_id": topic.id, "kinds": ["source_doc"]},
+        )
+    finally:
+        routes_memory._reindex_lock.release()
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "reindex already running"}
+
+
+def test_reindex_integrity_error_returns_409_with_partial_counts(
+    memory_api,
+    monkeypatch,
+):
+    client, topic, _ = memory_api
+
+    def fail_reindex(*_args, **_kwargs):
+        raise IntegrityError("reindex", {}, RuntimeError("collision"))
+
+    monkeypatch.setattr(routes_memory, "reindex_topic", fail_reindex)
+
+    response = client.post(
+        "/api/memory/reindex",
+        json={"topic_id": topic.id, "kinds": ["source_doc"]},
+    )
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["indexed"] == body["skipped"] == body["removed"] == 0
+    assert "partial counts" in body["note"]
 
 
 def test_stats_counts_match_topic(session, memory_api):

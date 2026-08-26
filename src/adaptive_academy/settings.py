@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     retriever: str = "hybrid"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_cache_dir: str = ""
+    embedding_allow_download: bool = True
     # Default Obsidian vault path (env AA_OBSIDIAN_VAULT_PATH); API calls may override per-request.
     obsidian_vault_path: str = ""
     # Static frontend build to serve at / (env AA_FRONTEND_DIST). The Docker image

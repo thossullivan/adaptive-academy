@@ -240,6 +240,64 @@ def test_hybrid_degrades_once_when_the_embedder_is_unavailable(monkeypatch, capl
     deps.reset_retriever_cache()
 
 
+def test_hybrid_degrades_once_when_downloads_disabled_and_model_not_cached(
+    monkeypatch,
+    caplog,
+    tmp_path,
+):
+    from adaptive_academy.api import deps
+
+    monkeypatch.setattr(deps.settings, "retriever", "hybrid")
+    monkeypatch.setattr(deps.settings, "embedding_allow_download", False)
+    monkeypatch.setattr(deps.settings, "embedding_cache_dir", str(tmp_path))
+    monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
+    monkeypatch.setattr(deps, "ensure_vec", lambda _engine: True)
+    monkeypatch.setattr(deps, "_logged_retriever_degradations", set())
+    deps.reset_retriever_cache()
+
+    with caplog.at_level("WARNING"):
+        first = deps.get_retriever()
+        second = deps.get_retriever()
+
+    assert isinstance(first, FtsRetriever)
+    assert isinstance(second, FtsRetriever)
+    assert caplog.messages.count("Hybrid retrieval is unavailable; using FTS5.") == 1
+    deps.reset_retriever_cache()
+
+
+def test_onnx_embedder_uses_fake_cached_model_when_downloads_disabled(
+    monkeypatch,
+    tmp_path,
+):
+    from adaptive_academy.llm import onnx_embedder
+
+    cache_dir = tmp_path / "fastembed_cache"
+    (cache_dir / "models--BAAI--bge-small-en-v1.5").mkdir(parents=True)
+    calls = []
+
+    class FakeVector:
+        def tolist(self):
+            return [0.0] * 384
+
+    class RecordingTextEmbedding:
+        def __init__(self, *, model_name, cache_dir, lazy_load):
+            calls.append((model_name, cache_dir, lazy_load))
+
+        def embed(self, texts):
+            return [FakeVector() for _ in texts]
+
+    monkeypatch.setattr(onnx_embedder, "TextEmbedding", RecordingTextEmbedding)
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_allow_download", False)
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_cache_dir", str(cache_dir))
+
+    embedder = OnnxEmbedder()
+    embedder.embed(["cached text"])
+
+    assert calls == [
+        ("BAAI/bge-small-en-v1.5", str(cache_dir), True),
+    ]
+
+
 def test_hybrid_degrades_once_when_embedding_dimensions_mismatch(monkeypatch, caplog):
     from adaptive_academy.api import deps
 
