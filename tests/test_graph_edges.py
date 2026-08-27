@@ -214,3 +214,50 @@ def test_backfill_twice_has_stable_counts_and_rows(session):
     assert second == first
     assert len(first_rows) == len(second_rows) == 4
     assert sum(row.valid_until is None for row in second_rows) == 4
+
+
+def test_backfill_does_not_resurrect_invalidated_edges(session):
+    """Regenerating a curriculum invalidates the old track's edges; a startup backfill must
+    leave them invalidated and only materialize tracks with no edge history."""
+    from adaptive_academy.engine import graph
+    from adaptive_academy.models import Concept, ConceptEdge, Topic, TopicFoundation, Track
+
+    topic = Topic(title="Regen")
+    session.add(topic)
+    session.commit()
+    session.add(TopicFoundation(topic_id=topic.id, key_concepts=["A", "B"],
+                                prerequisite_map={"A": ["B"]}))
+    old_track = Track(topic_id=topic.id, title="v1")
+    session.add(old_track)
+    session.commit()
+    old_a = Concept(track_id=old_track.id, name="A")
+    old_b = Concept(track_id=old_track.id, name="B")
+    session.add(old_a)
+    session.add(old_b)
+    session.commit()
+    graph.insert_edges(session, [(old_a.id, old_b.id)], kind="prerequisite", origin="researcher")
+    session.commit()
+    # regeneration: old edges invalidated, new track created with fresh concepts
+    graph.invalidate_track_edges(session, old_track.id)
+    new_track = Track(topic_id=topic.id, title="v2")
+    session.add(new_track)
+    session.commit()
+    new_a = Concept(track_id=new_track.id, name="A")
+    new_b = Concept(track_id=new_track.id, name="B")
+    session.add(new_a)
+    session.add(new_b)
+    session.commit()
+    graph.insert_edges(session, [(new_a.id, new_b.id)], kind="prerequisite", origin="researcher")
+    session.commit()
+
+    before = session.exec(select(ConceptEdge)).all()
+    assert sum(e.valid_until is None for e in before) == 1
+
+    result = graph.backfill(session)
+    session.commit()
+    after = session.exec(select(ConceptEdge)).all()
+    assert len(after) == len(before)  # nothing resurrected, nothing duplicated
+    assert sum(e.valid_until is None for e in after) == 1
+    current = [e for e in after if e.valid_until is None][0]
+    assert (current.src_concept_id, current.dst_concept_id) == (new_a.id, new_b.id)
+    assert result.tracks == 1  # the historical track is skipped

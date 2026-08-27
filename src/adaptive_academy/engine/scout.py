@@ -45,6 +45,11 @@ logger = logging.getLogger(__name__)
 SCOUT_DISMISS_COOLDOWN_DAYS = 30
 SCOUT_EVERY_N_ASSESSMENTS = 25
 SCOUT_DEADLINE_S = 10.0
+SCOUT_CHECK_EVERY = 64  # rows between deadline checks inside a generator
+
+
+def _expired(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
 SCOUT_DIGEST_MAX_CHARS = 12_000
 SCOUT_FIELD_MAX_CHARS = 200
 SCOUT_GOAL_MAX_CHARS = 2000
@@ -111,13 +116,17 @@ def _append_unique_evidence(target: list[dict], entries: list[dict]) -> None:
             target.append(entry)
 
 
-def frontier_candidates(session: Session, program_id: int) -> list[Candidate]:
+def frontier_candidates(
+    session: Session, program_id: int, *, deadline: float | None = None
+) -> list[Candidate]:
     """Return outside graph neighbors reached from verified Program concepts."""
     grouped: dict[str, Candidate] = {}
     for track in _program_tracks(session, program_id):
-        if track.id is None:
-            continue
+        if track.id is None or _expired(deadline):
+            break
         for concept_id, outside_names in graph.frontier(session, track.id):
+            if _expired(deadline):
+                break
             for outside_name in outside_names:
                 key = normalize_name(outside_name)
                 evidence = [
@@ -168,7 +177,9 @@ def _extract_terms(text: str) -> list[str]:
     return [term for term in [*capitalized, *identifiers] if term]
 
 
-def orphan_term_candidates(session: Session, program_id: int) -> list[Candidate]:
+def orphan_term_candidates(
+    session: Session, program_id: int, *, deadline: float | None = None
+) -> list[Candidate]:
     """Find repeated learner or tutor terms not represented in the concept graph."""
     topic_ids = _program_topic_ids(session, program_id)
     if not topic_ids:
@@ -185,7 +196,9 @@ def orphan_term_candidates(session: Session, program_id: int) -> list[Candidate]
     counts: dict[str, int] = {}
     labels: dict[str, str] = {}
     refs: dict[str, set[str]] = {}
-    for chunk in chunks:
+    for position, chunk in enumerate(chunks):
+        if position % SCOUT_CHECK_EVERY == 0 and _expired(deadline):
+            break
         for term in _extract_terms(chunk.text):
             if _matches_known_name(term, known_names):
                 continue
@@ -223,7 +236,9 @@ def _note_label(chunk: Chunk) -> str:
     return stem or chunk.source_ref
 
 
-def orphan_note_candidates(session: Session) -> list[Candidate]:
+def orphan_note_candidates(
+    session: Session, *, deadline: float | None = None
+) -> list[Candidate]:
     """Return one candidate for each vault note with no concept links."""
     chunks = session.exec(
         select(Chunk).where(Chunk.kind == "vault_note").order_by(Chunk.source_ref, Chunk.ordinal)
@@ -241,7 +256,9 @@ def orphan_note_candidates(session: Session) -> list[Candidate]:
         by_source.setdefault(chunk.source_ref, []).append(chunk)
 
     candidates = []
-    for source_ref, note_chunks in by_source.items():
+    for position, (source_ref, note_chunks) in enumerate(by_source.items()):
+        if position % SCOUT_CHECK_EVERY == 0 and _expired(deadline):
+            break
         if any(chunk.id in linked_ids for chunk in note_chunks):
             continue
         candidates.append(
@@ -266,7 +283,9 @@ def _extension_evidence(source_ref: str) -> dict:
     }
 
 
-def extension_candidates(session: Session, program_id: int) -> list[Candidate]:
+def extension_candidates(
+    session: Session, program_id: int, *, deadline: float | None = None
+) -> list[Candidate]:
     """Return learner-proposed paper extensions for Program topics."""
     topic_ids = _program_topic_ids(session, program_id)
     if not topic_ids:
@@ -285,7 +304,9 @@ def extension_candidates(session: Session, program_id: int) -> list[Candidate]:
             by_source.setdefault(chunk.source_ref, []).append(chunk)
 
     candidates = []
-    for source_ref, source_chunks in by_source.items():
+    for position, (source_ref, source_chunks) in enumerate(by_source.items()):
+        if position % SCOUT_CHECK_EVERY == 0 and _expired(deadline):
+            break
         label = " ".join(
             part
             for chunk in source_chunks
@@ -446,6 +467,9 @@ def rank(
     llm: LLMClient,
 ) -> list[TopicSuggestion]:
     """Rank candidates once, validate citations, and upsert reviewable suggestions."""
+    if not candidates:
+        return []
+
     if program.id is None:
         raise ValueError("program must be persisted before scouting")
     digest, kept_candidates = build_digest(
@@ -556,20 +580,21 @@ def run_scout(
     counts = {kind: 0 for kind in SCOUT_KINDS}
     candidates: list[Candidate] = []
     generators = (
-        ("frontier", lambda: frontier_candidates(session, program.id)),
-        ("orphan_term", lambda: orphan_term_candidates(session, program.id)),
-        ("orphan_note", lambda: orphan_note_candidates(session)),
-        ("extension", lambda: extension_candidates(session, program.id)),
+        ("frontier", lambda: frontier_candidates(session, program.id, deadline=deadline)),
+        ("orphan_term", lambda: orphan_term_candidates(session, program.id, deadline=deadline)),
+        ("orphan_note", lambda: orphan_note_candidates(session, deadline=deadline)),
+        ("extension", lambda: extension_candidates(session, program.id, deadline=deadline)),
     )
     truncated = False
-    for index, (kind, generate) in enumerate(generators):
-        if time.monotonic() >= deadline:
+    for kind, generate in generators:
+        if _expired(deadline):
             truncated = True
             break
         generated = generate()
         counts[kind] = len(generated)
         candidates.extend(generated)
-        if index < len(generators) - 1 and time.monotonic() >= deadline:
+        if _expired(deadline):
+            # The generator stopped early at its next deadline check; report it.
             truncated = True
             break
 

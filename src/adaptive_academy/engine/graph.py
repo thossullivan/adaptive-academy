@@ -418,6 +418,44 @@ def frontier(session: Session, track_id: int) -> list[tuple[int, list[str]]]:
     return result
 
 
+def _has_historical_researcher_edges(session: Session, track_id: int) -> bool:
+    concept_ids = _track_concept_ids(session, track_id)
+    if not concept_ids:
+        return False
+    return session.exec(
+        select(ConceptEdge.id).where(
+            col(ConceptEdge.src_concept_id).in_(concept_ids),
+            ConceptEdge.origin == "researcher",
+            col(ConceptEdge.valid_until).is_not(None),
+        )
+    ).first() is not None
+
+
+def _historical_researcher_pairs(session: Session, track_id: int) -> set[tuple[int, int]]:
+    """(src, dst) pairs that were invalidated on purpose; backfill must not resurrect them."""
+    concept_ids = _track_concept_ids(session, track_id)
+    if not concept_ids:
+        return set()
+    rows = session.exec(
+        select(ConceptEdge.src_concept_id, ConceptEdge.dst_concept_id).where(
+            col(ConceptEdge.src_concept_id).in_(concept_ids),
+            ConceptEdge.origin == "researcher",
+            col(ConceptEdge.valid_until).is_not(None),
+        )
+    ).all()
+    return {(src, dst) for src, dst in rows}
+
+
+def _track_concept_ids(session: Session, track_id: int) -> list[int]:
+    return [
+        concept_id
+        for concept_id in session.exec(
+            select(Concept.id).where(Concept.track_id == track_id)
+        ).all()
+        if concept_id is not None
+    ]
+
+
 def _current_researcher_edges(session: Session, track_id: int) -> list[ConceptEdge]:
     return session.exec(
         select(ConceptEdge)
@@ -447,7 +485,6 @@ def backfill(session: Session) -> BackfillResult:
         for track in tracks:
             if track.id is None:
                 continue
-            track_count += 1
             concepts = session.exec(
                 select(Concept)
                 .where(Concept.track_id == track.id)
@@ -457,8 +494,16 @@ def backfill(session: Session) -> BackfillResult:
                 foundation.prerequisite_map,
                 concepts,
             )
-            desired = {(source, destination, "prerequisite") for source, destination in pairs}
             current_rows = _current_researcher_edges(session, track.id)
+            # A track whose researcher edges were all invalidated (curriculum regenerated,
+            # topic pruned) is history: backfill never re-derives it. Only tracks with no
+            # edge history at all are legacy data that needs materializing.
+            if not current_rows and _has_historical_researcher_edges(session, track.id):
+                continue
+            track_count += 1
+            historical = _historical_researcher_pairs(session, track.id)
+            pairs = [(src, dst) for src, dst in pairs if (src, dst) not in historical]
+            desired = {(source, destination, "prerequisite") for source, destination in pairs}
             current = {
                 (edge.src_concept_id, edge.dst_concept_id, edge.kind)
                 for edge in current_rows

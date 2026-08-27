@@ -265,3 +265,26 @@ def test_retrievers_include_exact_since_and_derive_topic_from_concept(session):
     }
 
     assert fts_ids == scripted_ids == {exact.id, topic_wide.id}
+
+
+def test_ensure_fts_rebuilds_index_for_chunks_written_without_fts5():
+    """Chunks indexed while FTS5 was unavailable must become searchable once it is."""
+    from sqlalchemy import text
+    from sqlmodel import Session, SQLModel, create_engine
+
+    from adaptive_academy.db import ensure_fts
+    from adaptive_academy.models import Chunk
+
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    # No FTS objects yet: simulate the no-FTS5 upgrade path.
+    with Session(engine) as session:
+        session.add(Chunk(kind="vault_note", source_ref="file:///v/a.md", ordinal=0,
+                          heading="", text="quasar luminosity", content_hash="h1"))
+        session.commit()
+    assert ensure_fts(engine) is True
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT rowid FROM chunk_fts WHERE chunk_fts MATCH 'quasar'")
+        ).all()
+    assert len(rows) == 1
