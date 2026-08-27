@@ -124,7 +124,11 @@ def frontier_candidates(
     for track in _program_tracks(session, program_id):
         if track.id is None or _expired(deadline):
             break
-        for concept_id, outside_names in graph.frontier(session, track.id):
+        for concept_id, outside_names in graph.frontier(
+            session,
+            track.id,
+            deadline=deadline,
+        ):
             if _expired(deadline):
                 break
             for outside_name in outside_names:
@@ -184,30 +188,41 @@ def orphan_term_candidates(
     topic_ids = _program_topic_ids(session, program_id)
     if not topic_ids:
         return []
-    chunks = session.exec(
-        select(Chunk)
-        .where(
-            Chunk.topic_id.in_(topic_ids),
-            Chunk.kind.in_(("learner_output", "tutor_turn")),
-        )
-        .order_by(Chunk.id)
-    ).all()
+    if _expired(deadline):
+        return []
     known_names = _known_concept_names(session)
     counts: dict[str, int] = {}
     labels: dict[str, str] = {}
     refs: dict[str, set[str]] = {}
-    for position, chunk in enumerate(chunks):
-        if position % SCOUT_CHECK_EVERY == 0 and _expired(deadline):
+    last_id = 0
+    while True:
+        if _expired(deadline):
             break
-        for term in _extract_terms(chunk.text):
-            if _matches_known_name(term, known_names):
-                continue
-            key = normalize_name(term)
-            if not key:
-                continue
-            labels.setdefault(key, term)
-            counts[key] = counts.get(key, 0) + 1
-            refs.setdefault(key, set()).add(chunk.source_ref)
+        chunks = session.exec(
+            select(Chunk)
+            .where(
+                Chunk.id > last_id,
+                Chunk.topic_id.in_(topic_ids),
+                Chunk.kind.in_(("learner_output", "tutor_turn")),
+            )
+            .order_by(Chunk.id)
+            .limit(SCOUT_CHECK_EVERY)
+        ).all()
+        if not chunks:
+            break
+        for chunk in chunks:
+            for term in _extract_terms(chunk.text):
+                if _matches_known_name(term, known_names):
+                    continue
+                key = normalize_name(term)
+                if not key:
+                    continue
+                labels.setdefault(key, term)
+                counts[key] = counts.get(key, 0) + 1
+                refs.setdefault(key, set()).add(chunk.source_ref)
+        last_id = int(chunks[-1].id or last_id)
+        if len(chunks) < SCOUT_CHECK_EVERY:
+            break
 
     candidates = [
         Candidate(
@@ -240,20 +255,38 @@ def orphan_note_candidates(
     session: Session, *, deadline: float | None = None
 ) -> list[Candidate]:
     """Return one candidate for each vault note with no concept links."""
-    chunks = session.exec(
-        select(Chunk).where(Chunk.kind == "vault_note").order_by(Chunk.source_ref, Chunk.ordinal)
-    ).all()
-    if not chunks:
-        return []
-    chunk_ids = [chunk.id for chunk in chunks if chunk.id is not None]
-    linked_ids = set(
-        session.exec(
-            select(ChunkConcept.chunk_id).where(ChunkConcept.chunk_id.in_(chunk_ids))
-        ).all()
-    )
     by_source: dict[str, list[Chunk]] = {}
-    for chunk in chunks:
-        by_source.setdefault(chunk.source_ref, []).append(chunk)
+    linked_ids: set[int] = set()
+    last_id = 0
+    while True:
+        if _expired(deadline):
+            break
+        chunks = session.exec(
+            select(Chunk)
+            .where(
+                Chunk.id > last_id,
+                Chunk.kind == "vault_note",
+            )
+            .order_by(Chunk.id)
+            .limit(SCOUT_CHECK_EVERY)
+        ).all()
+        if not chunks:
+            break
+        chunk_ids = [chunk.id for chunk in chunks if chunk.id is not None]
+        if _expired(deadline):
+            break
+        linked_ids.update(
+            session.exec(
+                select(ChunkConcept.chunk_id).where(
+                    ChunkConcept.chunk_id.in_(chunk_ids)
+                )
+            ).all()
+        )
+        for chunk in chunks:
+            by_source.setdefault(chunk.source_ref, []).append(chunk)
+        last_id = int(chunks[-1].id or last_id)
+        if len(chunks) < SCOUT_CHECK_EVERY:
+            break
 
     candidates = []
     for position, (source_ref, note_chunks) in enumerate(by_source.items()):
@@ -290,18 +323,29 @@ def extension_candidates(
     topic_ids = _program_topic_ids(session, program_id)
     if not topic_ids:
         return []
-    chunks = session.exec(
-        select(Chunk)
-        .where(
-            Chunk.topic_id.in_(topic_ids),
-            Chunk.kind.in_(("paper", "learner_output")),
-        )
-        .order_by(Chunk.source_ref, Chunk.ordinal)
-    ).all()
     by_source: dict[str, list[Chunk]] = {}
-    for chunk in chunks:
-        if (chunk.meta or {}).get("role") == "extension":
-            by_source.setdefault(chunk.source_ref, []).append(chunk)
+    last_id = 0
+    while True:
+        if _expired(deadline):
+            break
+        chunks = session.exec(
+            select(Chunk)
+            .where(
+                Chunk.id > last_id,
+                Chunk.topic_id.in_(topic_ids),
+                Chunk.kind.in_(("paper", "learner_output")),
+            )
+            .order_by(Chunk.id)
+            .limit(SCOUT_CHECK_EVERY)
+        ).all()
+        if not chunks:
+            break
+        for chunk in chunks:
+            if (chunk.meta or {}).get("role") == "extension":
+                by_source.setdefault(chunk.source_ref, []).append(chunk)
+        last_id = int(chunks[-1].id or last_id)
+        if len(chunks) < SCOUT_CHECK_EVERY:
+            break
 
     candidates = []
     for position, (source_ref, source_chunks) in enumerate(by_source.items()):
@@ -549,16 +593,6 @@ def rank(
         seen_titles.add(title_key)
         suggestions.append(suggestion)
 
-    session.add(
-        AgentEvent(
-            program_id=program.id,
-            kind="scout:ranked",
-            detail=(
-                f"candidates={len(kept_candidates)} items={len(raw_items)} "
-                f"suggestions={len(suggestions)}"
-            ),
-        )
-    )
     session.commit()
     for suggestion in suggestions:
         session.refresh(suggestion)
@@ -602,6 +636,17 @@ def run_scout(
     _digest, kept_candidates = build_digest(candidates, program, milestones)
     truncated = truncated or len(kept_candidates) < len(candidates)
     suggestions = rank(session, program, kept_candidates, llm=llm)
+    session.add(
+        AgentEvent(
+            program_id=program.id,
+            kind="scout:ranked",
+            detail=(
+                f"candidates={len(kept_candidates)} "
+                f"suggestions={len(suggestions)}"
+            ),
+        )
+    )
+    session.commit()
     return ScoutResult(suggestions=suggestions, counts=counts, truncated=truncated)
 
 

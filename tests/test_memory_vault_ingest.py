@@ -357,6 +357,88 @@ def test_reindex_progress_counts_read_failures(session, tmp_path):
     assert progress["indexed"] == result.indexed
 
 
+def test_reindex_vault_expired_deadline_truncates_without_orphan_sweep(
+    session,
+    tmp_path,
+    monkeypatch,
+):
+    from adaptive_academy.engine import vault as vault_mod
+
+    topic = _topic(session)
+    orphan = tmp_path / "orphan.md"
+    orphan.write_text("# Orphan\n\nKeep this indexed chunk.", encoding="utf-8")
+    assert reindex_vault(session, topic.id, str(tmp_path)).indexed == 1
+    orphan_ref = orphan.resolve().as_uri()
+    orphan.unlink()
+    for index in range(3):
+        (tmp_path / f"note-{index}.md").write_text(
+            f"# Note {index}\n\nNew content {index}.",
+            encoding="utf-8",
+        )
+    original_read = vault_mod._read_index_text
+    reads = 0
+
+    def counting_read(path, *, vault):
+        nonlocal reads
+        reads += 1
+        return original_read(path, vault=vault)
+
+    monkeypatch.setattr(vault_mod, "_read_index_text", counting_read)
+
+    result = reindex_vault(
+        session,
+        topic.id,
+        str(tmp_path),
+        deadline=time.perf_counter() - 1,
+    )
+
+    assert result.indexed <= 1
+    assert reads <= 1
+    assert result.truncated is True
+    assert session.exec(
+        select(Chunk).where(Chunk.source_ref == orphan_ref)
+    ).one()
+
+
+def test_capped_vault_scan_preserves_unseen_notes_and_emits_partial_event(
+    session,
+    tmp_path,
+    monkeypatch,
+):
+    from adaptive_academy.engine import vault as vault_mod
+
+    monkeypatch.setattr(vault_mod, "_MAX_SCAN_FILES", 2)
+    b0 = tmp_path / "b0.md"
+    b1 = tmp_path / "b1.md"
+    b0.write_text("# B0\n\nFirst existing note.", encoding="utf-8")
+    b1.write_text("# B1\n\nSecond existing note.", encoding="utf-8")
+    topic = _topic(session)
+    first = reindex_vault(session, topic.id, str(tmp_path))
+    assert first.indexed == 2
+
+    added = tmp_path / "a.md"
+    added.write_text("# A\n\nNew note sorts before both existing notes.", encoding="utf-8")
+    second = reindex_vault(session, topic.id, str(tmp_path))
+
+    refs = {
+        chunk.source_ref
+        for chunk in session.exec(
+            select(Chunk).where(Chunk.kind == "vault_note")
+        ).all()
+    }
+    assert refs == {
+        added.resolve().as_uri(),
+        b0.resolve().as_uri(),
+        b1.resolve().as_uri(),
+    }
+    partial = session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:reindex_partial")
+    ).all()
+    assert len(partial) == 1
+    assert partial[0].detail == "scan capped at 2 files; orphan sweep skipped"
+    assert second.removed == 0
+
+
 def test_unchanged_vault_chunks_are_retagged_when_a_concept_appears(session, tmp_path):
     from adaptive_academy.engine.vault import reindex_vault
     from adaptive_academy.models import ChunkConcept, Concept, Track

@@ -152,8 +152,13 @@ def _qa_text(pp: PaperProbe, answers: dict[int, str],
     return "\n\n".join(parts)
 
 
-def grade_paper_probe(session: Session, pp: PaperProbe, *,
-                      llm: LLMClient) -> list[Assessment]:
+def grade_paper_probe(
+    session: Session,
+    pp: PaperProbe,
+    *,
+    llm: LLMClient,
+    retriever: Retriever | None = None,
+) -> list[Assessment]:
     """Blind grade: reuse assess_concept per exercised load-bearing concept, then an outcome."""
     milestone = session.get(Milestone, pp.milestone_id)
     concepts = milestone_load_bearing(session, milestone)
@@ -171,7 +176,14 @@ def grade_paper_probe(session: Session, pp: PaperProbe, *,
         text = _qa_text(pp, answers, c.id)
         if not text:
             continue  # the paper's questions never exercised this concept — no evidence
-        result = assess_concept(session, c, "paper_probe", text, llm=llm)
+        result = assess_concept(
+            session,
+            c,
+            "paper_probe",
+            text,
+            llm=llm,
+            retriever=retriever,
+        )
         result.assessment.paper_probe_id = pp.id
         session.add(result.assessment)
         graded.append(result.assessment)

@@ -212,3 +212,15 @@ def test_frontier_returns_only_verified_concepts_with_outside_neighbors(session)
     session.flush()
 
     assert frontier(session, track.id) == [(solid.id, ["Outside"])]
+
+
+def test_frontier_expired_deadline_stops_before_concept_work(session):
+    import time
+
+    track, _concepts = _track(
+        session,
+        [f"Concept {index}" for index in range(300)],
+        title="Deadline",
+    )
+
+    assert frontier(session, track.id, deadline=time.monotonic() - 1) == []

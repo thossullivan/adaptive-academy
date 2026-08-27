@@ -76,7 +76,7 @@ def start_paper_probe(program_id: int, milestone_id: int, body: PaperProbeStartI
                     status="drafting")
     session.add(pp)
     session.flush()
-    index_paper(session, pp)
+    index_paper(session, pp, retriever=retriever)
     session.commit()
     session.refresh(pp)
     direct(session, pp, llm=llm, retriever=retriever)
@@ -96,7 +96,12 @@ def get_paper_probe(pid: int, session: Session = Depends(get_session)):
 
 
 @router.post("/api/paper-probe/{pid}/answers", response_model=PaperProbeAnswerOut)
-def post_answer(pid: int, body: PaperProbeAnswerIn, session: Session = Depends(get_session)):
+def post_answer(
+    pid: int,
+    body: PaperProbeAnswerIn,
+    session: Session = Depends(get_session),
+    retriever: Retriever = Depends(get_retriever),
+):
     pp = _probe_or_404(session, pid)
     if pp.status != "answering":
         raise HTTPException(400, f"probe is {pp.status}, not answering")
@@ -135,6 +140,7 @@ def post_answer(pid: int, body: PaperProbeAnswerIn, session: Session = Depends(g
         topic_id=topic_id,
         concept_ids=concept_ids,
         role=str(question.get("axis", "")),
+        retriever=retriever,
     )
     session.commit()
     return PaperProbeAnswerOut(status=pp.status)
@@ -142,11 +148,17 @@ def post_answer(pid: int, body: PaperProbeAnswerIn, session: Session = Depends(g
 
 @router.post("/api/paper-probe/{pid}/submit", response_model=PaperProbeOut)
 def submit_paper_probe(pid: int, session: Session = Depends(get_session),
-                       llm: LLMClient = Depends(get_llm)):
+                       llm: LLMClient = Depends(get_llm),
+                       retriever: Retriever = Depends(get_retriever)):
     pp = _probe_or_404(session, pid)
     if pp.status not in ("answering", "graded"):
         raise HTTPException(400, f"probe is {pp.status}, not answering")
-    grade_paper_probe(session, pp, llm=llm)  # idempotent — re-grade replaces prior evidence
+    grade_paper_probe(
+        session,
+        pp,
+        llm=llm,
+        retriever=retriever,
+    )  # idempotent — re-grade replaces prior evidence
     return _out(session, pp)
 
 

@@ -99,6 +99,7 @@ class IndexResult:
     indexed: int
     skipped: int
     removed: int
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -627,6 +628,7 @@ def index_assessment(
     a: Assessment,
     *,
     topic_id: int,
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index an assessment prompt and the learner response as separate sources."""
     if a.id is None:
@@ -638,6 +640,7 @@ def index_assessment(
         source_ref=f"assessment:{a.id}#q",
         topic_id=topic_id,
         concept_id=a.concept_id,
+        retriever=retriever,
     )
     response = index_text(
         session,
@@ -651,6 +654,7 @@ def index_assessment(
             "score": a.score,
             "verdict": a.verdict,
         },
+        retriever=retriever,
     )
     return _combine_index_results(question, response)
 
@@ -661,6 +665,7 @@ def index_roleplay_turn(
     *,
     topic_id: int,
     concept_ids: Iterable[int],
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index one learner or persona roleplay turn."""
     if t.id is None:
@@ -678,6 +683,7 @@ def index_roleplay_turn(
         source_ref=source_ref,
         topic_id=topic_id,
         concept_id=_single_concept_id(concept_ids),
+        retriever=retriever,
     )
 
 
@@ -709,6 +715,7 @@ def index_paper_answer(
     topic_id: int,
     concept_ids: Iterable[int],
     role: str = "",
+    retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index one persisted paper-probe answer."""
     if answer.id is None:
@@ -722,6 +729,7 @@ def index_paper_answer(
         topic_id=topic_id,
         concept_id=_single_concept_id(concept_ids),
         meta=metadata,
+        retriever=retriever,
     )
 
 
@@ -790,7 +798,12 @@ def index_source_doc(
     )
 
 
-def index_paper(session: Session, pp: PaperProbe) -> IndexResult:
+def index_paper(
+    session: Session,
+    pp: PaperProbe,
+    *,
+    retriever: Retriever | None = None,
+) -> IndexResult:
     """Index a paper probe under the milestone's first materialized topic."""
     if pp.id is None:
         raise ValueError("paper probe must be flushed before indexing")
@@ -819,6 +832,7 @@ def index_paper(session: Session, pp: PaperProbe) -> IndexResult:
             "title": pp.paper_title,
         },
         splitter=split_markdown,
+        retriever=retriever,
     )
 
 
@@ -875,10 +889,13 @@ def reindex_topic(
                 vault_path,
                 only_refs=vault_only_refs,
                 retriever=retriever,
-             progress=progress)
+                progress=progress,
+                deadline=deadline,
+            )
             indexed += result.indexed
             skipped += result.skipped
             removed += result.removed
+            truncated = result.truncated
 
     if "source_doc" in selected and not truncated:
         source_chunks = session.exec(
@@ -976,7 +993,7 @@ def _reembed_stale_chunks(
         .order_by(Chunk.id)
     ).all()
     for start in range(0, len(chunks), 64):
-        if start and time.perf_counter() >= deadline:
+        if time.perf_counter() >= deadline:
             return True
         batch = chunks[start : start + 64]
         chunk_ids = [chunk.id for chunk in batch if chunk.id is not None]

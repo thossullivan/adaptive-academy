@@ -82,7 +82,7 @@ def assess(concept_id: int, body: AssessIn, session: Session = Depends(get_sessi
         result = assess_concept(session, concept, body.kind, body.response, llm=llm,
                                 confidence_predicted=body.confidence_predicted,
                                 baseline_id=body.baseline_id, item_id=body.item_id,
-                                anchor_id=body.anchor_id)
+                                anchor_id=body.anchor_id, retriever=retriever)
     except AnchorError as e:
         raise HTTPException(400, str(e))
     # Engaging with a concept arms a delayed, unassisted retrieval check (§8.6).

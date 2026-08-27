@@ -1,4 +1,8 @@
 from datetime import datetime, timedelta
+import re
+import time
+
+import pytest
 
 from adaptive_academy.engine.scout import (
     Candidate,
@@ -349,3 +353,67 @@ def test_generators_stop_at_the_deadline(session):
     result = run_scout(session, program, llm=ScriptedLLMClient([]), deadline_s=0.0)
     assert result.truncated is True
     assert result.suggestions == []
+
+
+@pytest.mark.parametrize(
+    ("generator_name", "kind", "meta"),
+    (
+        ("orphan_term", "learner_output", {}),
+        ("orphan_note", "vault_note", {}),
+        ("extension", "learner_output", {"role": "extension"}),
+    ),
+)
+def test_expired_chunk_generators_do_not_issue_unbounded_queries(
+    session,
+    monkeypatch,
+    generator_name,
+    kind,
+    meta,
+):
+    program, _milestone, topic, _track = _program_topic(session)
+    for index in range(300):
+        _chunk(
+            session,
+            kind=kind,
+            topic_id=topic.id,
+            source_ref=f"file:///vault/note-{index}.md",
+            text=f"Repeated Novel Term {index}",
+            meta=meta,
+        )
+    session.commit()
+    original_exec = session.exec
+    chunk_queries: list[str] = []
+
+    def counting_exec(statement, *args, **kwargs):
+        rendered = str(statement)
+        if re.search(r"\bFROM chunk(?:\s|$)", rendered):
+            chunk_queries.append(rendered)
+        return original_exec(statement, *args, **kwargs)
+
+    monkeypatch.setattr(session, "exec", counting_exec)
+    deadline = time.monotonic() - 1
+    if generator_name == "orphan_term":
+        candidates = orphan_term_candidates(session, program.id, deadline=deadline)
+    elif generator_name == "orphan_note":
+        candidates = orphan_note_candidates(session, deadline=deadline)
+    else:
+        candidates = extension_candidates(session, program.id, deadline=deadline)
+
+    assert candidates == []
+    assert len(chunk_queries) <= 1
+    assert all("LIMIT :param_1" in query for query in chunk_queries)
+
+
+def test_frontier_candidates_pass_deadline_to_graph(session, monkeypatch):
+    program, _milestone, _topic, track = _program_topic(session)
+    deadline = time.monotonic() + 10
+    calls = []
+
+    def fake_frontier(session_arg, track_id, *, deadline):
+        calls.append((session_arg, track_id, deadline))
+        return []
+
+    monkeypatch.setattr("adaptive_academy.engine.scout.graph.frontier", fake_frontier)
+
+    assert frontier_candidates(session, program.id, deadline=deadline) == []
+    assert calls == [(session, track.id, deadline)]

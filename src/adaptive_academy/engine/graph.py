@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+import time
 
 from sqlalchemy import and_, func, literal, or_
 from sqlmodel import Session, col, select
@@ -388,7 +389,12 @@ def weakest_ancestor(
     return weakest_id, float(latest_score[weakest_id])
 
 
-def frontier(session: Session, track_id: int) -> list[tuple[int, list[str]]]:
+def frontier(
+    session: Session,
+    track_id: int,
+    *,
+    deadline: float | None = None,
+) -> list[tuple[int, list[str]]]:
     """Return verified concepts with at least one neighbor outside their track."""
     # Concept.track_id is non-null, so "outside any track" means a different track_id.
     concepts = session.exec(
@@ -398,6 +404,8 @@ def frontier(session: Session, track_id: int) -> list[tuple[int, list[str]]]:
     ).all()
     result: list[tuple[int, list[str]]] = []
     for concept in concepts:
+        if deadline is not None and time.monotonic() >= deadline:
+            break
         if concept.id is None:
             continue
         assessments = session.exec(

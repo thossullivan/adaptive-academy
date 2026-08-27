@@ -122,7 +122,12 @@ def _baseline_score(session: Session, concept_id: int) -> float | None:
 
 
 def grade_decay_check(
-    session: Session, prompt_id: int, response: str, *, llm: LLMClient
+    session: Session,
+    prompt_id: int,
+    response: str,
+    *,
+    llm: LLMClient,
+    retriever: Retriever | None = None,
 ) -> DecayResult:
     """Grade a delayed recall unassisted, compute decay vs prior understanding, reschedule."""
     prompt = session.get(RecallPrompt, prompt_id)
@@ -133,7 +138,14 @@ def grade_decay_check(
         raise ValueError("concept not found")
 
     baseline = _baseline_score(session, concept.id)
-    result = assess_concept(session, concept, "recall", response, llm=llm)
+    result = assess_concept(
+        session,
+        concept,
+        "recall",
+        response,
+        llm=llm,
+        retriever=retriever,
+    )
     recall_score = result.assessment.score
 
     decay_delta = None if baseline is None else round(recall_score - baseline, 4)

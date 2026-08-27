@@ -169,8 +169,14 @@ def _history(session: Session, rp: RoleplaySession) -> list[dict]:
     return [{"role": role_map[t.role], "content": t.content} for t in turns]
 
 
-def run_roleplay_turn(session: Session, rp: RoleplaySession, user_text: str, *,
-                      llm: LLMClient) -> TurnResult:
+def run_roleplay_turn(
+    session: Session,
+    rp: RoleplaySession,
+    user_text: str,
+    *,
+    llm: LLMClient,
+    retriever: Retriever | None = None,
+) -> TurnResult:
     milestone = session.get(Milestone, rp.milestone_id)
     concepts = milestone_load_bearing(session, milestone)
     concept_ids = [concept.id for concept in concepts if concept.id is not None]
@@ -184,6 +190,7 @@ def run_roleplay_turn(session: Session, rp: RoleplaySession, user_text: str, *,
         user_turn,
         topic_id=topic_id,
         concept_ids=concept_ids,
+        retriever=retriever,
     )
     session.commit()
 
@@ -205,6 +212,7 @@ def run_roleplay_turn(session: Session, rp: RoleplaySession, user_text: str, *,
         persona_turn,
         topic_id=topic_id,
         concept_ids=concept_ids,
+        retriever=retriever,
     )
 
     user_turns = len(session.exec(
@@ -230,7 +238,13 @@ def _transcript_text(session: Session, rp: RoleplaySession) -> str:
     return "\n".join(f"{speaker[t.role]}: {t.content}" for t in turns)
 
 
-def grade_roleplay(session: Session, rp: RoleplaySession, *, llm: LLMClient) -> list[Assessment]:
+def grade_roleplay(
+    session: Session,
+    rp: RoleplaySession,
+    *,
+    llm: LLMClient,
+    retriever: Retriever | None = None,
+) -> list[Assessment]:
     """Blind grade: reuse assess_concept per load-bearing concept, then write an outcome."""
     milestone = session.get(Milestone, rp.milestone_id)
     concepts = milestone_load_bearing(session, milestone)
@@ -246,7 +260,14 @@ def grade_roleplay(session: Session, rp: RoleplaySession, *, llm: LLMClient) -> 
 
     graded: list[Assessment] = []
     for c in concepts:
-        result = assess_concept(session, c, "roleplay", transcript, llm=llm)
+        result = assess_concept(
+            session,
+            c,
+            "roleplay",
+            transcript,
+            llm=llm,
+            retriever=retriever,
+        )
         result.assessment.roleplay_session_id = rp.id
         session.add(result.assessment)
         graded.append(result.assessment)

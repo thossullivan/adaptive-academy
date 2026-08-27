@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 from adaptive_academy.engine.memory import index_assessment, topic_id_for_concept
 from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.jsonout import extract_json
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import Assessment, Concept
 from adaptive_academy.prompts import TEACH
@@ -46,7 +47,14 @@ def parse_teaching_json(text: str) -> tuple[float, str, list[str], list[str]]:
     )
 
 
-def grade_teaching(session: Session, concept: Concept, explanation: str, *, llm: LLMClient) -> TeachResult:
+def grade_teaching(
+    session: Session,
+    concept: Concept,
+    explanation: str,
+    *,
+    llm: LLMClient,
+    retriever: Retriever | None = None,
+) -> TeachResult:
     """Grade a public explanation under a teaching expectancy; persist as a teach assessment."""
     user = (f"CONCEPT: {concept.name}\n\n<<<TEACHING>>>\n"
             f"{explanation or '(empty)'}\n<<<END_TEACHING>>>")
@@ -66,7 +74,7 @@ def grade_teaching(session: Session, concept: Concept, explanation: str, *, llm:
     )
     session.add(assessment)
     session.flush()
-    index_assessment(session, assessment, topic_id=topic_id)
+    index_assessment(session, assessment, topic_id=topic_id, retriever=retriever)
     session.commit()
     session.refresh(assessment)
     return TeachResult(
