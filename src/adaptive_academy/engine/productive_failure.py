@@ -173,7 +173,13 @@ def generate_challenge(
 
 
 def consolidate(
-    session: Session, concept: Concept, problem: str, attempt: str, *, llm: LLMClient
+    session: Session,
+    concept: Concept,
+    problem: str,
+    attempt: str,
+    *,
+    llm: LLMClient,
+    retriever: Retriever | None = None,
 ) -> ConsolidateResult:
     """Grade the generative attempt and teach the canonical approach; persist the record."""
     user = (f"CONCEPT: {concept.name}\n\n<<<PROBLEM>>>\n{problem}\n<<<END_PROBLEM>>>\n\n"
@@ -196,7 +202,7 @@ def consolidate(
     )
     session.add(assessment)
     session.flush()
-    index_assessment(session, assessment, topic_id=topic_id)
+    index_assessment(session, assessment, topic_id=topic_id, retriever=retriever)
     session.commit()
     session.refresh(assessment)
     return ConsolidateResult(

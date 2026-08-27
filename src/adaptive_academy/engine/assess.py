@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from sqlmodel import Session, select
 
 from adaptive_academy.jsonout import extract_json
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
@@ -215,6 +216,7 @@ def assess_concept(
     baseline_id: int | None = None,
     item_id: int | None = None,
     anchor_id: int | None = None,
+    retriever: Retriever | None = None,
 ) -> AssessmentResult:
     """Run an anchored probe, persist an Assessment, and update the KnowledgeEstimate."""
     from adaptive_academy.engine.memory import index_assessment, topic_id_for_concept
@@ -281,7 +283,7 @@ def assess_concept(
         baseline_assessment_id=baseline_id, delta=delta)
     session.add(assessment)
     session.flush()
-    index_assessment(session, assessment, topic_id=topic_id)
+    index_assessment(session, assessment, topic_id=topic_id, retriever=retriever)
 
     level, conf = level_from_score(final_score)
     estimate = session.exec(

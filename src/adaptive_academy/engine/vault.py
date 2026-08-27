@@ -11,6 +11,7 @@ import io
 import os
 import re
 import stat
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -143,8 +144,8 @@ def _scan_notes_with_skips(
     *,
     vault: Path,
     skip_dirs: frozenset[str] = frozenset({EXPORT_FOLDER}),
-) -> tuple[list[Path], list[Path]]:
-    """List safe notes and paths rejected for symlink or containment reasons."""
+) -> tuple[list[Path], list[Path], bool]:
+    """List safe notes, rejected paths, and whether the scan reached its end."""
     notes: list[Path] = []
     rejected: list[Path] = []
     for directory, dirnames, filenames in os.walk(root, followlinks=False):
@@ -166,15 +167,15 @@ def _scan_notes_with_skips(
                 rejected.append(path)
                 continue
             notes.append(path)
-            if len(notes) >= _MAX_SCAN_FILES:
-                return sorted(notes), sorted(rejected)
-    return sorted(notes), sorted(rejected)
+            if len(notes) > _MAX_SCAN_FILES:
+                return sorted(notes[:_MAX_SCAN_FILES]), sorted(rejected), False
+    return sorted(notes), sorted(rejected), True
 
 
 def scan_notes(root: Path, *, skip_dirs: frozenset[str] = frozenset({EXPORT_FOLDER})) -> list[Path]:
     """Recursively list `*.md` under root, skipping our export folder and dotfolders."""
     resolved_root = root.resolve()
-    notes, _ = _scan_notes_with_skips(
+    notes, _, _ = _scan_notes_with_skips(
         resolved_root,
         vault=resolved_root,
         skip_dirs=skip_dirs,
@@ -318,11 +319,17 @@ def _read_index_text(path: Path, *, vault: Path) -> str:
     )
 
 
-def build_title_index(root: Path | str) -> dict[str, str]:
+def build_title_index(
+    root: Path | str,
+    *,
+    deadline: float | None = None,
+) -> dict[str, str]:
     """Build a case-folded title and frontmatter-alias map for one vault sweep."""
     resolved_root = Path(root).resolve()
     titles: dict[str, str] = {}
     for path in scan_notes(resolved_root):
+        if deadline is not None and time.perf_counter() >= deadline:
+            break
         try:
             text = _read_index_text(path, vault=resolved_root)
         except (OSError, UnicodeError):
@@ -459,6 +466,7 @@ def reindex_vault(
     only_refs: set[str] | None = None,
     progress: dict[str, int] | None = None,
     retriever: Retriever | None = None,
+    deadline: float | None = None,
 ) -> IndexResult:
     """Index vault note text and wikilinks with one transaction per file.
 
@@ -478,12 +486,20 @@ def reindex_vault(
 
     vault = safe_vault_dir(vault_path)
     root = safe_child(vault, subfolder) if subfolder else vault
-    paths, rejected_paths = _scan_notes_with_skips(root, vault=vault)
+    paths, rejected_paths, complete = _scan_notes_with_skips(root, vault=vault)
     if only_refs is not None:
         paths = [path for path in paths if path.resolve().as_uri() in only_refs]
         rejected_paths = []
     current_refs = {path.resolve().as_uri() for path in paths}
-    title_index = build_title_index(vault)
+    truncated = deadline is not None and time.perf_counter() >= deadline
+    title_index = (
+        {}
+        if truncated
+        else build_title_index(vault, deadline=deadline)
+    )
+    truncated = truncated or (
+        deadline is not None and time.perf_counter() >= deadline
+    )
     indexed = 0
     skipped = len(rejected_paths)
     removed = 0
@@ -503,6 +519,9 @@ def reindex_vault(
         session.commit()
 
     for path in paths:
+        if deadline is not None and time.perf_counter() >= deadline:
+            truncated = True
+            break
         source_ref = path.resolve().as_uri()
         existing = session.exec(
             select(Chunk)
@@ -600,24 +619,35 @@ def reindex_vault(
         )
         progress_seen = {"indexed": indexed, "skipped": skipped, "removed": removed}
 
-    root_prefix = root.resolve().as_uri().rstrip("/") + "/"
-    existing_refs = {
-        chunk.source_ref
-        for chunk in session.exec(
-            select(Chunk).where(
-                Chunk.kind == "vault_note",
-                Chunk.topic_id == topic_id,
+    if complete and not truncated:
+        root_prefix = root.resolve().as_uri().rstrip("/") + "/"
+        existing_refs = {
+            chunk.source_ref
+            for chunk in session.exec(
+                select(Chunk).where(
+                    Chunk.kind == "vault_note",
+                    Chunk.topic_id == topic_id,
+                )
+            ).all()
+            if chunk.source_ref.startswith(root_prefix)
+        }
+        if only_refs is not None:
+            existing_refs &= only_refs
+        for source_ref in sorted(existing_refs - current_refs):
+            gone = _remove_vault_source(session, source_ref)
+            removed += gone
+            session.commit()
+            bump_progress(progress, removed=gone)
+    else:
+        count = _MAX_SCAN_FILES if not complete else len(paths)
+        session.add(
+            AgentEvent(
+                topic_id=topic_id,
+                kind="memory:reindex_partial",
+                detail=f"scan capped at {count} files; orphan sweep skipped",
             )
-        ).all()
-        if chunk.source_ref.startswith(root_prefix)
-    }
-    if only_refs is not None:
-        existing_refs &= only_refs
-    for source_ref in sorted(existing_refs - current_refs):
-        gone = _remove_vault_source(session, source_ref)
-        removed += gone
+        )
         session.commit()
-        bump_progress(progress, removed=gone)
 
     session.add(
         AgentEvent(
@@ -627,7 +657,12 @@ def reindex_vault(
         )
     )
     session.commit()
-    return IndexResult(indexed=indexed, skipped=skipped, removed=removed)
+    return IndexResult(
+        indexed=indexed,
+        skipped=skipped,
+        removed=removed,
+        truncated=truncated,
+    )
 
 
 def _track_markdown(session: Session, track: Track) -> str:
@@ -692,7 +727,7 @@ def ingest_vault(
         s.url for s in session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
     }
     titles: list[str] = []
-    paths, _ = _scan_notes_with_skips(root, vault=vault)
+    paths, _, _ = _scan_notes_with_skips(root, vault=vault)
     for path in paths:
         url = path.resolve().as_uri()
         if url in existing:

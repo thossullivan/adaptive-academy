@@ -79,17 +79,25 @@ def get_roleplay(sid: int, session: Session = Depends(get_session)):
 
 @router.post("/api/roleplay/{sid}/turns", response_model=RoleplayTurnOut)
 def post_turn(sid: int, body: RoleplayTurnIn, session: Session = Depends(get_session),
-              llm: LLMClient = Depends(get_llm)):
+              llm: LLMClient = Depends(get_llm),
+              retriever: Retriever = Depends(get_retriever)):
     rp = _session_or_404(session, sid)
     if rp.status != "active":
         raise HTTPException(400, f"session is {rp.status}, not active")
-    res = run_roleplay_turn(session, rp, body.content, llm=llm)
+    res = run_roleplay_turn(
+        session,
+        rp,
+        body.content,
+        llm=llm,
+        retriever=retriever,
+    )
     return RoleplayTurnOut(reply=res.reply, status=res.status)
 
 
 @router.post("/api/roleplay/{sid}/end", response_model=RoleplaySessionOut)
 def end_roleplay(sid: int, session: Session = Depends(get_session),
-                 llm: LLMClient = Depends(get_llm)):
+                 llm: LLMClient = Depends(get_llm),
+                 retriever: Retriever = Depends(get_retriever)):
     rp = _session_or_404(session, sid)
     if rp.status == "graded":
         return _out(session, rp)  # idempotent
@@ -98,7 +106,7 @@ def end_roleplay(sid: int, session: Session = Depends(get_session),
         session.add(rp)
         session.commit()
         session.refresh(rp)
-    grade_roleplay(session, rp, llm=llm)
+    grade_roleplay(session, rp, llm=llm, retriever=retriever)
     return _out(session, rp)
 
 

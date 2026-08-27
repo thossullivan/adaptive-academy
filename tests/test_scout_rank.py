@@ -89,10 +89,6 @@ def test_rank_stores_five_grounded_items_and_resolves_evidence(session):
     assert len(llm.calls) == 1
     assert "<<<CANDIDATES>>>" in llm.calls[0]["messages"][0]["content"]
     assert "<<<END_CANDIDATES>>>" in llm.calls[0]["messages"][0]["content"]
-    event = session.exec(
-        select(AgentEvent).where(AgentEvent.kind == "scout:ranked")
-    ).one()
-    assert event.program_id == program.id
 
 
 def test_rank_upserts_normalized_titles_without_duplicates(session):
@@ -229,3 +225,66 @@ def test_maybe_scout_fires_at_25_assessments_but_not_24(session, monkeypatch):
 
     assert result == ScoutResult(suggestions=[], counts={}, truncated=False)
     assert len(calls) == 1
+
+
+def test_run_scout_without_candidates_records_one_ranked_event(session):
+    program, _milestone = _program(session)
+    session.commit()
+
+    result = scout.run_scout(
+        session,
+        program,
+        llm=ScriptedLLMClient([]),
+    )
+
+    events = session.exec(
+        select(AgentEvent).where(
+            AgentEvent.program_id == program.id,
+            AgentEvent.kind == "scout:ranked",
+        )
+    ).all()
+    assert result.suggestions == []
+    assert len(events) == 1
+
+
+def test_empty_scout_run_advances_assessment_cadence(session):
+    program, milestone = _program(session)
+    topic = Topic(title="Retrieval")
+    session.add(topic)
+    session.flush()
+    track = Track(topic_id=topic.id, title="Retrieval")
+    session.add(track)
+    session.flush()
+    concept = Concept(track_id=track.id, name="Ranking")
+    session.add(concept)
+    session.flush()
+    session.add(
+        ProgramTopicLink(
+            milestone_id=milestone.id,
+            topic_id=topic.id,
+            status="started",
+        )
+    )
+    for index in range(25):
+        session.add(
+            Assessment(
+                concept_id=concept.id,
+                kind="self_explanation",
+                prompt=f"Probe {index}",
+            )
+        )
+    session.commit()
+
+    first = maybe_scout(session, program.id, llm=ScriptedLLMClient([]))
+    second = maybe_scout(session, program.id, llm=ScriptedLLMClient([]))
+
+    events = session.exec(
+        select(AgentEvent).where(
+            AgentEvent.program_id == program.id,
+            AgentEvent.kind == "scout:ranked",
+        )
+    ).all()
+    assert first is not None
+    assert first.suggestions == []
+    assert second is None
+    assert len(events) == 1

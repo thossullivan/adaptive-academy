@@ -1,14 +1,19 @@
 import importlib.util
 import math
+import time
 
 import pytest
 from sqlalchemy import event
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
 
 from adaptive_academy.api.routes_memory import memory_stats
 from adaptive_academy.db import ensure_fts, ensure_vec
-from adaptive_academy.engine.memory import ChunkFilter, content_hash
+from adaptive_academy.engine.memory import (
+    ChunkFilter,
+    _reembed_stale_chunks,
+    content_hash,
+)
 from adaptive_academy.llm.fts_retriever import FtsRetriever
 from adaptive_academy.llm.hybrid_retriever import HybridRetriever
 from adaptive_academy.llm.onnx_embedder import (
@@ -71,6 +76,39 @@ def test_scripted_embedder_is_deterministic_and_normalized():
     assert first == second
     assert len(first) == 384
     assert math.sqrt(sum(value * value for value in first)) == pytest.approx(1.0)
+
+
+def test_expired_stale_reembed_deadline_embeds_no_rows(vec_session):
+    topic = Topic(title="Expired re-embed")
+    vec_session.add(topic)
+    vec_session.flush()
+    chunk = _chunk("stale vector", "vault:stale", topic_id=topic.id)
+    vec_session.add(chunk)
+    vec_session.commit()
+
+    class CountingEmbedder(ScriptedEmbedder):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def embed(self, texts):
+            self.calls += 1
+            return super().embed(texts)
+
+    embedder = CountingEmbedder()
+    retriever = HybridRetriever(FtsRetriever(), embedder)
+
+    truncated = _reembed_stale_chunks(
+        vec_session,
+        retriever,
+        topic_id=topic.id,
+        deadline=time.perf_counter() - 1,
+    )
+
+    persisted = vec_session.exec(select(Chunk).where(Chunk.id == chunk.id)).one()
+    assert truncated is True
+    assert embedder.calls == 0
+    assert persisted.embedding_model is None
 
 
 @pytest.mark.skipif(TextEmbedding is None, reason="fastembed optional extra is unavailable")

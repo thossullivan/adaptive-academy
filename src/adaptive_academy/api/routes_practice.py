@@ -31,10 +31,18 @@ def generate(concept_id: int, session: Session = Depends(get_session),
 @router.post("/{concept_id}/productive_failure/consolidate", response_model=ConsolidateOut)
 def do_consolidate(concept_id: int, body: ConsolidateIn,
                    session: Session = Depends(get_session),
-                   llm: LLMClient = Depends(get_llm)) -> ConsolidateOut:
+                   llm: LLMClient = Depends(get_llm),
+                   retriever: Retriever = Depends(get_retriever)) -> ConsolidateOut:
     concept = session.get(Concept, concept_id)
     if concept is None:
         raise HTTPException(404, "concept not found")
-    result = consolidate(session, concept, body.problem, body.attempt, llm=llm)
+    result = consolidate(
+        session,
+        concept,
+        body.problem,
+        body.attempt,
+        llm=llm,
+        retriever=retriever,
+    )
     return ConsolidateOut(canonical=result.canonical, feedback=result.feedback,
                           score=result.score)
