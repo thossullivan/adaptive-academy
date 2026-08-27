@@ -236,11 +236,15 @@ def _read_text_descriptor(
     if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
         raise OSError("outside-vault-or-symlink")
 
-    root_flags = os.O_RDONLY | os.O_DIRECTORY
+    # O_NOFOLLOW on the root refuses a root swapped for a symlink between resolve() and
+    # open(); the fstat check refuses anything that is not a directory.
+    root_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     if hasattr(os, "O_CLOEXEC"):
         root_flags |= os.O_CLOEXEC
     descriptor = os.open(root, root_flags)
     try:
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("outside-vault-or-symlink")
         for index, name in enumerate(relative.parts):
             flags = os.O_RDONLY | os.O_NOFOLLOW
             if index < len(relative.parts) - 1:
@@ -250,16 +254,34 @@ def _read_text_descriptor(
             child_descriptor = os.open(name, flags, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child_descriptor
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        final_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(final_stat.st_mode):
             raise OSError("outside-vault-or-symlink")
         final_descriptor = descriptor
         descriptor = -1
         with os.fdopen(final_descriptor, "rb") as raw:
             with io.TextIOWrapper(raw, encoding="utf-8", errors=errors) as handle:
-                return handle.read(limit)
+                text = handle.read(limit)
+        _LAST_READ_MTIME[path] = final_stat.st_mtime
+        return text
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+
+
+# mtime observed on the descriptor that was actually read (same object as the text),
+# so callers never stat the path a second time and race a swap.
+_LAST_READ_MTIME: dict[Path, float] = {}
+
+
+def _read_index_text_with_mtime(path: Path, *, vault: Path) -> tuple[str, float]:
+    """Read a vault note and return (text, mtime) from the very descriptor that was read."""
+    _LAST_READ_MTIME.pop(path, None)
+    text = _read_index_text(path, vault=vault)
+    mtime = _LAST_READ_MTIME.pop(path, None)
+    if mtime is None:
+        mtime = path.stat(follow_symlinks=False).st_mtime
+    return text, mtime
 
 
 def _read_text_fallback(
@@ -446,10 +468,12 @@ def reindex_vault(
     from adaptive_academy.engine.memory import (
         IndexResult,
         bump_progress,
+        concept_name_index,
         content_hash,
         index_text,
         make_context,
         split_markdown,
+        tag_chunk_concepts,
     )
 
     vault = safe_vault_dir(vault_path)
@@ -465,6 +489,7 @@ def reindex_vault(
     removed = 0
     bump_progress(progress, skipped=len(rejected_paths))
     progress_seen = {"indexed": 0, "skipped": skipped, "removed": 0}
+    concept_names = concept_name_index(session, topic_id)
 
     for path in rejected_paths:
         session.add(
@@ -504,8 +529,7 @@ def reindex_vault(
             progress_seen["skipped"] += 1
             continue
         try:
-            text = _read_index_text(path, vault=vault)
-            source_mtime = path.stat(follow_symlinks=False).st_mtime
+            text, source_mtime = _read_index_text_with_mtime(path, vault=vault)
         except OSError:
             skipped += 1
             session.add(AgentEvent(
@@ -514,6 +538,8 @@ def reindex_vault(
                 detail=f"{source_ref} outside-vault-or-symlink",
             ))
             session.commit()
+            bump_progress(progress, skipped=1)
+            progress_seen["skipped"] += 1
             continue
         except UnicodeError as exc:
             skipped += 1
@@ -521,6 +547,8 @@ def reindex_vault(
                 topic_id=topic_id, kind="memory:reindex_skipped",
                 detail=f"{source_ref} {type(exc).__name__}"))
             session.commit()
+            bump_progress(progress, skipped=1)
+            progress_seen["skipped"] += 1
             continue
 
         frontmatter, _ = parse_frontmatter(text)
@@ -542,6 +570,10 @@ def reindex_vault(
         )
         if unchanged:
             skipped += len(pieces)
+            # Concepts/aliases may have appeared since the chunks were written; keep the
+            # ChunkConcept links current even when no text changed.
+            for chunk in existing:
+                tag_chunk_concepts(session, chunk, concept_names)
         else:
             result = index_text(
                 session,

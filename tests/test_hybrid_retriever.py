@@ -393,3 +393,25 @@ def test_hybrid_degrades_once_when_embedding_dimensions_mismatch(monkeypatch, ca
     assert isinstance(second, FtsRetriever)
     assert caplog.messages.count("Hybrid retrieval is unavailable; using FTS5.") == 1
     deps.reset_retriever_cache()
+
+
+def test_offline_mode_passes_local_files_only_to_fastembed(monkeypatch, tmp_path):
+    from adaptive_academy.llm import onnx_embedder
+
+    captured: dict = {}
+
+    class FakeModel:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def embed(self, texts):
+            import numpy as np
+
+            return [np.zeros(384, dtype="float32") for _ in texts]
+
+    monkeypatch.setattr(onnx_embedder, "TextEmbedding", FakeModel)
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_allow_download", False)
+    monkeypatch.setattr(onnx_embedder, "_model_is_cached", lambda *_a, **_k: True)
+    embedder = onnx_embedder.OnnxEmbedder()
+    embedder.embed(["x"])
+    assert captured.get("local_files_only") is True

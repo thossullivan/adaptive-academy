@@ -7,8 +7,11 @@ Create Date: 2026-08-25
 
 import sqlite3
 
+import warnings
+
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.exc import OperationalError
 
 from adaptive_academy.db import FTS_DDL
 
@@ -59,8 +62,19 @@ def upgrade() -> None:
         sa.Index("ix_vaultlink_src_ref", "src_ref"),
         sa.Index("ix_vaultlink_dst_ref", "dst_ref"),
     )
-    for statement in FTS_DDL:
-        op.execute(statement)
+    _apply_fts_ddl(op.execute)
+
+
+def _apply_fts_ddl(execute) -> bool:
+    """Create the FTS5 objects when the SQLite build has FTS5; otherwise keep the plain
+    tables and let the runtime degrade to the scripted retriever (no crash at upgrade)."""
+    try:
+        for statement in FTS_DDL:
+            execute(statement)
+    except OperationalError as exc:  # e.g. "no such module: fts5"
+        warnings.warn(f"FTS5 unavailable; skipping chunk_fts: {exc}", stacklevel=2)
+        return False
+    return True
 
 
 def downgrade() -> None:

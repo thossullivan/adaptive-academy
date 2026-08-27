@@ -1,3 +1,4 @@
+import pytest
 import os
 import time
 
@@ -316,3 +317,63 @@ def test_explicit_topic_reindex_preserves_note_owned_by_another_topic(
         )
     ).one()
     assert event.detail == note.resolve().as_uri()
+
+
+def test_descriptor_read_refuses_symlinked_vault_root(tmp_path):
+    import os
+
+    from adaptive_academy.engine import vault as vault_mod
+
+    if os.open not in os.supports_dir_fd:
+        pytest.skip("dir_fd unsupported")
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "note.md").write_text("# N\n\nbody", encoding="utf-8")
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    # The root passed to the descriptor walk is the symlink itself (a swapped root).
+    with pytest.raises(OSError):
+        vault_mod._read_text_descriptor(
+            link / "note.md", vault=link, limit=10_000, errors="strict"
+        )
+    # Mtime is taken from the descriptor that was read, not from a second stat().
+    text, mtime = vault_mod._read_index_text_with_mtime(real / "note.md", vault=real)
+    assert text.startswith("# N")
+    assert mtime == (real / "note.md").stat().st_mtime
+
+
+def test_reindex_progress_counts_read_failures(session, tmp_path):
+    from adaptive_academy.engine.vault import reindex_vault
+
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    (tmp_path / "ok.md").write_text("# OK\n\nfine", encoding="utf-8")
+    (tmp_path / "bad.md").write_bytes(b"\xff\xfe\x00")
+    progress = {"indexed": 0, "skipped": 0, "removed": 0}
+    result = reindex_vault(session, topic.id, str(tmp_path), progress=progress)
+    assert result.skipped >= 1
+    assert progress["skipped"] == result.skipped
+    assert progress["indexed"] == result.indexed
+
+
+def test_unchanged_vault_chunks_are_retagged_when_a_concept_appears(session, tmp_path):
+    from adaptive_academy.engine.vault import reindex_vault
+    from adaptive_academy.models import ChunkConcept, Concept, Track
+
+    topic = Topic(title="Stats")
+    session.add(topic)
+    session.commit()
+    (tmp_path / "bayes.md").write_text(
+        "# Notes\n\nBayesian Inference underpins the whole approach.", encoding="utf-8"
+    )
+    reindex_vault(session, topic.id, str(tmp_path))
+    assert session.exec(select(ChunkConcept)).all() == []
+    track = Track(topic_id=topic.id, title="Stats")
+    session.add(track)
+    session.commit()
+    session.add(Concept(track_id=track.id, name="Bayesian Inference"))
+    session.commit()
+    second = reindex_vault(session, topic.id, str(tmp_path))
+    assert second.indexed == 0  # text unchanged
+    assert len(session.exec(select(ChunkConcept)).all()) == 1

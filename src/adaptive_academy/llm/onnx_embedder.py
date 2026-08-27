@@ -1,6 +1,5 @@
 """FastEmbed-backed local ONNX text embeddings."""
 
-import inspect
 import os
 import tempfile
 from pathlib import Path
@@ -42,8 +41,10 @@ class OnnxEmbedder:
                 "cache_dir": self.cache_dir,
                 "lazy_load": True,
             }
-            parameters = inspect.signature(TextEmbedding.__init__).parameters
-            if not self.allow_download and "local_files_only" in parameters:
+            # fastembed forwards unknown kwargs to its model loader; pass the flag whenever
+            # downloads are disabled so a valid cache is used offline and a missing one
+            # fails fast instead of contacting Hugging Face.
+            if not self.allow_download:
                 kwargs["local_files_only"] = True
             self._model = TextEmbedding(**kwargs)
         vectors = [vector.tolist() for vector in self._model.embed(texts)]

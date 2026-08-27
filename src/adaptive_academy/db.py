@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 import sqlite3
 
@@ -11,6 +12,8 @@ try:
     import sqlite_vec
 except ImportError:
     sqlite_vec = None
+
+logger = logging.getLogger(__name__)
 
 engine = create_engine(
     settings.database_url,
@@ -62,6 +65,27 @@ def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(engine)
     ensure_fts(engine)
     ensure_vec(engine)
+    ensure_graph_backfill(engine)
+
+
+def ensure_graph_backfill(db_engine: Engine) -> bool:
+    """Populate ConceptEdge from existing foundations/aliases at startup (idempotent), so a
+    database upgraded in place gets its graph without a manual `just graph-backfill`."""
+    from sqlmodel import Session
+
+    from adaptive_academy.engine.graph import backfill
+
+    try:
+        with Session(db_engine) as session:
+            result = backfill(session)
+            session.commit()
+    except Exception as exc:  # noqa: BLE001 - startup must never crash on graph state
+        logger.warning("graph backfill skipped: %s", exc)
+        return False
+    if result.edges:
+        logger.info("graph backfill: tracks=%s edges=%s unresolved=%s",
+                    result.tracks, result.edges, result.unresolved)
+    return True
 
 
 def ensure_fts(db_engine: Engine) -> bool:

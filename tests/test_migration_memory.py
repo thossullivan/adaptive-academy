@@ -168,3 +168,29 @@ def test_memory_migration_downgrade_upgrade_clears_chunk_vectors(tmp_path):
     with engine.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM chunk_vec")).scalar_one() == 0
     engine.dispose()
+
+
+def test_memory_migration_skips_fts_ddl_when_fts5_is_missing():
+    import importlib.util
+    from pathlib import Path
+
+    from sqlalchemy.exc import OperationalError
+
+    spec = importlib.util.spec_from_file_location(
+        "mig_memory", Path("alembic/versions/ba15f4c29e71_memory_chunks.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    executed: list[str] = []
+
+    def no_fts5(statement: str) -> None:
+        executed.append(statement)
+        raise OperationalError(statement, {}, RuntimeError("no such module: fts5"))
+
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert module._apply_fts_ddl(no_fts5) is False
+    assert executed and "fts5" in executed[0]
+    assert any("FTS5 unavailable" in str(w.message) for w in caught)
