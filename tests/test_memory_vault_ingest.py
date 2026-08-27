@@ -152,6 +152,76 @@ def test_reindex_vault_skips_outside_file_symlink_and_indexes_normal_note(
     )
 
 
+def test_reindex_vault_indexes_normal_nested_note(session, tmp_path):
+    topic = _topic(session)
+    vault = tmp_path / "vault"
+    nested = vault / "sub"
+    nested.mkdir(parents=True)
+    note = nested / "note.md"
+    note.write_text("# Nested\n\nNormal nested text.", encoding="utf-8")
+
+    result = reindex_vault(session, topic.id, str(vault))
+
+    assert result.indexed == 1
+    assert session.exec(select(Chunk)).one().source_ref == note.resolve().as_uri()
+
+
+def test_reindex_vault_refuses_parent_symlink_swap(session, tmp_path, monkeypatch):
+    topic = _topic(session)
+    vault = tmp_path / "vault"
+    nested = vault / "sub"
+    nested.mkdir(parents=True)
+    note = nested / "note.md"
+    note.write_text("# Inside\n\nInside vault text.", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "note.md").write_text(
+        "# Secret\n\nOutside vault text.",
+        encoding="utf-8",
+    )
+    original_open = os.open
+    root_opens = 0
+    file_opens = 0
+    swapped = False
+
+    def swap_parent() -> None:
+        nonlocal swapped
+        if swapped:
+            return
+        note.unlink()
+        nested.rmdir()
+        nested.symlink_to(outside, target_is_directory=True)
+        swapped = True
+
+    def racing_open(path, flags, mode=0o777, *, dir_fd=None):
+        nonlocal root_opens, file_opens
+        target = os.fspath(path)
+        if dir_fd is None and target == os.fspath(vault):
+            root_opens += 1
+            if root_opens == 2:
+                swap_parent()
+        if dir_fd is None and target == os.fspath(note):
+            file_opens += 1
+            if file_opens == 2:
+                swap_parent()
+        if dir_fd is None:
+            return original_open(path, flags, mode)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "open", racing_open)
+
+    result = reindex_vault(session, topic.id, str(vault))
+
+    assert swapped
+    assert result.indexed == 0
+    assert result.skipped == 1
+    assert not session.exec(select(Chunk)).all()
+    skipped = session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:reindex_skipped")
+    ).one()
+    assert skipped.detail.endswith("note.md outside-vault-or-symlink")
+
+
 def test_ingest_vault_does_not_follow_symlinked_directory(session, tmp_path):
     topic = _topic(session)
     vault = tmp_path / "vault"

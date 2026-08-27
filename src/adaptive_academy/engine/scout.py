@@ -21,6 +21,7 @@ from sqlmodel import Session, col, select
 
 from adaptive_academy.engine import graph
 from adaptive_academy.engine.aliases import normalize_name
+from adaptive_academy.engine.memory import escape_markers
 from adaptive_academy.llm.structured import SCOUT_SCHEMA, structured_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
@@ -306,21 +307,21 @@ def _render_digest(
     milestones: list[Milestone],
 ) -> str:
     lines = [
-        f"PROGRAM: {program.title}",
-        f"GOAL: {program.goal_statement or program.title}",
+        f"PROGRAM: {escape_markers(program.title)}",
+        f"GOAL: {escape_markers(program.goal_statement or program.title)}",
         "MILESTONES:",
     ]
-    lines.extend(f"- {milestone.title}" for milestone in milestones)
+    lines.extend(f"- {escape_markers(milestone.title)}" for milestone in milestones)
     lines.append("<<<CANDIDATES>>>")
     for index, candidate in enumerate(candidates):
         lines.append(
             f"[{index}] "
             + json.dumps(
                 {
-                    "kind": candidate.kind,
-                    "label": candidate.label,
+                    "kind": escape_markers(candidate.kind),
+                    "label": escape_markers(candidate.label),
                     "weight": candidate.weight,
-                    "evidence": candidate.evidence,
+                    "evidence": _escape_prompt_value(candidate.evidence),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -328,6 +329,21 @@ def _render_digest(
         )
     lines.append("<<<END_CANDIDATES>>>")
     return "\n".join(lines)
+
+
+def _escape_prompt_value(value: object) -> object:
+    if isinstance(value, str):
+        return escape_markers(value)
+    if isinstance(value, list):
+        return [_escape_prompt_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_escape_prompt_value(item) for item in value)
+    if isinstance(value, dict):
+        return {
+            escape_markers(str(key)): _escape_prompt_value(item)
+            for key, item in value.items()
+        }
+    return value
 
 
 def build_digest(
@@ -454,7 +470,7 @@ def rank(
             break
         if not isinstance(raw_item, dict):
             continue
-        title = str(raw_item.get("title", "")).strip()
+        title = escape_markers(str(raw_item.get("title", "")).strip())
         title_key = normalize_name(title)
         candidate_kind = str(raw_item.get("candidate_kind", ""))
         if not title_key or title_key in seen_titles or candidate_kind not in SCOUT_KINDS:
@@ -482,7 +498,9 @@ def rank(
             candidate_kind=candidate_kind,
         )
         suggestion.title = title
-        suggestion.rationale = str(raw_item.get("rationale", "")).strip()
+        suggestion.rationale = escape_markers(
+            str(raw_item.get("rationale", "")).strip()
+        )
         suggestion.candidate_kind = candidate_kind
         suggestion.evidence = evidence
         suggestion.score = _score(raw_item.get("score", 0.0))

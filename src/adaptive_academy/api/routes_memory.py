@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import time
 from collections.abc import Callable
 
@@ -21,6 +20,8 @@ from adaptive_academy.api.schemas import (
     MemoryStatsOut,
 )
 from adaptive_academy.engine.memory import (
+    REINDEX_LOCK,
+    REINDEX_LOCK_TIMEOUT_S,
     DEFAULT_K,
     MEMORY_SNIPPET_CHARS,
     REINDEX_DEADLINE_S,
@@ -33,8 +34,8 @@ from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.models import Chunk, Concept, Topic
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
-_reindex_lock = threading.Lock()
-_REINDEX_LOCK_TIMEOUT_S = 0.5
+_reindex_lock = REINDEX_LOCK  # shared with the vault ingest route
+_REINDEX_LOCK_TIMEOUT_S = REINDEX_LOCK_TIMEOUT_S
 
 
 def memory_hit_out(hit: Hit) -> MemoryHitOut:
@@ -105,8 +106,28 @@ def reindex_memory(
 ) -> MemoryReindexOut | JSONResponse:
     if not _reindex_lock.acquire(timeout=_REINDEX_LOCK_TIMEOUT_S):
         raise HTTPException(409, "reindex already running")
+    started = time.perf_counter()
+    progress = {"indexed": 0, "skipped": 0, "removed": 0}
     try:
-        return _reindex_memory_locked(body, session, fetch, retriever)
+        return _reindex_memory_locked(body, session, fetch, retriever, progress, started)
+    except (IntegrityError, OperationalError):
+        # Every DB step (topic lookup, ownership query, per-topic work) lands here; work
+        # committed before the conflict is reported from `progress`, not lost.
+        session.rollback()
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        output = MemoryReindexOut(
+            indexed=progress["indexed"],
+            skipped=progress["skipped"],
+            removed=progress["removed"],
+            truncated=True,
+            ms=elapsed_ms,
+            note=(
+                "database conflict; partial counts: "
+                f"indexed={progress['indexed']} skipped={progress['skipped']} "
+                f"removed={progress['removed']}"
+            ),
+        )
+        return JSONResponse(status_code=409, content=output.model_dump(mode="json"))
     finally:
         _reindex_lock.release()
 
@@ -116,6 +137,8 @@ def _reindex_memory_locked(
     session: Session,
     fetch: Callable[[str], str | None],
     retriever: Retriever,
+    progress: dict[str, int],
+    started: float,
 ) -> MemoryReindexOut | JSONResponse:
     kinds = REINDEX_KINDS if body.kinds is None else _parse_kinds(body.kinds)
     unsupported_kinds = sorted(set(kinds) - set(REINDEX_KINDS))
@@ -148,10 +171,6 @@ def _reindex_memory_locked(
         if not vault_refs_by_topic:
             note = "no topic owns vault notes yet; pass topic_id to index new vault notes"
 
-    started = time.perf_counter()
-    indexed = 0
-    skipped = 0
-    removed = 0
     truncated = False
     for topic in topics:
         topic_kinds = tuple(
@@ -178,39 +197,19 @@ def _reindex_memory_locked(
                 deadline_s=remaining,
                 vault_only_refs=only_refs,
                 retriever=retriever,
+                progress=progress,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        except (IntegrityError, OperationalError):
-            session.rollback()
-            elapsed_ms = int((time.perf_counter() - started) * 1000)
-            output = MemoryReindexOut(
-                indexed=indexed,
-                skipped=skipped,
-                removed=removed,
-                truncated=True,
-                ms=elapsed_ms,
-                note=(
-                    "database conflict; partial counts: "
-                    f"indexed={indexed} skipped={skipped} removed={removed}"
-                ),
-            )
-            return JSONResponse(
-                status_code=409,
-                content=output.model_dump(mode="json"),
-            )
-        indexed += result.indexed
-        skipped += result.skipped
-        removed += result.removed
         if result.truncated:
             truncated = True
             break
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     return MemoryReindexOut(
-        indexed=indexed,
-        skipped=skipped,
-        removed=removed,
+        indexed=progress["indexed"],
+        skipped=progress["skipped"],
+        removed=progress["removed"],
         truncated=truncated,
         ms=elapsed_ms,
         note=note,

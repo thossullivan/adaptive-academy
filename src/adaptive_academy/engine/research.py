@@ -9,6 +9,7 @@ from adaptive_academy.engine.memory import (
     ALREADY_COVERED_MARKER,
     DEFAULT_K,
     INJECT_BUDGET_CHARS,
+    escape_markers,
     retrieve,
 )
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
@@ -264,7 +265,7 @@ def _vault_heading_block(hits: list[Hit]) -> str:
     headings: list[str] = []
     seen: set[str] = set()
     for hit in hits:
-        heading = (hit.chunk.heading or hit.chunk.context).strip()
+        heading = escape_markers((hit.chunk.heading or hit.chunk.context).strip())
         if not heading or heading in seen:
             continue
         candidate_headings = [*headings, heading]
