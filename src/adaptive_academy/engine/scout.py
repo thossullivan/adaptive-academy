@@ -127,6 +127,9 @@ def frontier_candidates(
 ) -> list[Candidate]:
     """Return outside graph neighbors reached from verified Program concepts."""
     grouped: dict[str, Candidate] = {}
+    # A neighbor that already exists as a concept or alias anywhere (e.g. reached through an
+    # alias edge from another track) is not a frontier: proposing it would duplicate a topic.
+    known = _program_concept_keys(session, program_id, deadline=deadline)
     for track in _program_tracks(session, program_id, deadline=deadline):
         if track.id is None or _expired(deadline):
             break
@@ -139,6 +142,8 @@ def frontier_candidates(
                 break
             for outside_name in outside_names:
                 key = normalize_name(outside_name)
+                if key in known:
+                    continue
                 evidence = [
                     {"kind": "concept", "id": concept_id},
                     {"kind": "neighbor", "name": outside_name},
@@ -161,6 +166,33 @@ def frontier_candidates(
                     weight=existing.weight + FRONTIER_WEIGHT,
                 )
     return sorted(grouped.values(), key=lambda item: (-item.weight, normalize_name(item.label)))
+
+
+def _program_concept_keys(
+    session: Session, program_id: int, *, deadline: float | None = None
+) -> set[str]:
+    """Normalized names of concepts and aliases that already exist inside this Program."""
+    keys: set[str] = set()
+    if _expired(deadline):
+        return keys
+    track_ids = [t.id for t in _program_tracks(session, program_id, deadline=deadline) if t.id]
+    if track_ids and not _expired(deadline):
+        keys.update(
+            normalize_name(name)
+            for name in session.exec(
+                select(Concept.name).where(col(Concept.track_id).in_(track_ids))
+            ).all()
+            if name and name.strip()
+        )
+    if not _expired(deadline):
+        keys.update(
+            normalize_name(name)
+            for name in session.exec(
+                select(ConceptAlias.canonical_name).where(ConceptAlias.program_id == program_id)
+            ).all()
+            if name and name.strip()
+        )
+    return keys
 
 
 def _known_concept_names(session: Session, *, deadline: float | None = None) -> list[str]:
@@ -528,6 +560,13 @@ def rank(
     llm: LLMClient,
 ) -> list[TopicSuggestion]:
     """Rank candidates once, validate citations, and upsert reviewable suggestions."""
+    if not candidates:
+        return []
+    known = _program_concept_keys(session, program.id) if program.id is not None else set()
+    candidates = [
+        c for c in candidates
+        if not (c.kind == "frontier" and normalize_name(c.label) in known)
+    ]
     if not candidates:
         return []
 

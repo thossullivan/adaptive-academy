@@ -232,6 +232,13 @@ def _since_label(session: Session, program: Program) -> str:
     return dt.strftime("%B %Y")
 
 
+def _source_line(source) -> str:
+    """One untrusted, delimiter-safe source line for the revision prompt."""
+    fields = (source.angle, source.title, source.url, source.summary)
+    angle, title, url, summary = (escape_markers(str(f or "")) for f in fields)
+    return f"- [{angle}] {title} ({url}) — {summary}".rstrip(" —")
+
+
 def run_revision(
     session: Session,
     program: Program,
@@ -282,10 +289,12 @@ def run_revision(
 
     emit("prompt", PROGRAM_REVISION.tag)
     user_msg = "\n\n".join([
-        "<<<CURRENT MAP>>>", escape_markers(serialize_map(session, program)),
+        "<<<CURRENT MAP>>>", escape_markers(serialize_map(session, program)), "<<<END_CURRENT MAP>>>",
         "<<<LEARNINGS DIGEST>>>", escape_markers(build_learnings_digest(session, program)),
+        "<<<END_LEARNINGS DIGEST>>>",
         "<<<SOURCES>>>",
-        "\n".join(f"- [{s.angle}] {s.title} ({s.url}) — {s.summary}".rstrip(" —") for s in raw),
+        "\n".join(_source_line(s) for s in raw),
+        "<<<END_SOURCES>>>",
     ])
     data = structured_json(llm, PROGRAM_REVISION,
                            [{"role": "user", "content": user_msg}],

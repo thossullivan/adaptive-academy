@@ -6,7 +6,8 @@ from sqlmodel import Session, select
 
 from adaptive_academy.api.deps import get_llm, get_session
 from adaptive_academy.api.schemas import ScoutOut, TopicSuggestionOut
-from adaptive_academy.engine.scout import run_scout
+from adaptive_academy.engine.aliases import normalize_name
+from adaptive_academy.engine.scout import _program_concept_keys, run_scout
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
@@ -109,6 +110,8 @@ def accept_suggestion(
     _require_proposed(suggestion)
     if suggestion.program_id is None or body is None or body.milestone_id is None:
         raise HTTPException(400, "a valid program milestone is required")
+    if normalize_name(suggestion.title) in _program_concept_keys(session, suggestion.program_id):
+        raise HTTPException(409, "a concept with this name already exists")
     milestone = session.get(Milestone, body.milestone_id)
     if (
         milestone is None
