@@ -92,7 +92,8 @@ def test_onnx_embedder_reads_model_and_cache_settings_at_construction(monkeypatc
             return [0.0] * 384
 
     class RecordingTextEmbedding:
-        def __init__(self, *, model_name, cache_dir, lazy_load):
+        def __init__(self, *, model_name, cache_dir, lazy_load, local_files_only=None):
+            assert local_files_only is True  # downloads disabled -> offline-only load
             calls.append((model_name, cache_dir, lazy_load))
 
         def embed(self, texts):
