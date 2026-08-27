@@ -486,3 +486,17 @@ def test_expired_deadline_stops_scan_and_orphan_sweep(session, tmp_path):
     assert session.exec(
         select(AgentEvent).where(AgentEvent.kind == "memory:reindex_partial")
     ).all()
+
+
+def test_capped_scan_reports_truncated(session, tmp_path, monkeypatch):
+    from adaptive_academy.engine import vault as vault_mod
+    from adaptive_academy.engine.vault import reindex_vault
+
+    monkeypatch.setattr(vault_mod, "_MAX_SCAN_FILES", 2)
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    for name in ("a", "b", "c"):
+        (tmp_path / f"{name}.md").write_text(f"# {name}\n\nbody {name}", encoding="utf-8")
+    result = reindex_vault(session, topic.id, str(tmp_path))
+    assert result.truncated is True
