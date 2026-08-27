@@ -8,7 +8,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from adaptive_academy.api.deps import get_fetcher, get_retriever, get_session
 from adaptive_academy.api.routes_vault import _resolve_path
@@ -23,6 +23,7 @@ from adaptive_academy.engine.memory import (
     topic_id_for_concept,
     REINDEX_LOCK,
     REINDEX_LOCK_TIMEOUT_S,
+    REINDEX_TOPIC_BATCH,
     DEFAULT_K,
     MEMORY_SNIPPET_CHARS,
     REINDEX_DEADLINE_S,
@@ -154,61 +155,68 @@ def _reindex_memory_locked(
             f"unsupported reindex kinds: {', '.join(unsupported_kinds)}",
         )
     vault_path = _resolve_path(body.vault_path) if "vault_note" in kinds else ""
-    topic_statement = select(Topic).order_by(Topic.id)
-    if body.topic_id is not None:
-        topic_statement = topic_statement.where(Topic.id == body.topic_id)
-    topics = session.exec(topic_statement).all()
-    if body.topic_id is not None and not topics:
+    deadline = started + REINDEX_DEADLINE_S
+    all_topics = body.topic_id is None
+    if not all_topics and session.get(Topic, body.topic_id) is None:
         raise HTTPException(404, "topic not found")
 
     # All-topic sweeps re-index only the notes each topic already owns; a topic never
-    # claims another topic's notes, and new notes need an explicit topic_id.
-    vault_refs_by_topic: dict[int, set[str]] | None = None
+    # claims another topic's notes, and new notes need an explicit topic_id. Ownership is
+    # discovered per topic (bounded), never as one global materialization.
     note = ""
-    if body.topic_id is None and "vault_note" in kinds:
-        vault_refs_by_topic = {}
-        for owner_id, source_ref in session.exec(
-            select(Chunk.topic_id, Chunk.source_ref)
-            .where(Chunk.kind == "vault_note")
-            .distinct()
-        ).all():
-            if owner_id is not None:
-                vault_refs_by_topic.setdefault(owner_id, set()).add(source_ref)
-        if not vault_refs_by_topic:
+    if all_topics and "vault_note" in kinds:
+        any_owner = session.exec(
+            select(Chunk.id)
+            .where(Chunk.kind == "vault_note", col(Chunk.topic_id).is_not(None))
+            .limit(1)
+        ).first()
+        if any_owner is None:
             note = "no topic owns vault notes yet; pass topic_id to index new vault notes"
 
     truncated = False
-    for topic in topics:
-        topic_kinds = tuple(
-            kind
-            for kind in kinds
-            if kind != "vault_note"
-            or vault_refs_by_topic is None
-            or topic.id in vault_refs_by_topic
-        )
-        if not topic_kinds:
-            continue
-        only_refs = None if vault_refs_by_topic is None else vault_refs_by_topic.get(topic.id)
-        remaining = REINDEX_DEADLINE_S - (time.perf_counter() - started)
-        if remaining <= 0:
+    last_topic_id = 0
+    while True:
+        # Deadline before every query, including the first topic lookup.
+        if time.perf_counter() >= deadline:
             truncated = True
             break
-        try:
-            result = reindex_topic(
-                session,
-                topic.id,
-                vault_path=vault_path,
-                fetch=fetch,
-                kinds=topic_kinds,
-                deadline_s=remaining,
-                vault_only_refs=only_refs,
-                retriever=retriever,
-                progress=progress,
+        topic_statement = select(Topic).where(Topic.id > last_topic_id).order_by(Topic.id)
+        if not all_topics:
+            topic_statement = topic_statement.where(Topic.id == body.topic_id)
+        topics = session.exec(topic_statement.limit(REINDEX_TOPIC_BATCH)).all()
+        if not topics:
+            break
+        last_topic_id = max(topic.id for topic in topics if topic.id is not None)
+        for topic in topics:
+            if time.perf_counter() >= deadline:
+                truncated = True
+                break
+            only_refs: set[str] | None = None
+            topic_kinds = kinds
+            if all_topics and "vault_note" in kinds:
+                only_refs = set(
+                    session.exec(
+                        select(Chunk.source_ref)
+                        .where(Chunk.kind == "vault_note", Chunk.topic_id == topic.id)
+                        .distinct()
+                    ).all()
+                )
+                if not only_refs:
+                    topic_kinds = tuple(kind for kind in kinds if kind != "vault_note")
+            if not topic_kinds:
+                continue
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                truncated = True
+                break
+            result = _reindex_one_topic(
+                session, topic.id, vault_path, fetch, retriever, progress,
+                kinds=topic_kinds, deadline_s=remaining, only_refs=only_refs,
             )
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
-        if result.truncated:
-            truncated = True
+            if result.truncated:
+                truncated = True
+                break
+        if truncated:
             break
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -220,6 +228,25 @@ def _reindex_memory_locked(
         ms=elapsed_ms,
         note=note,
     )
+
+
+def _reindex_one_topic(session, topic_id, vault_path, fetch, retriever, progress, *,
+                       kinds, deadline_s, only_refs):
+    try:
+        return reindex_topic(
+            session,
+            topic_id,
+            vault_path=vault_path,
+            fetch=fetch,
+            kinds=kinds,
+            deadline_s=deadline_s,
+            vault_only_refs=only_refs,
+            retriever=retriever,
+            progress=progress,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
 
 
 @router.get("/stats", response_model=MemoryStatsOut)

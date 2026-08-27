@@ -51,6 +51,7 @@ REINDEX_DEADLINE_S = 60.0
 REINDEX_LOCK = threading.Lock()
 REINDEX_LOCK_TIMEOUT_S = 0.5
 REEMBED_BATCH = 64
+REINDEX_TOPIC_BATCH = 64
 
 
 def bump_progress(progress: dict[str, int] | None, **deltas: int) -> None:
