@@ -1,10 +1,17 @@
+from collections.abc import Callable
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
 
-from adaptive_academy.api.deps import get_llm, get_researcher, get_session
+from adaptive_academy.api.deps import (
+    get_fetcher,
+    get_llm,
+    get_researcher,
+    get_retriever,
+    get_session,
+)
 from adaptive_academy.api.schemas import (
     ConceptOut,
     CreateTopicIn,
@@ -27,6 +34,7 @@ from adaptive_academy.api.schemas import (
 from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone_gate
+from adaptive_academy.engine.memory import index_source_doc, remove_source
 from adaptive_academy.engine.research import research_topic
 from adaptive_academy.engine.revision import revision_suggested
 from adaptive_academy.engine.track_markdown import (
@@ -39,15 +47,14 @@ from adaptive_academy.engine.track_markdown import (
     track_to_markdown,
 )
 from adaptive_academy.llm.researcher_types import ResearcherClient
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
     Concept,
-    ConceptAlias,
     Deliverable,
     Item,
-    KnowledgeEstimate,
     Milestone,
     Phase,
     Program,
@@ -179,6 +186,7 @@ def run_research(
     session: Session = Depends(get_session),
     researcher: ResearcherClient = Depends(get_researcher),
     llm: LLMClient = Depends(get_llm),
+    retriever: Retriever = Depends(get_retriever),
 ) -> ResearchOut:
     topic = session.get(Topic, topic_id)
     if topic is None:
@@ -187,7 +195,14 @@ def run_research(
     if intent is None:
         raise HTTPException(status_code=400, detail="topic has no intent")
 
-    result = research_topic(session, topic, intent, researcher=researcher, llm=llm)
+    result = research_topic(
+        session,
+        topic,
+        intent,
+        researcher=researcher,
+        llm=llm,
+        retriever=retriever,
+    )
     return ResearchOut(
         foundation=FoundationOut(
             overview=result.foundation.overview,
@@ -231,15 +246,25 @@ def review_sources(
     topic_id: int,
     body: ReviewSourcesIn,
     session: Session = Depends(get_session),
+    fetch: Callable[[str], str | None] = Depends(get_fetcher),
+    retriever: Retriever = Depends(get_retriever),
 ) -> list[SourceDocOut]:
     rows = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
     by_id = {s.id: s for s in rows}
+    newly_accepted: list[SourceDoc] = []
     for sid in body.accepted_ids:
-        if sid in by_id:
+        if sid in by_id and by_id[sid].status != "accepted":
             by_id[sid].status = "accepted"
+            newly_accepted.append(by_id[sid])
     for sid in body.pruned_ids:
         if sid in by_id:
             by_id[sid].status = "pruned"
+    for source in rows:
+        if source.status != "accepted" and source.id is not None:
+            remove_source(session, f"sourcedoc:{source.id}")
+    for source in newly_accepted:
+        if source.status == "accepted":
+            index_source_doc(session, source, fetch=fetch, retriever=retriever)
     session.commit()
     for s in rows:
         session.refresh(s)
@@ -364,41 +389,41 @@ def import_curriculum(
     if topic is None:
         raise HTTPException(404, "topic not found")
     view = markdown_to_track(body.markdown)
-    # Replace any existing track for this topic.
-    old = session.exec(select(Track).where(Track.topic_id == topic_id)).all()
-    for t in old:
-        for p in session.exec(select(Phase).where(Phase.track_id == t.id)).all():
+    # Policy: import replaces the track's phases/items/deliverables/sidebars ONLY.
+    # Concepts, KnowledgeEstimates, ConceptAliases, Assessments and ConceptEdges are
+    # competence evidence and graph history; they are never deleted by an import.
+    # The oldest track is reused (title/overview updated); other tracks lose their
+    # phase content and are removed only when they own no concepts.
+    old = session.exec(select(Track).where(Track.topic_id == topic_id).order_by(Track.id)).all()
+    track = None
+    for old_track in old:
+        for p in session.exec(select(Phase).where(Phase.track_id == old_track.id)).all():
             for it in session.exec(select(Item).where(Item.phase_id == p.id)).all():
                 session.delete(it)
             d = session.exec(select(Deliverable).where(Deliverable.phase_id == p.id)).first()
             if d:
                 session.delete(d)
             session.delete(p)
-        for s in session.exec(select(Sidebar).where(Sidebar.track_id == t.id)).all():
+        for s in session.exec(select(Sidebar).where(Sidebar.track_id == old_track.id)).all():
             session.delete(s)
-        # Concepts (and their estimates + program aliases) belong to the track too —
-        # delete them before the track, or the default cascade NULLs concept.track_id
-        # and violates NOT NULL. ConceptAlias.concept_id is also a NOT NULL FK (program
-        # topics get one alias row per concept via apply_program_aliases after curriculum
-        # generation), so it must go before the concept too or foreign_keys=ON raises.
-        for c in session.exec(select(Concept).where(Concept.track_id == t.id)).all():
-            est = session.exec(
-                select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == c.id)
-            ).first()
-            if est:
-                session.delete(est)
-            for alias in session.exec(
-                select(ConceptAlias).where(ConceptAlias.concept_id == c.id)
-            ).all():
-                session.delete(alias)
-            session.delete(c)
-        session.delete(t)
+        if track is None:
+            track = old_track
+            track.title = view.title
+            track.overview = view.overview
+            session.add(track)
+            continue
+        owns_concepts = session.exec(
+            select(Concept).where(Concept.track_id == old_track.id)
+        ).first() is not None
+        if not owns_concepts:
+            session.delete(old_track)
     session.commit()
 
-    track = Track(topic_id=topic_id, title=view.title, overview=view.overview)
-    session.add(track)
-    session.commit()
-    session.refresh(track)
+    if track is None:
+        track = Track(topic_id=topic_id, title=view.title, overview=view.overview)
+        session.add(track)
+        session.commit()
+        session.refresh(track)
     for pi, pv in enumerate(view.phases):
         phase = Phase(track_id=track.id, title=pv.title, position=pi,
                       est_hours=pv.est_hours, flags=pv.flags)

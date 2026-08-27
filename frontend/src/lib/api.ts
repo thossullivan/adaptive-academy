@@ -1,8 +1,96 @@
-import type { Conversation, SendResult, Topic, CreateTopicBody, ResearchResult, SourceDoc, Foundation, EventOut, Curriculum, Item, Assessment, Rubric, Retention, SRSCard, AssessBody, Remediation, Anchor, AnchorGen, Story, DecayDue, DecayGrade, Challenge, Consolidation, TeachResult, ShipResult, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, WindState, Comeback, Program, ProgramDetail, CreateProgramBody, GateReport, MilestoneInfo, ProgramContext, MapRevisionInfo, RoleplaySession, RoleplayTurnResult, PaperProbe } from './types';
+import type {
+  Anchor,
+  AnchorGen,
+  AssessBody,
+  Assessment,
+  Challenge,
+  Comeback,
+  ConceptGraph,
+  Consolidation,
+  Conversation,
+  CreateProgramBody,
+  CreateTopicBody,
+  Curriculum,
+  DecayDue,
+  DecayGrade,
+  EventOut,
+  Foundation,
+  GateReport,
+  GraphAncestor,
+  Item,
+  MapRevisionInfo,
+  MemoryReindexBody,
+  MemoryReindexResult,
+  MemorySearchResult,
+  MemoryStats,
+  MilestoneInfo,
+  PaperProbe,
+  Program,
+  ProgramContext,
+  ProgramDetail,
+  Remediation,
+  ResearchResult,
+  Retention,
+  RoleplaySession,
+  RoleplayTurnResult,
+  Rubric,
+  ScoutEvidence,
+  ScoutResult,
+  ScoutSuggestionGroup,
+  SendResult,
+  ShipResult,
+  SourceDoc,
+  SRSCard,
+  Story,
+  TeachResult,
+  Topic,
+  TopicSuggestion,
+  VaultExportAllResult,
+  VaultExportResult,
+  VaultIngestResult,
+  VaultStatus,
+  WindState
+} from './types';
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
   return r.json() as Promise<T>;
+}
+
+const SCOUT_KIND_ORDER = ['frontier', 'orphan_term', 'orphan_note', 'extension'];
+
+export function evidenceLabel(evidence: ScoutEvidence): string {
+  if (evidence.kind === 'concept' && evidence.id != null) return `Concept #${evidence.id}`;
+  if (evidence.kind === 'neighbor' && evidence.name) return `Neighbor: ${evidence.name}`;
+  if (evidence.kind === 'paper_probe' && evidence.id != null) {
+    return `Paper probe #${evidence.id}`;
+  }
+  if (evidence.ref) return evidence.ref;
+  if (evidence.name) return evidence.name;
+  return evidence.kind.replaceAll('_', ' ');
+}
+
+export function groupSuggestionsByKind(
+  suggestions: TopicSuggestion[]
+): ScoutSuggestionGroup[] {
+  const grouped = new Map<string, TopicSuggestion[]>();
+  for (const suggestion of suggestions) {
+    const rows = grouped.get(suggestion.candidate_kind) ?? [];
+    rows.push(suggestion);
+    grouped.set(suggestion.candidate_kind, rows);
+  }
+  const knownKinds = SCOUT_KIND_ORDER.filter((kind) => grouped.has(kind));
+  const extraKinds = [...grouped.keys()]
+    .filter((kind) => !SCOUT_KIND_ORDER.includes(kind))
+    .sort();
+  return [...knownKinds, ...extraKinds].map((kind) => ({
+    kind,
+    suggestions: grouped.get(kind) ?? []
+  }));
+}
+
+export function scoutCardTitle(suggestions: TopicSuggestion[]): string | null {
+  return suggestions.length ? `Scout found ${suggestions.length}` : null;
 }
 
 export const api = {
@@ -30,6 +118,10 @@ export const api = {
     fetch(`/api/topics/${topicId}/research`, { method: 'POST' }).then(j<ResearchResult>),
   getFoundation: (topicId: number) =>
     fetch(`/api/topics/${topicId}/foundation`).then(j<Foundation>),
+  getGraph: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/graph`).then(j<ConceptGraph>),
+  getAncestors: (conceptId: number, depth = 3) =>
+    fetch(`/api/concepts/${conceptId}/ancestors?depth=${depth}`).then(j<GraphAncestor[]>),
   listEvents: (topicId: number) => fetch(`/api/topics/${topicId}/events`).then(j<EventOut[]>),
   listSources: (topicId: number, status?: string) =>
     fetch(`/api/topics/${topicId}/sources${status ? `?status=${status}` : ''}`).then(j<SourceDoc[]>),
@@ -134,6 +226,26 @@ export const api = {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ vault_path })
     }).then(j<VaultExportAllResult>),
+  searchMemory: (
+    q: string,
+    opts: { topic_id?: number; concept_id?: number; kinds?: string[]; k?: number } = {}
+  ) => {
+    const params = new URLSearchParams({ q });
+    if (opts.topic_id != null) params.set('topic_id', String(opts.topic_id));
+    if (opts.concept_id != null) params.set('concept_id', String(opts.concept_id));
+    if (opts.kinds?.length) params.set('kinds', opts.kinds.join(','));
+    if (opts.k != null) params.set('k', String(opts.k));
+    return fetch(`/api/memory/search?${params}`).then(j<MemorySearchResult>);
+  },
+  reindexMemory: (body: MemoryReindexBody) =>
+    fetch('/api/memory/reindex', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(j<MemoryReindexResult>),
+  memoryStats: (topicId?: number) => {
+    const suffix = topicId == null ? '' : `?topic_id=${topicId}`;
+    return fetch(`/api/memory/stats${suffix}`).then(j<MemoryStats>);
+  },
   getFleet: () => fetch('/api/fleet').then(j<WindState[]>),
   getWind: (topicId: number) => fetch(`/api/topics/${topicId}/wind`).then(j<WindState>),
   getComeback: (topicId: number) => fetch(`/api/topics/${topicId}/comeback`).then(j<Comeback>),
@@ -184,6 +296,21 @@ export const api = {
     fetch(`/api/programs/${pid}/changes/${changeId}/accept`, { method: 'POST' }).then(j<ProgramDetail>),
   rejectChange: (pid: number, changeId: number) =>
     fetch(`/api/programs/${pid}/changes/${changeId}/reject`, { method: 'POST' }).then(j<ProgramDetail>),
+
+  runScout: (programId: number) =>
+    fetch(`/api/programs/${programId}/scout`, { method: 'POST' }).then(j<ScoutResult>),
+  listSuggestions: (programId: number, status?: string) => {
+    const suffix = status ? `?status=${encodeURIComponent(status)}` : '';
+    return fetch(`/api/programs/${programId}/suggestions${suffix}`).then(j<TopicSuggestion[]>);
+  },
+  acceptSuggestion: (suggestionId: number, milestoneId: number) =>
+    fetch(`/api/suggestions/${suggestionId}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ milestone_id: milestoneId })
+    }).then(j<TopicSuggestion>),
+  dismissSuggestion: (suggestionId: number) =>
+    fetch(`/api/suggestions/${suggestionId}/dismiss`, { method: 'POST' }).then(j<TopicSuggestion>),
 
   startRoleplay: (programId: number, milestoneId: number) =>
     fetch(`/api/programs/${programId}/milestones/${milestoneId}/roleplay`, { method: 'POST' })

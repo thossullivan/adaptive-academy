@@ -2,7 +2,7 @@ from adaptive_academy.prompts import PAPER_PROBE_DIRECTOR, PAPER_PROBE_OUTCOME
 
 
 def test_tags():
-    assert PAPER_PROBE_DIRECTOR.tag == "paper_probe.director@v1"
+    assert PAPER_PROBE_DIRECTOR.tag == "paper_probe.director@v2"
     assert PAPER_PROBE_OUTCOME.tag == "paper_probe.outcome@v1"
 
 

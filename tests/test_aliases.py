@@ -2,7 +2,7 @@ from sqlmodel import select
 
 from adaptive_academy.engine.aliases import apply_program_aliases, normalize_name
 from adaptive_academy.models import (
-    AgentEvent, Assessment, Concept, ConceptAlias, KnowledgeEstimate, Milestone,
+    AgentEvent, Assessment, Concept, ConceptAlias, ConceptEdge, KnowledgeEstimate, Milestone,
     Program, ProgramTopicLink, Topic, Track,
 )
 
@@ -81,6 +81,8 @@ def test_first_topic_registers_groups_second_topic_seeds(session):
     r2 = apply_program_aliases(session, topic2.id)
     assert r2.registered == 2  # both concepts join alias groups (one existing, one new)
     assert r2.seeded == [(second[0].id, "low")]  # seeded from most-recently-assessed member
+    assert {(e.src_concept_id, e.dst_concept_id) for e in session.exec(select(ConceptEdge)).all()} == {
+        (first[0].id, second[0].id), (second[0].id, first[0].id)}
     est = session.exec(
         select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == second[0].id)
     ).first()

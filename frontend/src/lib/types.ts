@@ -1,15 +1,39 @@
 export interface Concept { id: number; name: string; is_load_bearing: boolean; has_anchor?: boolean; }
+export type GraphEdgeKind = 'prerequisite' | 'related' | 'alias';
+export interface GraphEdge {
+  src: number;
+  dst: number;
+  kind: GraphEdgeKind;
+  weight: number;
+}
+export interface GraphLink {
+  source: number;
+  target: number;
+  kind: GraphEdgeKind;
+  weight: number;
+}
+export interface ConceptGraph { nodes: Concept[]; edges: GraphEdge[]; }
+export type GraphAncestor = [conceptId: number, depth: number];
 export interface Topic { id: number; title: string; concepts: Concept[]; intent?: Intent | null; }
 export interface EventOut { kind: string; detail: string; }
-export interface MessageOut { role: 'user' | 'tutor'; content: string; }
+export interface MemoryHit {
+  chunk_id: number;
+  kind: string;
+  heading: string;
+  snippet: string;
+  score: number;
+  source_ref: string;
+}
+export interface MessageOut { role: 'user' | 'tutor'; content: string; memory?: MemoryHit[]; }
 export interface Conversation {
   id: number; concept_id: number; attempt_logged: boolean;
   assistance_level: string; challenge_level: string; messages: MessageOut[];
 }
-export interface SendResult {
+export interface SendMessageOut {
   reply: string; attempt_logged: boolean;
-  assistance_level: string; challenge_level: string; events: EventOut[];
+  assistance_level: string; challenge_level: string; events: EventOut[]; memory: MemoryHit[];
 }
+export type SendResult = SendMessageOut;
 export interface Intent { goal: string; prior_knowledge: string; time_budget: string; }
 export interface SourceDoc {
   id: number; title: string; url: string; tier: number;
@@ -92,6 +116,24 @@ export interface VaultExportAllResult {
   topics: number;
   written: string[];
 }
+export interface MemorySearchResult { hits: MemoryHit[]; }
+export interface MemoryReindexBody {
+  topic_id?: number;
+  vault_path?: string;
+  kinds?: string[];
+}
+export interface MemoryReindexResult {
+  indexed: number;
+  skipped: number;
+  removed: number;
+  truncated: boolean;
+  ms: number;
+}
+export interface MemoryStats {
+  by_kind: Record<string, number>;
+  last_indexed_at: string | null;
+  retriever: string;
+}
 
 export interface WindState {
   topic_id: number;
@@ -147,6 +189,34 @@ export interface ProgramContext {
 export interface CreateProgramBody {
   title: string; goal_statement?: string; target_depth?: string; prior_knowledge?: string;
   weekly_time_budget?: string; horizon?: string; focus_area?: string;
+}
+
+export interface ScoutEvidence {
+  kind: string;
+  id?: number;
+  ref?: string;
+  name?: string;
+}
+export interface TopicSuggestion {
+  id: number;
+  program_id: number;
+  title: string;
+  rationale: string;
+  candidate_kind: string;
+  evidence: ScoutEvidence[];
+  score: number;
+  status: string;
+  created_at: string;
+  decided_at: string | null;
+}
+export interface ScoutResult {
+  suggestions: TopicSuggestion[];
+  candidates: Record<string, number>;
+  truncated: boolean;
+}
+export interface ScoutSuggestionGroup {
+  kind: string;
+  suggestions: TopicSuggestion[];
 }
 
 export type RoleplayTurnRow = { role: 'user' | 'persona'; content: string };

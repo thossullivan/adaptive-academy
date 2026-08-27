@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, Index, JSON, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -165,6 +165,47 @@ class SourceDoc(SQLModel, table=True):
     status: str = "proposed"  # proposed | accepted | pruned
     added_by: str = "researcher"
     created_at: datetime = Field(default_factory=_now)
+
+
+class Chunk(SQLModel, table=True):
+    """One indexed span of text used for retrieval and deduplication."""
+
+    __table_args__ = (
+        UniqueConstraint("source_ref", "ordinal", name="uq_chunk_source_ref_ordinal"),
+        Index("ix_chunk_kind_topic_id", "kind", "topic_id"),
+        Index("ix_chunk_kind_concept_id", "kind", "concept_id"),
+        Index("ix_chunk_source_ref", "source_ref"),
+        Index("ix_chunk_created_at", "created_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    kind: str
+    topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
+    concept_id: Optional[int] = Field(default=None, foreign_key="concept.id")
+    source_ref: str
+    ordinal: int = 0
+    heading: str = ""
+    text: str
+    context: str = ""
+    content_hash: str
+    meta: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    source_mtime: Optional[float] = None
+    embedding_model: Optional[str] = None
+    created_at: datetime = Field(default_factory=_now)
+
+
+class VaultLink(SQLModel, table=True):
+    """One resolved or unresolved wikilink from a vault note."""
+
+    __table_args__ = (
+        Index("ix_vaultlink_src_ref", "src_ref"),
+        Index("ix_vaultlink_dst_ref", "dst_ref"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    src_ref: str
+    dst_ref: str
+    dst_title: str
 
 
 class TopicFoundation(SQLModel, table=True):
@@ -359,7 +400,7 @@ class ProgramTopicLink(SQLModel, table=True):
     proposed_title: str = ""
     why: str = ""
     sources: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    added_by: str = "research"  # "research" | "revision"
+    added_by: str = "research"  # "research" | "revision" | "scout"
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -393,3 +434,65 @@ class MapChange(SQLModel, table=True):
     source_urls: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     status: str = "proposed"  # proposed | accepted | rejected
     created_at: datetime = Field(default_factory=_now)
+
+
+class ConceptEdge(SQLModel, table=True):
+    """Directed, typed, bi-temporal edge between two concepts."""
+
+    __table_args__ = (
+        Index(
+            "ix_conceptedge_src_concept_id_valid_until",
+            "src_concept_id",
+            "valid_until",
+        ),
+        Index(
+            "ix_conceptedge_dst_concept_id_valid_until",
+            "dst_concept_id",
+            "valid_until",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    src_concept_id: int = Field(foreign_key="concept.id")
+    dst_concept_id: int = Field(foreign_key="concept.id")
+    kind: str  # prerequisite | related | alias
+    weight: float = 1.0
+    origin: str  # researcher | revision | alias | learner
+    origin_ref: str = ""
+    valid_from: datetime = Field(default_factory=_now)
+    valid_until: Optional[datetime] = None
+    recorded_at: datetime = Field(default_factory=_now)
+
+
+class ChunkConcept(SQLModel, table=True):
+    """Which concepts a chunk mentions after deterministic string matching."""
+
+    __table_args__ = (
+        UniqueConstraint(
+            "chunk_id",
+            "concept_id",
+            name="uq_chunkconcept_chunk_id_concept_id",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    chunk_id: int = Field(foreign_key="chunk.id")
+    concept_id: int = Field(foreign_key="concept.id")
+    hits: int = 1
+
+
+class TopicSuggestion(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_topicsuggestion_status_program_id", "status", "program_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    program_id: Optional[int] = Field(default=None, foreign_key="program.id")
+    title: str
+    rationale: str
+    candidate_kind: str  # frontier | orphan_term | orphan_note | extension
+    evidence: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    score: float = 0.0
+    status: str = "proposed"  # proposed | accepted | dismissed
+    created_at: datetime = Field(default_factory=_now)
+    decided_at: Optional[datetime] = None

@@ -51,3 +51,56 @@ def test_returns_none_on_fetch_error():
 def test_returns_none_on_empty_body():
     assert fetch_artifact_text(
         "https://raw.githubusercontent.com/a", resolve=PUBLIC, get=lambda _u: b"   ") is None
+
+
+def _public(_host):
+    return ["93.184.216.34"]
+
+
+def test_redirect_to_non_https_or_internal_target_is_refused():
+    def respond(url):
+        if url == "https://github.com/x":
+            return 302, "http://169.254.169.254/latest/meta-data/", b""
+        raise AssertionError(f"unexpected request {url}")
+
+    assert fetch_artifact_text("https://github.com/x", resolve=_public, get_response=respond) is None
+
+
+def test_redirect_to_allowlisted_https_target_is_followed_once_validated():
+    seen = []
+
+    def respond(url):
+        seen.append(url)
+        if url == "https://github.com/x":
+            return 301, "https://raw.githubusercontent.com/x/README.md", b""
+        return 200, None, b"followed body"
+
+    assert (
+        fetch_artifact_text("https://github.com/x", resolve=_public, get_response=respond)
+        == "followed body"
+    )
+    assert seen == ["https://github.com/x", "https://raw.githubusercontent.com/x/README.md"]
+
+
+def test_redirect_to_non_allowlisted_https_host_is_refused():
+    def respond(url):
+        return 302, "https://evil.example.org/", b""
+
+    assert fetch_artifact_text("https://github.com/x", resolve=_public, get_response=respond) is None
+
+
+def test_redirect_chain_is_bounded():
+    def respond(url):
+        return 302, "https://github.com/next", b""
+
+    assert fetch_artifact_text("https://github.com/x", resolve=_public, get_response=respond) is None
+
+
+def test_default_opener_does_not_follow_redirects():
+    from urllib.request import HTTPRedirectHandler
+
+    from adaptive_academy.engine import fetch as fetch_mod
+
+    handler = next(h for h in fetch_mod._OPENER.handlers if isinstance(h, HTTPRedirectHandler))
+    assert type(handler).__name__ == "_NoRedirect"
+    assert handler.redirect_request(None, None, 302, "Found", {}, "https://x/") is None

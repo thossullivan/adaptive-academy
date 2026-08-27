@@ -1,13 +1,15 @@
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlmodel import Session
 
 from adaptive_academy.engine.levels import compute_levels
-from adaptive_academy.prompts import build_tutor_system_prompt
+from adaptive_academy.engine.memory import index_message, memory_blocks_for_tutor
 from adaptive_academy.engine.tools import TIERS, TOOLS, reveal_gate
+from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.llm.types import LLMClient, LLMResponse, ToolCall
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
+from adaptive_academy.prompts import build_tutor_system_prompt
 
 _MAX_STEPS = 6
 _FALLBACK = "Let's slow down — tell me what you've tried so far, and we'll work from there."
@@ -17,6 +19,7 @@ _FALLBACK = "Let's slow down — tell me what you've tried so far, and we'll wor
 class TurnResult:
     reply: str
     events: list[AgentEvent]
+    memory: list[Hit] = field(default_factory=list)
 
 
 def _history(convo: Conversation) -> list[dict]:
@@ -29,6 +32,8 @@ def run_tutor_turn(
     convo: Conversation,
     user_text: str,
     llm: LLMClient,
+    *,
+    retriever: Retriever | None = None,
 ) -> TurnResult:
     events: list[AgentEvent] = []
 
@@ -38,14 +43,39 @@ def run_tutor_turn(
         events.append(ev)
 
     # Persist the incoming user message.
-    session.add(Message(conversation_id=convo.id, role="user", content=user_text))
+    user_message = Message(conversation_id=convo.id, role="user", content=user_text)
+    session.add(user_message)
+    session.flush()
+    index_message(
+        session,
+        user_message,
+        concept_id=convo.concept_id,
+        topic_id=convo.topic_id,
+        retriever=retriever,
+    )
     session.commit()
     session.refresh(convo)
 
     concept = session.get(Concept, convo.concept_id)
     levels = compute_levels(concept.estimate if concept else None)
     emit("levels", f"assistance={levels.assistance} challenge={levels.challenge}")
-    system = build_tutor_system_prompt(concept.name if concept else "", levels)
+    memory_block = ""
+    covered_block = ""
+    memory_hits: list[Hit] = []
+    if retriever is not None and concept is not None:
+        memory_block, covered_block, memory_hits = memory_blocks_for_tutor(
+            session,
+            retriever,
+            convo,
+            concept,
+            user_text,
+        )
+    system = build_tutor_system_prompt(
+        concept.name if concept else "",
+        levels,
+        memory_block=memory_block,
+        covered_block=covered_block,
+    )
 
     messages = _history(convo)
     reply_text = ""
@@ -81,9 +111,19 @@ def run_tutor_turn(
         reply_text = _FALLBACK
 
     # Persist the tutor reply.
-    session.add(Message(conversation_id=convo.id, role="tutor", content=reply_text))
+    tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply_text)
+    session.add(tutor_message)
+    session.flush()
+    index_message(
+        session,
+        tutor_message,
+        concept_id=convo.concept_id,
+        topic_id=convo.topic_id,
+        levels=levels,
+        retriever=retriever,
+    )
     session.commit()
-    return TurnResult(reply=reply_text, events=events)
+    return TurnResult(reply=reply_text, events=events, memory=memory_hits)
 
 
 def _assistant_tool_blocks(resp: LLMResponse) -> list[dict]:

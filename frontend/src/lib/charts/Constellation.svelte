@@ -9,15 +9,23 @@
     type Simulation
   } from 'd3-force';
   import { VERDICT_COLOR, VERDICT_LABEL, type Verdict } from '$lib/competence';
+  import type { GraphLink } from '$lib/types';
 
   type Node = { id: number; name: string; verdict: Verdict; loadBearing: boolean; hasAnchor: boolean };
-  type Edge = { source: number; target: number };
 
   let {
     nodes = [],
     links = [],
+    selected = null,
+    highlighted = [],
     onselect = (_id: number) => {}
-  }: { nodes?: Node[]; links?: Edge[]; onselect?: (id: number) => void } = $props();
+  }: {
+    nodes?: Node[];
+    links?: GraphLink[];
+    selected?: number | null;
+    highlighted?: number[];
+    onselect?: (id: number) => void;
+  } = $props();
 
   let w = $state(800);
   let h = $state(520);
@@ -27,7 +35,9 @@
   // Mutable simulation nodes; `frame` bumps to push positions into the template each tick.
   type SimNode = Node & { x: number; y: number };
   let simNodes = $state<SimNode[]>([]);
-  let simLinks = $state<{ source: any; target: any }[]>([]);
+  let simLinks = $state<
+    { source: SimNode; target: SimNode; kind: GraphLink['kind']; weight: number }[]
+  >([]);
 
   const LEGEND: Verdict[] = ['solid', 'verified', 'unverified', 'shaky', 'untested'];
 
@@ -45,7 +55,12 @@
     const byId = new Map(seeded.map((n) => [n.id, n]));
     simLinks = links
       .filter((l) => byId.has(l.source) && byId.has(l.target))
-      .map((l) => ({ source: byId.get(l.source), target: byId.get(l.target) }));
+      .map((l) => ({
+        source: byId.get(l.source)!,
+        target: byId.get(l.target)!,
+        kind: l.kind,
+        weight: l.weight
+      }));
 
     sim = forceSimulation(seeded as any)
       .force('charge', forceManyBody().strength(-340))
@@ -84,6 +99,8 @@
   }
 
   const posById = $derived(new Map(simNodes.map((n) => [n.id, n])));
+  const highlightedSet = $derived(new Set(highlighted));
+  const selectedSet = $derived(new Set(selected == null ? highlighted : [selected, ...highlighted]));
 </script>
 
 <div class="relative h-[clamp(380px,60vh,640px)] w-full overflow-hidden rounded-[var(--radius-lg)] border border-border bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--info)_7%,transparent),transparent_55%)]" bind:clientWidth={w} bind:clientHeight={h}>
@@ -100,15 +117,18 @@
       {@const s = posById.get(l.source.id)}
       {@const t = posById.get(l.target.id)}
       {#if s && t}
-        {@const lit = hovered != null && (l.source.id === hovered || l.target.id === hovered)}
+        {@const lit = selected != null
+          ? selectedSet.has(l.source.id) && selectedSet.has(l.target.id)
+          : hovered != null && (l.source.id === hovered || l.target.id === hovered)}
         <line
           x1={s.x}
           y1={s.y}
           x2={t.x}
           y2={t.y}
-          stroke={lit ? 'var(--accent)' : 'var(--border-strong)'}
+          stroke={lit ? 'var(--accent)' : l.kind === 'related' ? 'var(--info)' : 'var(--border-strong)'}
           stroke-width={lit ? 1.5 : 0.8}
-          opacity={hovered == null ? 0.55 : lit ? 0.9 : 0.18}
+          stroke-dasharray={l.kind === 'related' ? '5 4' : l.kind === 'alias' ? '2 4' : undefined}
+          opacity={selected == null && hovered == null ? 0.55 : lit ? 0.9 : 0.18}
         />
       {/if}
     {/each}
@@ -117,7 +137,9 @@
     {#each simNodes as n (n.id)}
       {@const r = radius(n)}
       {@const c = VERDICT_COLOR[n.verdict]}
-      {@const dim = hovered != null && !isConnected(n.id)}
+      {@const dim = selected != null
+        ? n.id !== selected && !highlightedSet.has(n.id)
+        : hovered != null && !isConnected(n.id)}
       <g
         transform="translate({n.x},{n.y})"
         class="cursor-pointer transition-opacity"
@@ -132,6 +154,9 @@
         <!-- glow -->
         <circle r={r + 8} fill={c} opacity={hovered === n.id ? 0.28 : 0.14} />
         <circle r={r} fill={c} stroke="var(--bg)" stroke-width="1.5" />
+        {#if n.id === selected || highlightedSet.has(n.id)}
+          <circle r={r + 6} fill="none" stroke="var(--accent)" stroke-width={n.id === selected ? 2 : 1.25} opacity="0.9" />
+        {/if}
         {#if n.loadBearing}
           <circle r={r + 3.5} fill="none" stroke={c} stroke-width="1" opacity="0.6" />
         {/if}

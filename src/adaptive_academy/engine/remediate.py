@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine import graph
+from adaptive_academy.engine.assess import level_from_score
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import REMEDIATE
@@ -12,7 +14,6 @@ from adaptive_academy.models import (
     Assessment,
     Concept,
     Item,
-    KnowledgeEstimate,
     Phase,
     SourceDoc,
     TopicFoundation,
@@ -88,10 +89,15 @@ def parse_remediation_json(text: str) -> RemediationDraft:
 
 def build_remediate_prompt(
     concept_name: str, gaps: list[str], level: str, *,
-    foundation_overview: str = "", sources_summary: str = "",
+    ancestor_name: str = "", foundation_overview: str = "",
+    sources_summary: str = "",
 ) -> tuple[str, str]:
     lines = [
         f"CONCEPT: {concept_name}",
+    ]
+    if ancestor_name:
+        lines.append(f"ANCESTOR: {ancestor_name}")
+    lines += [
         f"LEARNER PRIOR-KNOWLEDGE LEVEL: {level}",
         "ASSESSED GAPS (one targeted item each):",
     ]
@@ -133,6 +139,25 @@ def _covered_keys(session: Session, track_id: int, concept_name: str) -> set[str
     }
 
 
+def _earliest_concept_phase(
+    session: Session,
+    concept: Concept,
+) -> tuple[list[Phase], int] | None:
+    """Return the concept's earliest referenced phase, then its track's first phase."""
+    phases = session.exec(
+        select(Phase)
+        .where(Phase.track_id == concept.track_id)
+        .order_by(Phase.position)
+    ).all()
+    if not phases:
+        return None
+    for index, phase in enumerate(phases):
+        items = session.exec(select(Item).where(Item.phase_id == phase.id)).all()
+        if any(concept.name in (item.concept_refs or []) for item in items):
+            return phases, index
+    return phases, 0
+
+
 def remediate_concept(session: Session, concept: Concept, *,
                       llm: LLMClient, assessment_id: int | None = None) -> RemediationResult:
     track = session.get(Track, concept.track_id)
@@ -161,9 +186,22 @@ def remediate_concept(session: Session, concept: Concept, *,
     if not phases:
         raise RemediationError("track has no phases to remediate into")
 
-    estimate = session.exec(
-        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
-    level = estimate.level if estimate else "high"
+    level = level_from_score(assessment.score)[0]
+    ancestor_name = ""
+    ancestor_target: tuple[list[Phase], int] | None = None
+    weakest = graph.weakest_ancestor(session, concept.id)
+    if weakest is not None:
+        ancestor = session.get(Concept, weakest[0])
+        ancestor_level = level_from_score(weakest[1])[0]
+        target_strength = (graph.LEVEL_ORDER[level], assessment.score)
+        ancestor_strength = (graph.LEVEL_ORDER[ancestor_level], weakest[1])
+        if ancestor is not None and ancestor_strength < target_strength:
+            ancestor_name = ancestor.name
+            ancestor_target = _earliest_concept_phase(session, ancestor)
+            emit(
+                "remediate:ancestor",
+                f"{ancestor.name} (concept {ancestor.id}, level {ancestor_level})",
+            )
     foundation = session.exec(
         select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)).first()
     sources = session.exec(
@@ -173,6 +211,7 @@ def remediate_concept(session: Session, concept: Concept, *,
 
     system, user = build_remediate_prompt(
         concept.name, open_gaps, level,
+        ancestor_name=ancestor_name,
         foundation_overview=(foundation.overview if foundation else ""),
         sources_summary=sources_summary)
     emit("prompt", REMEDIATE.tag)
@@ -182,13 +221,22 @@ def remediate_concept(session: Session, concept: Concept, *,
     planned = plan_remediation_items(draft.items, concept.name, open_gaps, covered)
     emit("remediate:generated", f"{len(planned)} item(s)")
 
+    placement_phases = ancestor_target[0] if ancestor_target is not None else phases
     statuses = [
-        [it.status for it in session.exec(
-            select(Item).where(Item.phase_id == p.id)).all()]
-        for p in phases
+        [
+            item.status
+            for item in session.exec(
+                select(Item).where(Item.phase_id == phase.id)
+            ).all()
+        ]
+        for phase in placement_phases
     ]
-    target_idx = choose_target_phase(statuses)
-    target = phases[target_idx]
+    target_idx = (
+        ancestor_target[1]
+        if ancestor_target is not None
+        else choose_target_phase(statuses)
+    )
+    target = placement_phases[target_idx]
     base_pos = len(statuses[target_idx])
 
     created: list[Item] = []
@@ -202,7 +250,11 @@ def remediate_concept(session: Session, concept: Concept, *,
 
     revisit_key = f"revisit:{gap_key(concept.name)}"
     if draft.revisit and revisit_key not in covered:
-        later = phases[target_idx + 1] if target_idx + 1 < len(phases) else target
+        later = (
+            placement_phases[target_idx + 1]
+            if target_idx + 1 < len(placement_phases)
+            else target
+        )
         rtext = str(draft.revisit.get("text") or "").strip() or \
             f"Revisit & self-explain: {concept.name}"
         rpos = len(session.exec(select(Item).where(Item.phase_id == later.id)).all())

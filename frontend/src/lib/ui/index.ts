@@ -11,3 +11,4 @@ export { default as Select } from './Select.svelte';
 export { default as Markdown } from './Markdown.svelte';
 export { default as SignalStrip } from './SignalStrip.svelte';
 export { default as ComebackCard } from './ComebackCard.svelte';
+export { default as ScoutCard } from './ScoutCard.svelte';

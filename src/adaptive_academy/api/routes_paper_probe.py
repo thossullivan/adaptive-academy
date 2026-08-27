@@ -1,14 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
-from adaptive_academy.api.deps import get_llm, get_session
+from adaptive_academy.api.deps import get_llm, get_retriever, get_session
 from adaptive_academy.api.schemas import (
     PaperProbeAnswerIn, PaperProbeAnswerOut, PaperProbeAnswerRow, PaperProbeOut,
     PaperProbeStartIn, PaperQuestionRow, ScorecardRow,
 )
 from adaptive_academy.engine.gates import milestone_load_bearing
+from adaptive_academy.engine.memory import (
+    index_paper,
+    index_paper_answer,
+    topic_id_for_concept,
+)
 from adaptive_academy.engine.paper import PaperIngestError, ingest_paper
 from adaptive_academy.engine.paper_probe import direct, grade_paper_probe
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     Assessment, Concept, Milestone, PaperProbe, PaperProbeAnswer,
@@ -53,7 +59,8 @@ def _out(session: Session, pp: PaperProbe) -> PaperProbeOut:
              response_model=PaperProbeOut)
 def start_paper_probe(program_id: int, milestone_id: int, body: PaperProbeStartIn,
                       session: Session = Depends(get_session),
-                      llm: LLMClient = Depends(get_llm)):
+                      llm: LLMClient = Depends(get_llm),
+                      retriever: Retriever = Depends(get_retriever)):
     milestone = session.get(Milestone, milestone_id)
     if milestone is None or milestone.program_id != program_id:
         raise HTTPException(404, "milestone not found")
@@ -68,9 +75,11 @@ def start_paper_probe(program_id: int, milestone_id: int, body: PaperProbeStartI
                     paper_url=body.url or "", paper_text=extract.text, source=extract.source,
                     status="drafting")
     session.add(pp)
+    session.flush()
+    index_paper(session, pp, retriever=retriever)
     session.commit()
     session.refresh(pp)
-    direct(session, pp, llm=llm)
+    direct(session, pp, llm=llm, retriever=retriever)
     return _out(session, pp)
 
 
@@ -87,7 +96,12 @@ def get_paper_probe(pid: int, session: Session = Depends(get_session)):
 
 
 @router.post("/api/paper-probe/{pid}/answers", response_model=PaperProbeAnswerOut)
-def post_answer(pid: int, body: PaperProbeAnswerIn, session: Session = Depends(get_session)):
+def post_answer(
+    pid: int,
+    body: PaperProbeAnswerIn,
+    session: Session = Depends(get_session),
+    retriever: Retriever = Depends(get_retriever),
+):
     pp = _probe_or_404(session, pid)
     if pp.status != "answering":
         raise HTTPException(400, f"probe is {pp.status}, not answering")
@@ -96,21 +110,55 @@ def post_answer(pid: int, body: PaperProbeAnswerIn, session: Session = Depends(g
         PaperProbeAnswer.question_index == body.question_index)).first()
     if existing:
         existing.content = body.content
-        session.add(existing)
+        answer = existing
     else:
-        session.add(PaperProbeAnswer(probe_id=pid, question_index=body.question_index,
-                                     content=body.content))
+        answer = PaperProbeAnswer(
+            probe_id=pid,
+            question_index=body.question_index,
+            content=body.content,
+        )
+    session.add(answer)
+    session.flush()
+    question = next(
+        (
+            question
+            for question in pp.questions
+            if question.get("index") == body.question_index
+        ),
+        {},
+    )
+    concept_ids = list(question.get("concept_ids", []))
+    if concept_ids:
+        topic_id = topic_id_for_concept(session, concept_ids[0])
+    else:
+        milestone = session.get(Milestone, pp.milestone_id)
+        concepts = milestone_load_bearing(session, milestone)
+        topic_id = topic_id_for_concept(session, concepts[0].id) if concepts else None
+    index_paper_answer(
+        session,
+        answer,
+        topic_id=topic_id,
+        concept_ids=concept_ids,
+        role=str(question.get("axis", "")),
+        retriever=retriever,
+    )
     session.commit()
     return PaperProbeAnswerOut(status=pp.status)
 
 
 @router.post("/api/paper-probe/{pid}/submit", response_model=PaperProbeOut)
 def submit_paper_probe(pid: int, session: Session = Depends(get_session),
-                       llm: LLMClient = Depends(get_llm)):
+                       llm: LLMClient = Depends(get_llm),
+                       retriever: Retriever = Depends(get_retriever)):
     pp = _probe_or_404(session, pid)
     if pp.status not in ("answering", "graded"):
         raise HTTPException(400, f"probe is {pp.status}, not answering")
-    grade_paper_probe(session, pp, llm=llm)  # idempotent — re-grade replaces prior evidence
+    grade_paper_probe(
+        session,
+        pp,
+        llm=llm,
+        retriever=retriever,
+    )  # idempotent — re-grade replaces prior evidence
     return _out(session, pp)
 
 

@@ -5,9 +5,16 @@ honoring local-first (no external services, no data egress). Orchestration that 
 lives in the API layer; this module stays side-effect-light and unit-testable.
 """
 
+from __future__ import annotations
+
+import io
+import os
 import re
+import stat
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sqlmodel import Session, select
 
@@ -23,6 +30,7 @@ from adaptive_academy.engine.track_markdown import (
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
+    Chunk,
     Concept,
     Deliverable,
     Item,
@@ -32,13 +40,23 @@ from adaptive_academy.models import (
     SourceDoc,
     Topic,
     Track,
+    VaultLink,
 )
+
+if TYPE_CHECKING:
+    from adaptive_academy.engine.memory import IndexResult
+    from adaptive_academy.llm.retriever_types import Retriever
 
 # We own this subfolder for exports; ingest skips it to avoid a feedback loop.
 EXPORT_FOLDER = "Adaptive Academy"
 _SUMMARY_CAP = 280
 _MAX_SCAN_FILES = 2000
 _MAX_READ_CHARS = 100_000  # only the head is needed for title/summary
+_HAS_DESCRIPTOR_WALK = (
+    os.open in os.supports_dir_fd
+    and hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NOFOLLOW")
+)
 
 
 def slugify(name: str) -> str:
@@ -109,17 +127,243 @@ def _cap(text: str, cap: int) -> str:
 
 # --- scanning + path-safety --------------------------------------------------
 
+def _is_safe_vault_path(path: Path, vault: Path) -> bool:
+    """Return whether a non-symlink path resolves inside the vault."""
+    if path.is_symlink():
+        return False
+    try:
+        resolved = path.resolve(strict=True)
+    except OSError:
+        return False
+    root = vault.resolve()
+    return resolved == root or root in resolved.parents
+
+
+def _scan_notes_with_skips(
+    root: Path,
+    *,
+    vault: Path,
+    skip_dirs: frozenset[str] = frozenset({EXPORT_FOLDER}),
+    deadline: float | None = None,
+) -> tuple[list[Path], list[Path], bool]:
+    """List safe notes, rejected paths, and whether the scan reached its end.
+
+    The scan stops (complete=False) at the file cap or when the absolute deadline passes.
+    """
+    notes: list[Path] = []
+    rejected: list[Path] = []
+    for directory, dirnames, filenames in os.walk(root, followlinks=False):
+        if deadline is not None and time.perf_counter() >= deadline:
+            return sorted(notes), sorted(rejected), False
+        directory_path = Path(directory)
+        retained_dirs: list[str] = []
+        for name in sorted(dirnames):
+            child = directory_path / name
+            if child.is_symlink() or not _is_safe_vault_path(child, vault):
+                rejected.append(child)
+            elif name not in skip_dirs and not name.startswith("."):
+                retained_dirs.append(name)
+        dirnames[:] = retained_dirs
+
+        for name in sorted(filenames):
+            if not name.endswith(".md"):
+                continue
+            path = directory_path / name
+            if path.is_symlink() or not _is_safe_vault_path(path, vault):
+                rejected.append(path)
+                continue
+            notes.append(path)
+            if len(notes) > _MAX_SCAN_FILES:
+                return sorted(notes[:_MAX_SCAN_FILES]), sorted(rejected), False
+    return sorted(notes), sorted(rejected), True
+
+
 def scan_notes(root: Path, *, skip_dirs: frozenset[str] = frozenset({EXPORT_FOLDER})) -> list[Path]:
     """Recursively list `*.md` under root, skipping our export folder and dotfolders."""
-    out: list[Path] = []
-    for p in sorted(root.rglob("*.md")):
-        rel_parts = p.relative_to(root).parts
-        if any(part in skip_dirs or part.startswith(".") for part in rel_parts[:-1]):
-            continue
-        out.append(p)
-        if len(out) >= _MAX_SCAN_FILES:
+    resolved_root = root.resolve()
+    notes, _, _ = _scan_notes_with_skips(
+        resolved_root,
+        vault=resolved_root,
+        skip_dirs=skip_dirs,
+    )
+    return notes
+
+
+def _frontmatter_list(value: object) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    raw = str(value).strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    values = []
+    for item in raw.split(","):
+        cleaned = item.strip().strip("'\"")
+        if cleaned:
+            values.append(cleaned)
+    return values
+
+
+def _read_text(
+    path: Path,
+    *,
+    vault: Path,
+    limit: int,
+    errors: str,
+) -> str:
+    if _HAS_DESCRIPTOR_WALK:
+        return _read_text_descriptor(
+            path,
+            vault=vault,
+            limit=limit,
+            errors=errors,
+        )
+
+    return _read_text_fallback(
+        path,
+        vault=vault,
+        limit=limit,
+        errors=errors,
+    )
+
+
+def _read_text_descriptor(
+    path: Path,
+    *,
+    vault: Path,
+    limit: int,
+    errors: str,
+) -> str:
+    root = vault.resolve()
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise OSError("outside-vault-or-symlink") from exc
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise OSError("outside-vault-or-symlink")
+
+    # O_NOFOLLOW on the root refuses a root swapped for a symlink between resolve() and
+    # open(); the fstat check refuses anything that is not a directory.
+    root_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        root_flags |= os.O_CLOEXEC
+    descriptor = os.open(root, root_flags)
+    try:
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("outside-vault-or-symlink")
+        for index, name in enumerate(relative.parts):
+            flags = os.O_RDONLY | os.O_NOFOLLOW
+            if index < len(relative.parts) - 1:
+                flags |= os.O_DIRECTORY
+            if hasattr(os, "O_CLOEXEC"):
+                flags |= os.O_CLOEXEC
+            child_descriptor = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child_descriptor
+        final_stat = os.fstat(descriptor)
+        if not stat.S_ISREG(final_stat.st_mode):
+            raise OSError("outside-vault-or-symlink")
+        final_descriptor = descriptor
+        descriptor = -1
+        with os.fdopen(final_descriptor, "rb") as raw:
+            with io.TextIOWrapper(raw, encoding="utf-8", errors=errors) as handle:
+                text = handle.read(limit)
+        _LAST_READ_MTIME[path] = final_stat.st_mtime
+        return text
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+# mtime observed on the descriptor that was actually read (same object as the text),
+# so callers never stat the path a second time and race a swap.
+_LAST_READ_MTIME: dict[Path, float] = {}
+
+
+def _read_index_text_with_mtime(path: Path, *, vault: Path) -> tuple[str, float]:
+    """Read a vault note and return (text, mtime) from the very descriptor that was read."""
+    _LAST_READ_MTIME.pop(path, None)
+    text = _read_index_text(path, vault=vault)
+    mtime = _LAST_READ_MTIME.pop(path, None)
+    if mtime is None:
+        mtime = path.stat(follow_symlinks=False).st_mtime
+    return text, mtime
+
+
+def _read_text_fallback(
+    path: Path,
+    *,
+    vault: Path,
+    limit: int,
+    errors: str,
+) -> str:
+    if not _is_safe_vault_path(path, vault):
+        raise OSError("outside-vault-or-symlink")
+
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
+        with path.open(encoding="utf-8", errors=errors) as handle:
+            return handle.read(limit)
+
+    flags = os.O_RDONLY | nofollow
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, encoding="utf-8", errors=errors) as handle:
+        return handle.read(limit)
+
+
+def _read_index_text(path: Path, *, vault: Path) -> str:
+    from adaptive_academy.engine.memory import MAX_INDEX_CHARS
+
+    return _read_text(
+        path,
+        vault=vault,
+        limit=MAX_INDEX_CHARS,
+        errors="strict",
+    )
+
+
+def build_title_index(
+    root: Path | str,
+    *,
+    deadline: float | None = None,
+) -> dict[str, str]:
+    """Build a case-folded title and frontmatter-alias map for one vault sweep."""
+    titles, _complete = build_title_index_checked(root, deadline=deadline)
+    return titles
+
+
+def build_title_index_checked(
+    root: Path | str,
+    *,
+    deadline: float | None = None,
+) -> tuple[dict[str, str], bool]:
+    """Title index plus whether it is complete (deadline and file cap honoured in the scan)."""
+    resolved_root = Path(root).resolve()
+    titles: dict[str, str] = {}
+    paths, _rejected, complete = _scan_notes_with_skips(
+        resolved_root, vault=resolved_root, deadline=deadline
+    )
+    for path in paths:
+        if deadline is not None and time.perf_counter() >= deadline:
+            complete = False
             break
-    return out
+        try:
+            text = _read_index_text(path, vault=resolved_root)
+        except (OSError, UnicodeError):
+            # An unreadable note leaves the index partial: callers must not resolve links
+            # against it (a link to this note would silently degrade to unresolved).
+            complete = False
+            continue
+        frontmatter, _ = parse_frontmatter(text)
+        names = [note_title(text, path.stem), *_frontmatter_list(frontmatter.get("aliases"))]
+        for name in names:
+            key = name.strip().casefold()
+            if key:
+                titles.setdefault(key, path.resolve().as_uri())
+    return titles, complete
 
 
 def safe_vault_dir(path: str) -> Path:
@@ -199,6 +443,261 @@ class ExportAllResult:
     written: list[str] = field(default_factory=list)
 
 
+def _sync_vault_links(
+    session: Session,
+    source_ref: str,
+    text: str,
+    title_index: dict[str, str],
+) -> None:
+    from adaptive_academy.engine.memory import extract_wikilinks
+
+    desired = [
+        (title_index.get(link.target.casefold(), ""), link.target)
+        for link in extract_wikilinks(text)
+    ]
+    existing = session.exec(
+        select(VaultLink).where(VaultLink.src_ref == source_ref).order_by(VaultLink.id)
+    ).all()
+    current = [(link.dst_ref, link.dst_title) for link in existing]
+    if current == desired:
+        return
+    for link in existing:
+        session.delete(link)
+    for dst_ref, dst_title in desired:
+        session.add(
+            VaultLink(src_ref=source_ref, dst_ref=dst_ref, dst_title=dst_title)
+        )
+
+
+def _remove_vault_source(session: Session, source_ref: str) -> int:
+    from adaptive_academy.engine.memory import remove_source
+
+    removed = remove_source(session, source_ref)
+    for link in session.exec(
+        select(VaultLink).where(VaultLink.src_ref == source_ref)
+    ).all():
+        session.delete(link)
+    return removed
+
+
+def reindex_vault(
+    session: Session,
+    topic_id: int,
+    vault_path: str,
+    *,
+    subfolder: str = "",
+    only_refs: set[str] | None = None,
+    progress: dict[str, int] | None = None,
+    retriever: Retriever | None = None,
+    deadline: float | None = None,
+) -> IndexResult:
+    """Index vault note text and wikilinks with one transaction per file.
+
+    With ``only_refs`` (file URIs), only those notes are (re)indexed and only their
+    orphans removed — used by all-topic sweeps so one topic never claims another's notes.
+    """
+    from adaptive_academy.engine.memory import (
+        IndexResult,
+        bump_progress,
+        concept_name_index,
+        content_hash,
+        index_text,
+        make_context,
+        split_markdown,
+        tag_chunk_concepts,
+    )
+
+    vault = safe_vault_dir(vault_path)
+    root = safe_child(vault, subfolder) if subfolder else vault
+    paths, rejected_paths, complete = _scan_notes_with_skips(root, vault=vault, deadline=deadline)
+    if only_refs is not None:
+        paths = [path for path in paths if path.resolve().as_uri() in only_refs]
+        rejected_paths = []
+    current_refs = {path.resolve().as_uri() for path in paths}
+    # A capped or deadline-stopped scan is partial work: report it as truncated.
+    truncated = (not complete) or (deadline is not None and time.perf_counter() >= deadline)
+    title_index: dict[str, str] = {}
+    titles_complete = False
+    if not truncated:
+        title_index, titles_complete = build_title_index_checked(vault, deadline=deadline)
+    if not titles_complete:
+        truncated = True  # link resolution would be partial; treat the run as truncated
+    truncated = truncated or (
+        deadline is not None and time.perf_counter() >= deadline
+    )
+    indexed = 0
+    skipped = len(rejected_paths)
+    removed = 0
+    bump_progress(progress, skipped=len(rejected_paths))
+    progress_seen = {"indexed": 0, "skipped": skipped, "removed": 0}
+    concept_names = concept_name_index(session, topic_id)
+
+    for path in rejected_paths:
+        session.add(
+            AgentEvent(
+                topic_id=topic_id,
+                kind="memory:reindex_skipped",
+                detail=f"{path.absolute().as_uri()} outside-vault-or-symlink",
+            )
+        )
+    if rejected_paths:
+        session.commit()
+
+    for path in paths:
+        if deadline is not None and time.perf_counter() >= deadline:
+            truncated = True
+            break
+        source_ref = path.resolve().as_uri()
+        existing = session.exec(
+            select(Chunk)
+            .where(
+                Chunk.kind == "vault_note",
+                Chunk.source_ref == source_ref,
+            )
+            .order_by(Chunk.ordinal)
+        ).all()
+        if only_refs is None and any(
+            chunk.topic_id is not None and chunk.topic_id != topic_id
+            for chunk in existing
+        ):
+            skipped += 1
+            session.add(
+                AgentEvent(
+                    topic_id=topic_id,
+                    kind="memory:reindex_owned_elsewhere",
+                    detail=source_ref,
+                )
+            )
+            session.commit()
+            bump_progress(progress, skipped=1)
+            progress_seen["skipped"] += 1
+            continue
+        try:
+            text, source_mtime = _read_index_text_with_mtime(path, vault=vault)
+        except OSError:
+            skipped += 1
+            session.add(AgentEvent(
+                topic_id=topic_id,
+                kind="memory:reindex_skipped",
+                detail=f"{source_ref} outside-vault-or-symlink",
+            ))
+            session.commit()
+            bump_progress(progress, skipped=1)
+            progress_seen["skipped"] += 1
+            continue
+        except UnicodeError as exc:
+            skipped += 1
+            session.add(AgentEvent(
+                topic_id=topic_id, kind="memory:reindex_skipped",
+                detail=f"{source_ref} {type(exc).__name__}"))
+            session.commit()
+            bump_progress(progress, skipped=1)
+            progress_seen["skipped"] += 1
+            continue
+
+        frontmatter, _ = parse_frontmatter(text)
+        title = note_title(text, path.stem)
+        metadata = {
+            "tags": _frontmatter_list(frontmatter.get("tags")),
+            "aliases": _frontmatter_list(frontmatter.get("aliases")),
+        }
+        pieces = split_markdown(text)
+        unchanged = len(existing) == len(pieces) and all(
+            chunk.kind == "vault_note"
+            and chunk.topic_id == topic_id
+            and chunk.source_mtime == source_mtime
+            and chunk.content_hash == content_hash(piece.text)
+            and chunk.heading == piece.heading
+            and chunk.context == make_context(title, piece.heading)
+            and chunk.meta == metadata
+            for chunk, piece in zip(existing, pieces, strict=True)
+        )
+        if unchanged:
+            skipped += len(pieces)
+            # Concepts/aliases may have appeared since the chunks were written; keep the
+            # ChunkConcept links current even when no text changed.
+            for chunk in existing:
+                tag_chunk_concepts(session, chunk, concept_names)
+        else:
+            result = index_text(
+                session,
+                kind="vault_note",
+                text=text,
+                source_ref=source_ref,
+                doc_title=title,
+                topic_id=topic_id,
+                meta=metadata,
+                source_mtime=source_mtime,
+                splitter=split_markdown,
+                retriever=retriever,
+            )
+            indexed += result.indexed
+            skipped += result.skipped
+            removed += result.removed
+        if titles_complete:
+            _sync_vault_links(session, source_ref, text, title_index)
+        session.commit()
+        bump_progress(
+            progress,
+            indexed=indexed - progress_seen["indexed"],
+            skipped=skipped - progress_seen["skipped"],
+            removed=removed - progress_seen["removed"],
+        )
+        progress_seen = {"indexed": indexed, "skipped": skipped, "removed": removed}
+
+    if complete and not truncated:
+        root_prefix = root.resolve().as_uri().rstrip("/") + "/"
+        existing_refs = {
+            chunk.source_ref
+            for chunk in session.exec(
+                select(Chunk).where(
+                    Chunk.kind == "vault_note",
+                    Chunk.topic_id == topic_id,
+                )
+            ).all()
+            if chunk.source_ref.startswith(root_prefix)
+        }
+        if only_refs is not None:
+            existing_refs &= only_refs
+        for source_ref in sorted(existing_refs - current_refs):
+            if deadline is not None and time.perf_counter() >= deadline:
+                truncated = True
+                session.add(AgentEvent(
+                    topic_id=topic_id, kind="memory:reindex_partial",
+                    detail="deadline reached during orphan sweep; remaining orphans kept"))
+                session.commit()
+                break
+            gone = _remove_vault_source(session, source_ref)
+            removed += gone
+            session.commit()
+            bump_progress(progress, removed=gone)
+    else:
+        count = _MAX_SCAN_FILES if not complete else len(paths)
+        session.add(
+            AgentEvent(
+                topic_id=topic_id,
+                kind="memory:reindex_partial",
+                detail=f"scan capped at {count} files; orphan sweep skipped",
+            )
+        )
+        session.commit()
+
+    session.add(
+        AgentEvent(
+            topic_id=topic_id,
+            kind="memory:reindex",
+            detail=f"indexed={indexed} skipped={skipped} removed={removed}",
+        )
+    )
+    session.commit()
+    return IndexResult(
+        indexed=indexed,
+        skipped=skipped,
+        removed=removed,
+        truncated=truncated,
+    )
+
+
 def _track_markdown(session: Session, track: Track) -> str:
     """Build a TrackView from the DB and render it (mirrors the curriculum.md route)."""
     phases = session.exec(
@@ -246,7 +745,12 @@ def _concept_verdict_summary(session: Session, concept: Concept) -> tuple[str, s
 
 
 def ingest_vault(
-    session: Session, topic_id: int, vault_path: str, *, subfolder: str = ""
+    session: Session,
+    topic_id: int,
+    vault_path: str,
+    *,
+    subfolder: str = "",
+    retriever: Retriever | None = None,
 ) -> IngestResult:
     """Scan a vault for markdown notes and register them as `proposed` SourceDocs for the topic.
     Already-ingested notes (same file URL) are skipped, so re-running is safe."""
@@ -256,11 +760,20 @@ def ingest_vault(
         s.url for s in session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
     }
     titles: list[str] = []
-    for path in scan_notes(root):
+    paths, _, _ = _scan_notes_with_skips(root, vault=vault)
+    for path in paths:
         url = path.resolve().as_uri()
         if url in existing:
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")[:_MAX_READ_CHARS]
+        try:
+            text = _read_text(
+                path,
+                vault=vault,
+                limit=_MAX_READ_CHARS,
+                errors="replace",
+            )
+        except OSError:
+            continue
         title = note_title(text, path.stem)
         session.add(SourceDoc(
             topic_id=topic_id, title=title, url=url, tier=2, summary=note_summary(text),
@@ -271,6 +784,13 @@ def ingest_vault(
         session.add(AgentEvent(
             topic_id=topic_id, kind="vault:ingest", detail=f"{len(titles)} note(s) from vault"))
     session.commit()
+    reindex_vault(
+        session,
+        topic_id,
+        vault_path,
+        subfolder=subfolder,
+        retriever=retriever,
+    )
     return IngestResult(count=len(titles), titles=titles)
 
 

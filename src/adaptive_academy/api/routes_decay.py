@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
-from adaptive_academy.api.deps import get_llm, get_session
+from adaptive_academy.api.deps import get_llm, get_retriever, get_session
 from adaptive_academy.api.schemas import (
     DecayDueOut,
     DecayGradeIn,
@@ -9,6 +9,7 @@ from adaptive_academy.api.schemas import (
     DecayItemOut,
 )
 from adaptive_academy.engine.decay import due_decay_checks, grade_decay_check
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import Concept
 
@@ -30,9 +31,16 @@ def list_due(topic_id: int, session: Session = Depends(get_session)) -> DecayDue
 
 @ops_router.post("/{prompt_id}/grade", response_model=DecayGradeOut)
 def grade(prompt_id: int, body: DecayGradeIn, session: Session = Depends(get_session),
-          llm: LLMClient = Depends(get_llm)) -> DecayGradeOut:
+          llm: LLMClient = Depends(get_llm),
+          retriever: Retriever = Depends(get_retriever)) -> DecayGradeOut:
     try:
-        result = grade_decay_check(session, prompt_id, body.response, llm=llm)
+        result = grade_decay_check(
+            session,
+            prompt_id,
+            body.response,
+            llm=llm,
+            retriever=retriever,
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
     a = result.assessment

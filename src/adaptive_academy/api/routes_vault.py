@@ -8,7 +8,8 @@ and file I/O live in engine/vault.py.
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
-from adaptive_academy.api.deps import get_session
+from adaptive_academy.api.deps import get_retriever, get_session
+from adaptive_academy.engine.memory import REINDEX_LOCK, REINDEX_LOCK_TIMEOUT_S
 from adaptive_academy.api.schemas import (
     VaultExportAllOut,
     VaultExportIn,
@@ -24,6 +25,7 @@ from adaptive_academy.engine.vault import (
     safe_vault_dir,
     scan_notes,
 )
+from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.settings import settings
 
 router = APIRouter(prefix="/api", tags=["vault"])
@@ -38,10 +40,31 @@ def _resolve_path(given: str) -> str:
 
 @router.post("/topics/{topic_id}/vault/ingest", response_model=VaultIngestOut)
 def ingest(
-    topic_id: int, body: VaultIngestIn, session: Session = Depends(get_session)
+    topic_id: int,
+    body: VaultIngestIn,
+    session: Session = Depends(get_session),
+    retriever: Retriever = Depends(get_retriever),
+) -> VaultIngestOut:
+    # Ingest reindexes the vault; serialize with /api/memory/reindex.
+    if not REINDEX_LOCK.acquire(timeout=REINDEX_LOCK_TIMEOUT_S):
+        raise HTTPException(409, "reindex already running")
+    try:
+        return _ingest_locked(topic_id, body, session, retriever)
+    finally:
+        REINDEX_LOCK.release()
+
+
+def _ingest_locked(
+    topic_id: int, body: VaultIngestIn, session: Session, retriever: Retriever
 ) -> VaultIngestOut:
     try:
-        res = ingest_vault(session, topic_id, _resolve_path(body.vault_path), subfolder=body.subfolder)
+        res = ingest_vault(
+            session,
+            topic_id,
+            _resolve_path(body.vault_path),
+            subfolder=body.subfolder,
+            retriever=retriever,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return VaultIngestOut(count=res.count, titles=res.titles)
