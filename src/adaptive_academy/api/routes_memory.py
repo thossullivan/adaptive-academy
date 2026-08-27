@@ -20,6 +20,7 @@ from adaptive_academy.api.schemas import (
     MemoryStatsOut,
 )
 from adaptive_academy.engine.memory import (
+    topic_id_for_concept,
     REINDEX_LOCK,
     REINDEX_LOCK_TIMEOUT_S,
     DEFAULT_K,
@@ -79,8 +80,13 @@ def search_memory(
         raise HTTPException(400, "memory search query is blank")
     if topic_id is not None and session.get(Topic, topic_id) is None:
         raise HTTPException(404, "topic not found")
-    if concept_id is not None and session.get(Concept, concept_id) is None:
-        raise HTTPException(404, "concept not found")
+    if concept_id is not None:
+        concept = session.get(Concept, concept_id)
+        if concept is None:
+            raise HTTPException(404, "concept not found")
+        owner_topic_id = topic_id_for_concept(session, concept_id)
+        if topic_id is not None and owner_topic_id is not None and owner_topic_id != topic_id:
+            raise HTTPException(400, "concept does not belong to this topic")
     event_target = {"topic_id": topic_id} if topic_id is not None else None
     hits = retrieve(
         session,
