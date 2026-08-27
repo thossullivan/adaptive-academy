@@ -123,6 +123,10 @@ def test_onnx_embedder_construction_does_not_load_the_model():
 def test_onnx_embedder_reads_model_and_cache_settings_at_construction(monkeypatch):
     from adaptive_academy.llm import onnx_embedder
 
+    # This test exercises the download-allowed path with a fake TextEmbedding; the autouse
+    # fixture disables downloads for everything else.
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_allow_download", True)
+
     calls = []
 
     class FakeVector:
@@ -512,3 +516,14 @@ def test_reembed_uses_keyset_batches_and_checks_deadline_first(vec_session, monk
         select(Chunk).where(Chunk.topic_id == topic.id, col(Chunk.embedding_model).is_(None))
     ).all()
     assert stale == []
+
+
+def test_route_default_retriever_is_scripted_under_the_test_fixture():
+    """A clean model cache must never be filled by route tests: the autouse fixture pins the
+    default retriever to scripted and disables downloads."""
+    from adaptive_academy.api import deps as api_deps
+    from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
+
+    assert api_deps.settings.retriever == "scripted"
+    assert api_deps.settings.embedding_allow_download is False
+    assert isinstance(api_deps.get_retriever(), ScriptedRetriever)
