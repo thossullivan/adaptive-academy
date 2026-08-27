@@ -470,3 +470,43 @@ def test_incomplete_orphan_scan_yields_no_candidates(session, monkeypatch):
     ticks = iter([False, False, True, True, True, True])
     monkeypatch.setattr(scout, "_expired", lambda _d: next(ticks, True))
     assert scout.orphan_note_candidates(session, deadline=1.0) == []
+
+
+def test_frontier_skips_neighbors_that_already_exist_as_concepts_or_aliases(session):
+    from adaptive_academy.engine import graph, scout
+    from adaptive_academy.models import (
+        Assessment, Concept, ConceptAlias, Milestone, Program, ProgramTopicLink, Topic, Track,
+    )
+
+    program = Program(title="P")
+    session.add(program)
+    session.commit()
+    milestone = Milestone(program_id=program.id, title="M")
+    session.add(milestone)
+    session.commit()
+    t1, t2 = Topic(title="T1"), Topic(title="T2")
+    session.add(t1)
+    session.add(t2)
+    session.commit()
+    for topic in (t1, t2):
+        session.add(ProgramTopicLink(milestone_id=milestone.id, topic_id=topic.id, status="active",
+                                     proposed_title=topic.title))
+    tr1, tr2 = Track(topic_id=t1.id, title="T1"), Track(topic_id=t2.id, title="T2")
+    session.add(tr1)
+    session.add(tr2)
+    session.commit()
+    a1 = Concept(track_id=tr1.id, name="Attention")
+    a2 = Concept(track_id=tr2.id, name="Attention")
+    session.add(a1)
+    session.add(a2)
+    session.commit()
+    for c in (a1, a2):
+        session.add(ConceptAlias(program_id=program.id, canonical_name="attention", concept_id=c.id))
+    session.commit()
+    graph.alias_edges(session, program.id, "attention")
+    # a1 is "verified": strong delayed recall + artifact evidence
+    session.add(Assessment(concept_id=a1.id, kind="recall", prompt="q", response="r", score=0.95))
+    session.add(Assessment(concept_id=a1.id, kind="teach", prompt="q", response="r", score=0.95))
+    session.commit()
+    labels = {c.label for c in scout.frontier_candidates(session, program.id)}
+    assert "Attention" not in labels
