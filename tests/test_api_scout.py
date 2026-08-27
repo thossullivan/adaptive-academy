@@ -202,3 +202,17 @@ def test_accepting_suggestion_twice_returns_conflict(session):
     assert first.status_code == 200
     assert second.status_code == 409
     assert len(session.exec(select(ProgramTopicLink)).all()) == 1
+
+
+def test_accept_refuses_a_title_that_already_names_a_program_topic_or_stub(session):
+    program, milestone = _seed_program(session)
+    session.add(ProgramTopicLink(milestone_id=milestone.id, status="stub",
+                                 proposed_title="Sparse Retrieval", added_by="revision"))
+    session.commit()
+    suggestion = _suggestion(session, program, title="sparse retrieval")
+    client = _client(session)
+    response = client.post(
+        f"/api/suggestions/{suggestion.id}/accept", json={"milestone_id": milestone.id}
+    )
+    assert response.status_code == 409
+    assert len(session.exec(select(ProgramTopicLink)).all()) == 1

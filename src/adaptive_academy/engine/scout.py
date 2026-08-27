@@ -34,6 +34,7 @@ from adaptive_academy.models import (
     Milestone,
     Program,
     ProgramTopicLink,
+    Topic,
     TopicSuggestion,
     Track,
     now_utc,
@@ -192,6 +193,19 @@ def _program_concept_keys(
             ).all()
             if name and name.strip()
         )
+    if not _expired(deadline):
+        # Existing (non-pruned) Program topics and stubs count too: accepting a suggestion
+        # named like one would create a second stub and split curriculum/memory state.
+        rows = session.exec(
+            select(ProgramTopicLink.proposed_title, Topic.title)
+            .join(Milestone, ProgramTopicLink.milestone_id == Milestone.id)
+            .outerjoin(Topic, ProgramTopicLink.topic_id == Topic.id)
+            .where(Milestone.program_id == program_id, ProgramTopicLink.status != "pruned")
+        ).all()
+        for proposed_title, topic_title in rows:
+            for name in (proposed_title, topic_title):
+                if name and name.strip():
+                    keys.add(normalize_name(name))
     return keys
 
 
