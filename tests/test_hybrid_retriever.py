@@ -4,7 +4,7 @@ import time
 
 import pytest
 from sqlalchemy import event
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, col, create_engine, select
 from sqlmodel.pool import StaticPool
 
 from adaptive_academy.api.routes_memory import memory_stats
@@ -473,3 +473,42 @@ def test_vector_leg_ignores_vectors_from_another_model(session):
     where = ChunkFilter(kinds=("vault_note",))
     assert _eligible_chunk_ids(session, where, embedding_model="model-b") == [b.id]
     assert set(_eligible_chunk_ids(session, where)) == {a.id, b.id}
+
+
+def test_reembed_uses_keyset_batches_and_checks_deadline_first(vec_session, monkeypatch):
+    import time
+
+    from adaptive_academy.engine import memory as memory_mod
+    from adaptive_academy.engine.memory import _reembed_stale_chunks
+
+    topic = Topic(title="Batches")
+    vec_session.add(topic)
+    vec_session.flush()
+    for i in range(5):
+        vec_session.add(_chunk(f"stale text {i}", f"vault:stale{i}", topic_id=topic.id))
+    vec_session.flush()
+    retriever = HybridRetriever(FtsRetriever(), ScriptedEmbedder())
+    queries = {"n": 0}
+    original = memory_mod.Session.exec
+
+    def counting_exec(self, *args, **kwargs):
+        queries["n"] += 1
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(memory_mod.Session, "exec", counting_exec)
+    # Expired deadline: no query at all.
+    assert _reembed_stale_chunks(vec_session, retriever, topic_id=topic.id,
+                                 deadline=time.perf_counter() - 1) is True
+    assert queries["n"] == 0
+    # Batches of 2: 5 rows -> 3 batch queries + 1 empty terminal query.
+    monkeypatch.setattr(memory_mod, "REEMBED_BATCH", 2)
+    assert _reembed_stale_chunks(vec_session, retriever, topic_id=topic.id,
+                                 deadline=time.perf_counter() + 60) is False
+    # 3 keyset batches + 1 empty terminal select, plus whatever on_index needs per batch.
+    assert queries["n"] >= 4
+    from adaptive_academy.models import Chunk
+
+    stale = vec_session.exec(
+        select(Chunk).where(Chunk.topic_id == topic.id, col(Chunk.embedding_model).is_(None))
+    ).all()
+    assert stale == []

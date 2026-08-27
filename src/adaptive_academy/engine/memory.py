@@ -50,6 +50,7 @@ REINDEX_DEADLINE_S = 60.0
 # One reindex at a time per process (vault ingest and /api/memory/reindex share it).
 REINDEX_LOCK = threading.Lock()
 REINDEX_LOCK_TIMEOUT_S = 0.5
+REEMBED_BATCH = 64
 
 
 def bump_progress(progress: dict[str, int] | None, **deltas: int) -> None:
@@ -921,7 +922,13 @@ def reindex_topic(
             if source is None or source.status != "accepted":
                 stale_refs.add(chunk.source_ref)
         for source_ref in sorted(stale_refs):
-            removed += remove_source(session, source_ref)
+            if time.perf_counter() >= deadline:
+                truncated = True
+                break
+            gone = remove_source(session, source_ref)
+            session.commit()
+            removed += gone
+            bump_progress(progress, removed=gone)
 
         docs = session.exec(
             select(SourceDoc)
@@ -942,13 +949,13 @@ def reindex_topic(
             session.commit()
             bump_progress(progress, indexed=result.indexed, skipped=result.skipped, removed=result.removed)
 
-    reembed_truncated = _reembed_stale_chunks(
-        session,
-        retriever,
-        topic_id=topic_id,
-        deadline=deadline,
-    )
-    truncated = truncated or reembed_truncated
+    if not truncated:
+        truncated = _reembed_stale_chunks(
+            session,
+            retriever,
+            topic_id=topic_id,
+            deadline=deadline,
+        )
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     session.add(
@@ -987,21 +994,27 @@ def _reembed_stale_chunks(
     if embedder is None:
         return False
 
-    chunks = session.exec(
-        select(Chunk)
-        .where(
-            Chunk.topic_id == topic_id,
-            or_(
-                col(Chunk.embedding_model).is_(None),
-                Chunk.embedding_model != embedder.name,
-            ),
-        )
-        .order_by(Chunk.id)
-    ).all()
-    for start in range(0, len(chunks), 64):
+    last_id = 0
+    while True:
+        # Deadline first, then one bounded keyset batch: never materialize every stale row.
         if time.perf_counter() >= deadline:
             return True
-        batch = chunks[start : start + 64]
+        batch = session.exec(
+            select(Chunk)
+            .where(
+                Chunk.topic_id == topic_id,
+                Chunk.id > last_id,
+                or_(
+                    col(Chunk.embedding_model).is_(None),
+                    Chunk.embedding_model != embedder.name,
+                ),
+            )
+            .order_by(Chunk.id)
+            .limit(REEMBED_BATCH)
+        ).all()
+        if not batch:
+            return False
+        last_id = max(chunk.id for chunk in batch if chunk.id is not None)
         chunk_ids = [chunk.id for chunk in batch if chunk.id is not None]
         try:
             with session.begin_nested():

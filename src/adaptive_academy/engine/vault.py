@@ -497,7 +497,8 @@ def reindex_vault(
         paths = [path for path in paths if path.resolve().as_uri() in only_refs]
         rejected_paths = []
     current_refs = {path.resolve().as_uri() for path in paths}
-    truncated = deadline is not None and time.perf_counter() >= deadline
+    # A capped or deadline-stopped scan is partial work: report it as truncated.
+    truncated = (not complete) or (deadline is not None and time.perf_counter() >= deadline)
     title_index = (
         {}
         if truncated

@@ -308,3 +308,23 @@ def test_reindex_topic_aggregates_vault_and_accepted_sources(session, tmp_path):
     assert result.skipped == result.removed == 0
     assert result.truncated is False
     assert result.ms >= 0
+
+
+def test_reindex_topic_reports_committed_stale_source_removals_in_progress(session):
+    from adaptive_academy.engine.memory import index_text, reindex_topic
+    from adaptive_academy.models import SourceDoc, Topic
+
+    topic = Topic(title="Sources")
+    session.add(topic)
+    session.commit()
+    doc = SourceDoc(topic_id=topic.id, title="Pruned", url="https://example.org/p", status="pruned")
+    session.add(doc)
+    session.commit()
+    index_text(session, kind="source_doc", text="old source text", topic_id=topic.id,
+               source_ref=f"sourcedoc:{doc.id}", doc_title="Pruned")
+    session.commit()
+    progress = {"indexed": 0, "skipped": 0, "removed": 0}
+    result = reindex_topic(session, topic.id, vault_path="", fetch=lambda url: None,
+                           kinds=("source_doc",), progress=progress)
+    assert result.removed == 1
+    assert progress["removed"] == 1
