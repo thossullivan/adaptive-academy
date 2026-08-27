@@ -46,6 +46,9 @@ SCOUT_DISMISS_COOLDOWN_DAYS = 30
 SCOUT_EVERY_N_ASSESSMENTS = 25
 SCOUT_DEADLINE_S = 10.0
 SCOUT_DIGEST_MAX_CHARS = 12_000
+SCOUT_FIELD_MAX_CHARS = 200
+SCOUT_GOAL_MAX_CHARS = 2000
+SCOUT_MAX_MILESTONES = 40
 SCOUT_MAX_SUGGESTIONS = 5
 
 FRONTIER_WEIGHT = 4.0
@@ -306,20 +309,27 @@ def _render_digest(
     program: Program,
     milestones: list[Milestone],
 ) -> str:
+    # Program text is learner-authored: it lives inside its own untrusted block and is
+    # capped so it can never crowd out the candidate delimiters.
     lines = [
-        f"PROGRAM: {escape_markers(program.title)}",
-        f"GOAL: {escape_markers(program.goal_statement or program.title)}",
+        "<<<PROGRAM>>>",
+        f"PROGRAM: {escape_markers(program.title)[:SCOUT_FIELD_MAX_CHARS]}",
+        f"GOAL: {escape_markers(program.goal_statement or program.title)[:SCOUT_GOAL_MAX_CHARS]}",
         "MILESTONES:",
     ]
-    lines.extend(f"- {escape_markers(milestone.title)}" for milestone in milestones)
+    lines.extend(
+        f"- {escape_markers(milestone.title)[:SCOUT_FIELD_MAX_CHARS]}"
+        for milestone in milestones[:SCOUT_MAX_MILESTONES]
+    )
+    lines.append("<<<END_PROGRAM>>>")
     lines.append("<<<CANDIDATES>>>")
     for index, candidate in enumerate(candidates):
         lines.append(
             f"[{index}] "
             + json.dumps(
                 {
-                    "kind": escape_markers(candidate.kind),
-                    "label": escape_markers(candidate.label),
+                    "kind": escape_markers(candidate.kind)[:SCOUT_FIELD_MAX_CHARS],
+                    "label": escape_markers(candidate.label)[:SCOUT_FIELD_MAX_CHARS],
                     "weight": candidate.weight,
                     "evidence": _escape_prompt_value(candidate.evidence),
                 },
@@ -368,8 +378,9 @@ def build_digest(
     dropped = len(candidates) - len(indexed)
     if dropped:
         logger.info("Scout digest dropped %d candidate(s)", dropped)
-    if len(digest) > limit:
-        digest = digest[:limit]
+    # Never slice through a delimiter: with every field capped and all candidates dropped
+    # the digest is bounded, so a remaining overflow means the limit is smaller than the
+    # fixed frame — keep the frame intact rather than emit a truncated block.
     return digest, [candidate for _, candidate in indexed]
 
 

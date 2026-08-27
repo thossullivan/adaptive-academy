@@ -85,3 +85,29 @@ def test_curriculum_regeneration_invalidates_old_edges_and_inserts_new(session: 
     assert len(current) == len(historical) == 2
     assert {edge.id for edge in historical} == original_ids
     assert not original_ids.intersection(edge.id for edge in current)
+
+
+def test_startup_backfill_populates_edges_for_existing_data(session):
+    from adaptive_academy.db import ensure_graph_backfill
+    from adaptive_academy.models import Concept, ConceptEdge, TopicFoundation, Track
+
+    topic = Topic(title="Startup")
+    session.add(topic)
+    session.commit()
+    track = Track(topic_id=topic.id, title="Startup")
+    session.add(track)
+    session.commit()
+    a = Concept(track_id=track.id, name="Alpha")
+    b = Concept(track_id=track.id, name="Beta")
+    session.add(a)
+    session.add(b)
+    session.add(TopicFoundation(topic_id=topic.id, key_concepts=["Alpha", "Beta"],
+                                prerequisite_map={"Alpha": ["Beta"]}))
+    session.commit()
+    assert session.exec(select(ConceptEdge)).all() == []
+    assert ensure_graph_backfill(session.get_bind()) is True
+    session.expire_all()
+    edges = session.exec(select(ConceptEdge)).all()
+    assert len(edges) == 1 and edges[0].valid_until is None
+    assert ensure_graph_backfill(session.get_bind()) is True  # idempotent
+    assert len(session.exec(select(ConceptEdge)).all()) == 1
