@@ -588,6 +588,12 @@ def index_message(
     retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index one persisted learner or tutor conversation message."""
+    # Defensive: a chunk is filed under the concept's own topic, never a caller-supplied
+    # topic that does not own the concept (keeps topic memory and Scout uncontaminated).
+    owner_topic_id = topic_id_for_concept(session, concept_id)
+    if owner_topic_id is not None and owner_topic_id != topic_id:
+        topic_id = owner_topic_id
+
     if msg.id is None:
         raise ValueError("message must be flushed before indexing")
     source_ref = f"message:{msg.id}"

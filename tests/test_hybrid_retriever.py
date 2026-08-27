@@ -195,6 +195,7 @@ def test_hybrid_returns_fts_results_when_vector_embedding_fails(vec_session, cap
     vec_session.flush()
     assert topic.id is not None
     chunk = _chunk("lexical fallback", "vault:fallback", topic_id=topic.id)
+    chunk.embedding_model = FailingEmbedder().name  # a current-model vector exists
     vec_session.add(chunk)
     vec_session.flush()
     where = ChunkFilter(topic_id=topic.id)
@@ -454,3 +455,21 @@ def test_offline_mode_passes_local_files_only_to_fastembed(monkeypatch, tmp_path
     embedder = onnx_embedder.OnnxEmbedder()
     embedder.embed(["x"])
     assert captured.get("local_files_only") is True
+
+
+def test_vector_leg_ignores_vectors_from_another_model(session):
+    """Vectors written by model A are never ranked when the active embedder is model B."""
+    from adaptive_academy.engine.memory import ChunkFilter
+    from adaptive_academy.llm.hybrid_retriever import _eligible_chunk_ids
+    from adaptive_academy.models import Chunk
+
+    a = Chunk(kind="vault_note", source_ref="file:///v/a.md", ordinal=0, heading="",
+              text="alpha", content_hash="ha", embedding_model="model-a")
+    b = Chunk(kind="vault_note", source_ref="file:///v/b.md", ordinal=0, heading="",
+              text="beta", content_hash="hb", embedding_model="model-b")
+    session.add(a)
+    session.add(b)
+    session.commit()
+    where = ChunkFilter(kinds=("vault_note",))
+    assert _eligible_chunk_ids(session, where, embedding_model="model-b") == [b.id]
+    assert set(_eligible_chunk_ids(session, where)) == {a.id, b.id}

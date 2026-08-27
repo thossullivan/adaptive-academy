@@ -15,7 +15,7 @@ from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.tutor import run_tutor_turn
 from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
-from adaptive_academy.models import Concept, Conversation
+from adaptive_academy.models import Concept, Conversation, Track
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -27,6 +27,12 @@ def _levels_for(session: Session, convo: Conversation):
 
 @router.post("", response_model=ConversationOut)
 def start_conversation(body: StartConversationIn, session: Session = Depends(get_session)):
+    concept = session.get(Concept, body.concept_id)
+    if concept is None:
+        raise HTTPException(404, "concept not found")
+    track = session.get(Track, concept.track_id)
+    if track is None or track.topic_id != body.topic_id:
+        raise HTTPException(400, "concept does not belong to this topic")
     convo = Conversation(topic_id=body.topic_id, concept_id=body.concept_id)
     session.add(convo)
     session.commit()

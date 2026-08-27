@@ -83,7 +83,11 @@ class ScoutResult:
     truncated: bool
 
 
-def _program_topic_ids(session: Session, program_id: int) -> list[int]:
+def _program_topic_ids(
+    session: Session, program_id: int, *, deadline: float | None = None
+) -> list[int]:
+    if _expired(deadline):
+        return []
     topic_ids = session.exec(
         select(ProgramTopicLink.topic_id)
         .join(Milestone, ProgramTopicLink.milestone_id == Milestone.id)
@@ -98,9 +102,11 @@ def _program_topic_ids(session: Session, program_id: int) -> list[int]:
     return list(dict.fromkeys(int(topic_id) for topic_id in topic_ids if topic_id is not None))
 
 
-def _program_tracks(session: Session, program_id: int) -> list[Track]:
-    topic_ids = _program_topic_ids(session, program_id)
-    if not topic_ids:
+def _program_tracks(
+    session: Session, program_id: int, *, deadline: float | None = None
+) -> list[Track]:
+    topic_ids = _program_topic_ids(session, program_id, deadline=deadline)
+    if not topic_ids or _expired(deadline):
         return []
     return session.exec(
         select(Track).where(Track.topic_id.in_(topic_ids)).order_by(Track.id)
@@ -121,7 +127,7 @@ def frontier_candidates(
 ) -> list[Candidate]:
     """Return outside graph neighbors reached from verified Program concepts."""
     grouped: dict[str, Candidate] = {}
-    for track in _program_tracks(session, program_id):
+    for track in _program_tracks(session, program_id, deadline=deadline):
         if track.id is None or _expired(deadline):
             break
         for concept_id, outside_names in graph.frontier(
@@ -157,8 +163,12 @@ def frontier_candidates(
     return sorted(grouped.values(), key=lambda item: (-item.weight, normalize_name(item.label)))
 
 
-def _known_concept_names(session: Session) -> list[str]:
+def _known_concept_names(session: Session, *, deadline: float | None = None) -> list[str]:
+    if _expired(deadline):
+        return []
     names = [name for name in session.exec(select(Concept.name)).all() if name.strip()]
+    if _expired(deadline):
+        return list(dict.fromkeys(names))
     names.extend(
         name
         for name in session.exec(select(ConceptAlias.canonical_name)).all()
@@ -185,12 +195,12 @@ def orphan_term_candidates(
     session: Session, program_id: int, *, deadline: float | None = None
 ) -> list[Candidate]:
     """Find repeated learner or tutor terms not represented in the concept graph."""
-    topic_ids = _program_topic_ids(session, program_id)
+    topic_ids = _program_topic_ids(session, program_id, deadline=deadline)
     if not topic_ids:
         return []
     if _expired(deadline):
         return []
-    known_names = _known_concept_names(session)
+    known_names = _known_concept_names(session, deadline=deadline)
     counts: dict[str, int] = {}
     labels: dict[str, str] = {}
     refs: dict[str, set[str]] = {}
@@ -320,7 +330,7 @@ def extension_candidates(
     session: Session, program_id: int, *, deadline: float | None = None
 ) -> list[Candidate]:
     """Return learner-proposed paper extensions for Program topics."""
-    topic_ids = _program_topic_ids(session, program_id)
+    topic_ids = _program_topic_ids(session, program_id, deadline=deadline)
     if not topic_ids:
         return []
     by_source: dict[str, list[Chunk]] = {}

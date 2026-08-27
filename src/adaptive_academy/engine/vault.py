@@ -144,11 +144,17 @@ def _scan_notes_with_skips(
     *,
     vault: Path,
     skip_dirs: frozenset[str] = frozenset({EXPORT_FOLDER}),
+    deadline: float | None = None,
 ) -> tuple[list[Path], list[Path], bool]:
-    """List safe notes, rejected paths, and whether the scan reached its end."""
+    """List safe notes, rejected paths, and whether the scan reached its end.
+
+    The scan stops (complete=False) at the file cap or when the absolute deadline passes.
+    """
     notes: list[Path] = []
     rejected: list[Path] = []
     for directory, dirnames, filenames in os.walk(root, followlinks=False):
+        if deadline is not None and time.perf_counter() >= deadline:
+            return sorted(notes), sorted(rejected), False
         directory_path = Path(directory)
         retained_dirs: list[str] = []
         for name in sorted(dirnames):
@@ -486,7 +492,7 @@ def reindex_vault(
 
     vault = safe_vault_dir(vault_path)
     root = safe_child(vault, subfolder) if subfolder else vault
-    paths, rejected_paths, complete = _scan_notes_with_skips(root, vault=vault)
+    paths, rejected_paths, complete = _scan_notes_with_skips(root, vault=vault, deadline=deadline)
     if only_refs is not None:
         paths = [path for path in paths if path.resolve().as_uri() in only_refs]
         rejected_paths = []
@@ -634,6 +640,13 @@ def reindex_vault(
         if only_refs is not None:
             existing_refs &= only_refs
         for source_ref in sorted(existing_refs - current_refs):
+            if deadline is not None and time.perf_counter() >= deadline:
+                truncated = True
+                session.add(AgentEvent(
+                    topic_id=topic_id, kind="memory:reindex_partial",
+                    detail="deadline reached during orphan sweep; remaining orphans kept"))
+                session.commit()
+                break
             gone = _remove_vault_source(session, source_ref)
             removed += gone
             session.commit()

@@ -55,7 +55,9 @@ class HybridRetriever:
             k=HYBRID_CANDIDATE_K,
         )
         try:
-            eligible_ids = _eligible_chunk_ids(session, where)
+            eligible_ids = _eligible_chunk_ids(
+                session, where, embedding_model=self.embedder.name
+            )
             semantic = self._vector_search(session, query, eligible_ids)
         except Exception:
             _warn_vector_failure_once()
@@ -145,8 +147,13 @@ class HybridRetriever:
         session.flush()
 
 
-def _eligible_chunk_ids(session: Session, where: ChunkFilter) -> list[int]:
+def _eligible_chunk_ids(
+    session: Session, where: ChunkFilter, *, embedding_model: str | None = None
+) -> list[int]:
+    """Ids allowed into the vector leg; a stale or foreign-model vector is never ranked."""
     statement = select(Chunk.id)
+    if embedding_model is not None:
+        statement = statement.where(Chunk.embedding_model == embedding_model)
     if where.kinds:
         statement = statement.where(col(Chunk.kind).in_(where.kinds))
     if where.topic_id is not None:

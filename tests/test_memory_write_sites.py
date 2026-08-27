@@ -1,6 +1,7 @@
+from sqlmodel import select
 import json
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 import adaptive_academy.engine.tutor_sdk as tutor_sdk
 from adaptive_academy.api.routes_paper_probe import post_answer
@@ -725,3 +726,30 @@ def test_paper_probe_regrade_removes_chunks_for_replaced_assessment(session):
 def test_topic_id_for_concept_promotes_shared_resolution_helper(session):
     topic, concept = _seed_concept(session)
     assert memory.topic_id_for_concept(session, concept.id) == topic.id
+
+
+def test_index_message_files_chunk_under_the_concepts_own_topic(session):
+    from adaptive_academy.engine.memory import index_message
+    from adaptive_academy.models import Chunk, Concept, Conversation, Message, Topic, Track
+
+    owner = Topic(title="Owner")
+    other = Topic(title="Other")
+    session.add(owner)
+    session.add(other)
+    session.commit()
+    track = Track(topic_id=owner.id, title="Owner")
+    session.add(track)
+    session.commit()
+    concept = Concept(track_id=track.id, name="C")
+    session.add(concept)
+    session.commit()
+    convo = Conversation(topic_id=other.id, concept_id=concept.id)
+    session.add(convo)
+    session.commit()
+    msg = Message(conversation_id=convo.id, role="user", content="my attempt at C")
+    session.add(msg)
+    session.flush()
+    index_message(session, msg, concept_id=concept.id, topic_id=other.id)
+    session.commit()
+    chunk = session.exec(select(Chunk).where(Chunk.source_ref == f"message:{msg.id}")).one()
+    assert chunk.topic_id == owner.id

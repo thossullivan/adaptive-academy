@@ -459,3 +459,30 @@ def test_unchanged_vault_chunks_are_retagged_when_a_concept_appears(session, tmp
     second = reindex_vault(session, topic.id, str(tmp_path))
     assert second.indexed == 0  # text unchanged
     assert len(session.exec(select(ChunkConcept)).all()) == 1
+
+
+def test_expired_deadline_stops_scan_and_orphan_sweep(session, tmp_path):
+    import time
+
+    from adaptive_academy.engine.memory import index_text
+    from adaptive_academy.engine.vault import _scan_notes_with_skips, reindex_vault
+    from adaptive_academy.models import AgentEvent, Chunk
+
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    (tmp_path / "a.md").write_text("# A\n\nbody", encoding="utf-8")
+    notes, _rejected, complete = _scan_notes_with_skips(
+        tmp_path, vault=tmp_path, deadline=time.perf_counter() - 1
+    )
+    assert notes == [] and complete is False
+    # An orphan chunk for a note that no longer exists must survive an expired sweep.
+    index_text(session, kind="vault_note", text="gone", topic_id=topic.id,
+               source_ref=(tmp_path / "gone.md").resolve().as_uri())
+    session.commit()
+    result = reindex_vault(session, topic.id, str(tmp_path), deadline=time.perf_counter() - 1)
+    assert result.truncated is True
+    assert session.exec(select(Chunk).where(Chunk.text == "gone")).all() != []
+    assert session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:reindex_partial")
+    ).all()
