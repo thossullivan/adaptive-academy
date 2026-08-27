@@ -29,6 +29,7 @@ from adaptive_academy.models import (
 from adaptive_academy.prompts import (
     ROLEPLAY_DIRECTOR, ROLEPLAY_GRADE, ROLEPLAY_PERSONA, build_roleplay_persona_prompt,
 )
+from adaptive_academy.engine.untrusted import escape_markers
 
 _TURN_CAP = 15
 _END = "[[END]]"
@@ -49,7 +50,8 @@ def direct(
     """Generate the persona brief from the milestone + load-bearing concepts; activate."""
     milestone = session.get(Milestone, rp.milestone_id)
     concepts = milestone_load_bearing(session, milestone)
-    lines = [f"MILESTONE: {milestone.title}", f"SUCCESS CRITERIA: {milestone.success_criteria}",
+    lines = [f"MILESTONE: {escape_markers(milestone.title)}",
+             f"SUCCESS CRITERIA: {escape_markers(milestone.success_criteria)}",
              "", "LOAD-BEARING CONCEPTS (name — learner level):"]
     for c in concepts:
         level = compute_levels(c.estimate)
@@ -273,7 +275,7 @@ def grade_roleplay(
         graded.append(result.assessment)
 
     _emit(session, rp, "prompt", ROLEPLAY_GRADE.tag)
-    user = "<<<TRANSCRIPT>>>\n" + transcript + "\n<<<END_TRANSCRIPT>>>"
+    user = "<<<TRANSCRIPT>>>\n" + escape_markers(transcript) + "\n<<<END_TRANSCRIPT>>>"
     resp = llm.complete(system=ROLEPLAY_GRADE,
                         messages=[{"role": "user", "content": user}], tools=[])
     rp.outcome = json.loads(extract_json(resp.text))

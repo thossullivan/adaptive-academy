@@ -353,6 +353,9 @@ def build_title_index_checked(
         try:
             text = _read_index_text(path, vault=resolved_root)
         except (OSError, UnicodeError):
+            # An unreadable note leaves the index partial: callers must not resolve links
+            # against it (a link to this note would silently degrade to unresolved).
+            complete = False
             continue
         frontmatter, _ = parse_frontmatter(text)
         names = [note_title(text, path.stem), *_frontmatter_list(frontmatter.get("aliases"))]

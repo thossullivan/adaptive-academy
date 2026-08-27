@@ -418,3 +418,20 @@ def test_all_topic_reindex_checks_deadline_before_any_topic_work(memory_api, mon
     assert response.status_code == 200
     assert response.json()["truncated"] is True
     assert calls["n"] == 0
+
+
+def test_owned_vault_refs_are_enumerated_in_deadline_checked_batches(session, memory_api, monkeypatch):
+    import time
+
+    from adaptive_academy.api import routes_memory as rm
+
+    client, topic, _ = memory_api
+    for i in range(5):
+        index_text(session, kind="vault_note", text=f"n{i}", topic_id=topic.id,
+                   source_ref=f"file:///v/n{i}.md")
+    session.commit()
+    monkeypatch.setattr(rm, "REINDEX_TOPIC_BATCH", 2)
+    refs, complete = rm._owned_vault_refs(session, topic.id, time.perf_counter() + 60)
+    assert complete is True and len(refs) == 5
+    refs, complete = rm._owned_vault_refs(session, topic.id, time.perf_counter() - 1)
+    assert complete is False and refs == set()

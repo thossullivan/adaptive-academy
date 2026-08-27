@@ -19,6 +19,7 @@ from adaptive_academy.models import (
     TopicFoundation,
 )
 from adaptive_academy.prompts import GRADE, PROBE_TEXT, RUBRIC
+from adaptive_academy.engine.untrusted import escape_markers
 
 # Deterministic band ceilings (a missing required element or a present misconception means the
 # explanation cannot be graded "solid"). Applied as a CEILING, not a subtraction, so the LLM's
@@ -174,7 +175,7 @@ def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
         lines.append(f"- {c}")
     if reference:
         lines.append(f"REFERENCE ANSWER: {reference}")
-    lines += ["", "<<<RESPONSE>>>", response or "(empty)", "<<<END_RESPONSE>>>"]
+    lines += ["", "<<<RESPONSE>>>", escape_markers(response or "(empty)"), "<<<END_RESPONSE>>>"]
     return GRADE, "\n".join(lines)
 
 

@@ -531,3 +531,25 @@ def test_title_index_honours_deadline_and_incomplete_index_skips_links(session, 
         vault_mod.time.perf_counter = real
     assert result.truncated is True
     assert session.exec(select(VaultLink)).all() == []
+
+
+def test_unreadable_note_makes_title_index_incomplete_and_keeps_existing_links(session, tmp_path):
+    from adaptive_academy.engine.vault import build_title_index_checked, reindex_vault
+    from adaptive_academy.models import VaultLink
+
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    (tmp_path / "a.md").write_text("# A\n\nsee [[B]]", encoding="utf-8")
+    (tmp_path / "b.md").write_text("# B\n\nbody", encoding="utf-8")
+    reindex_vault(session, topic.id, str(tmp_path))
+    resolved_before = [link.dst_ref for link in session.exec(select(VaultLink)).all() if link.dst_ref]
+    assert resolved_before
+    # B becomes unreadable: the index is incomplete and A's resolved link is preserved.
+    (tmp_path / "b.md").write_bytes(b"\xff\xfe\x00")
+    _titles, complete = build_title_index_checked(tmp_path)
+    assert complete is False
+    result = reindex_vault(session, topic.id, str(tmp_path))
+    assert result.truncated is True
+    resolved_after = [link.dst_ref for link in session.exec(select(VaultLink)).all() if link.dst_ref]
+    assert resolved_after == resolved_before
