@@ -164,7 +164,7 @@ def _reindex_memory_locked(
     # claims another topic's notes, and new notes need an explicit topic_id. Ownership is
     # discovered per topic (bounded), never as one global materialization.
     note = ""
-    if all_topics and "vault_note" in kinds:
+    if all_topics and "vault_note" in kinds and time.perf_counter() < deadline:
         any_owner = session.exec(
             select(Chunk.id)
             .where(Chunk.kind == "vault_note", col(Chunk.topic_id).is_not(None))
@@ -194,13 +194,12 @@ def _reindex_memory_locked(
             only_refs: set[str] | None = None
             topic_kinds = kinds
             if all_topics and "vault_note" in kinds:
-                only_refs = set(
-                    session.exec(
-                        select(Chunk.source_ref)
-                        .where(Chunk.kind == "vault_note", Chunk.topic_id == topic.id)
-                        .distinct()
-                    ).all()
-                )
+                only_refs, refs_complete = _owned_vault_refs(session, topic.id, deadline)
+                if not refs_complete:
+                    # Ownership enumeration did not finish inside the budget: do not sweep
+                    # this topic's vault with a partial ownership set.
+                    truncated = True
+                    break
                 if not only_refs:
                     topic_kinds = tuple(kind for kind in kinds if kind != "vault_note")
             if not topic_kinds:
@@ -228,6 +227,25 @@ def _reindex_memory_locked(
         ms=elapsed_ms,
         note=note,
     )
+
+
+def _owned_vault_refs(session: Session, topic_id: int, deadline: float) -> tuple[set[str], bool]:
+    """Distinct vault-note refs a topic owns, in deadline-checked keyset batches."""
+    refs: set[str] = set()
+    last_id = 0
+    while True:
+        if time.perf_counter() >= deadline:
+            return refs, False
+        rows = session.exec(
+            select(Chunk.id, Chunk.source_ref)
+            .where(Chunk.kind == "vault_note", Chunk.topic_id == topic_id, Chunk.id > last_id)
+            .order_by(Chunk.id)
+            .limit(REINDEX_TOPIC_BATCH)
+        ).all()
+        if not rows:
+            return refs, True
+        last_id = max(chunk_id for chunk_id, _ in rows)
+        refs.update(ref for _, ref in rows)
 
 
 def _reindex_one_topic(session, topic_id, vault_path, fetch, retriever, progress, *,

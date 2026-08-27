@@ -23,6 +23,7 @@ from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import AgentEvent, Assessment, Concept, Deliverable, Item, Phase, Track
 from adaptive_academy.prompts import ASSESS_ARTIFACT
+from adaptive_academy.engine.untrusted import escape_markers
 
 
 @dataclass
@@ -60,7 +61,7 @@ def build_artifact_prompt(deliverable: Deliverable, content: str) -> tuple[str, 
     lines = [f"DELIVERABLE: {deliverable.text}", "ACCEPTANCE CRITERIA:"]
     for c in deliverable.acceptance_criteria or []:
         lines.append(f"- {c}")
-    lines += ["", "<<<ARTIFACT>>>", content or "(empty)", "<<<END_ARTIFACT>>>"]
+    lines += ["", "<<<ARTIFACT>>>", escape_markers(content or "(empty)"), "<<<END_ARTIFACT>>>"]
     return ASSESS_ARTIFACT, "\n".join(lines)
 
 

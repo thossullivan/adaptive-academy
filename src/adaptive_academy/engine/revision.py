@@ -31,6 +31,7 @@ from adaptive_academy.models import (
     Track,
 )
 from adaptive_academy.prompts import PROGRAM_REVISION
+from adaptive_academy.engine.untrusted import escape_markers
 
 
 def build_learnings_digest(session: Session, program: Program) -> str:
@@ -281,8 +282,8 @@ def run_revision(
 
     emit("prompt", PROGRAM_REVISION.tag)
     user_msg = "\n\n".join([
-        "<<<CURRENT MAP>>>", serialize_map(session, program),
-        "<<<LEARNINGS DIGEST>>>", build_learnings_digest(session, program),
+        "<<<CURRENT MAP>>>", escape_markers(serialize_map(session, program)),
+        "<<<LEARNINGS DIGEST>>>", escape_markers(build_learnings_digest(session, program)),
         "<<<SOURCES>>>",
         "\n".join(f"- [{s.angle}] {s.title} ({s.url}) — {s.summary}".rstrip(" —") for s in raw),
     ])

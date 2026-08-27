@@ -7,6 +7,8 @@ import math
 import re
 import threading
 import time
+
+from adaptive_academy.engine.untrusted import escape_markers as _escape_markers
 import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
@@ -1078,7 +1080,7 @@ def jaccard(a: str, b: str) -> float:
 
 def escape_markers(text: str) -> str:
     """Neutralize prompt-block delimiter sequences in untrusted text."""
-    return text.replace("<<<", "‹‹‹").replace(">>>", "›››")
+    return _escape_markers(text)
 
 
 def render_block(

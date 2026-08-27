@@ -18,6 +18,7 @@ from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import Assessment, Concept
 from adaptive_academy.prompts import TEACH
+from adaptive_academy.engine.untrusted import escape_markers
 
 
 
@@ -57,7 +58,7 @@ def grade_teaching(
 ) -> TeachResult:
     """Grade a public explanation under a teaching expectancy; persist as a teach assessment."""
     user = (f"CONCEPT: {concept.name}\n\n<<<TEACHING>>>\n"
-            f"{explanation or '(empty)'}\n<<<END_TEACHING>>>")
+            f"{escape_markers(explanation or '(empty)')}\n<<<END_TEACHING>>>")
     topic_id = topic_id_for_concept(session, concept.id)
     trace_prompt(session, TEACH, topic_id=topic_id)
     resp = llm.complete(system=TEACH, messages=[{"role": "user", "content": user}], tools=[])

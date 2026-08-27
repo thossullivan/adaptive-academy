@@ -38,6 +38,7 @@ from adaptive_academy.models import (
     TopicFoundation,
 )
 from adaptive_academy.prompts import PF_CONSOLIDATE, PF_GENERATE
+from adaptive_academy.engine.untrusted import escape_markers
 
 
 
@@ -182,8 +183,8 @@ def consolidate(
     retriever: Retriever | None = None,
 ) -> ConsolidateResult:
     """Grade the generative attempt and teach the canonical approach; persist the record."""
-    user = (f"CONCEPT: {concept.name}\n\n<<<PROBLEM>>>\n{problem}\n<<<END_PROBLEM>>>\n\n"
-            f"<<<ATTEMPT>>>\n{attempt or '(none)'}\n<<<END_ATTEMPT>>>")
+    user = (f"CONCEPT: {concept.name}\n\n<<<PROBLEM>>>\n{escape_markers(problem)}\n<<<END_PROBLEM>>>\n\n"
+            f"<<<ATTEMPT>>>\n{escape_markers(attempt or '(none)')}\n<<<END_ATTEMPT>>>")
     topic_id = topic_id_for_concept(session, concept.id)
     trace_prompt(session, PF_CONSOLIDATE, topic_id=topic_id)
     resp = llm.complete(

@@ -21,6 +21,7 @@ from adaptive_academy.models import (
     AgentEvent, Assessment, Milestone, PaperProbe, PaperProbeAnswer,
 )
 from adaptive_academy.prompts import PAPER_PROBE_DIRECTOR, PAPER_PROBE_OUTCOME
+from adaptive_academy.engine.untrusted import escape_markers
 
 
 def _emit(session: Session, pp: PaperProbe, kind: str, detail: str = "") -> None:
@@ -42,12 +43,7 @@ def direct(
     for c in concepts:
         level = compute_levels(c.estimate)
         lines.append(f"[id={c.id}] {c.name} — challenge={level.challenge}")
-    base_user = (
-        "<<<PAPER>>>\n"
-        + pp.paper_text
-        + "\n<<<END_PAPER>>>\n\n"
-        + "\n".join(lines)
-    )
+    base_user = paper_block(pp) + "\n\n" + "\n".join(lines)
     concept_ids = [concept.id for concept in concepts if concept.id is not None]
     covered_block = ""
     prior_questions = []
@@ -141,14 +137,19 @@ def _answers(session: Session, pp: PaperProbe) -> dict[int, str]:
     return {a.question_index: a.content for a in rows}
 
 
+def paper_block(pp: PaperProbe) -> str:
+    """The untrusted paper block; the paper text can never forge its own delimiters."""
+    return "<<<PAPER>>>\n" + escape_markers(pp.paper_text) + "\n<<<END_PAPER>>>"
+
+
 def _qa_text(pp: PaperProbe, answers: dict[int, str],
              concept_id: int | None = None) -> str:
     parts = []
     for q in pp.questions:
         if concept_id is not None and concept_id not in q.get("concept_ids", []):
             continue
-        a = answers.get(q["index"], "(no answer)")
-        parts.append(f"Q ({q.get('axis', '')}): {q.get('prompt', '')}\nA: {a}")
+        a = escape_markers(answers.get(q["index"], "(no answer)"))
+        parts.append(f"Q ({q.get('axis', '')}): {escape_markers(q.get('prompt', ''))}\nA: {a}")
     return "\n\n".join(parts)
 
 
