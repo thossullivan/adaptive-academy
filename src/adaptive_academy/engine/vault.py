@@ -331,10 +331,24 @@ def build_title_index(
     deadline: float | None = None,
 ) -> dict[str, str]:
     """Build a case-folded title and frontmatter-alias map for one vault sweep."""
+    titles, _complete = build_title_index_checked(root, deadline=deadline)
+    return titles
+
+
+def build_title_index_checked(
+    root: Path | str,
+    *,
+    deadline: float | None = None,
+) -> tuple[dict[str, str], bool]:
+    """Title index plus whether it is complete (deadline and file cap honoured in the scan)."""
     resolved_root = Path(root).resolve()
     titles: dict[str, str] = {}
-    for path in scan_notes(resolved_root):
+    paths, _rejected, complete = _scan_notes_with_skips(
+        resolved_root, vault=resolved_root, deadline=deadline
+    )
+    for path in paths:
         if deadline is not None and time.perf_counter() >= deadline:
+            complete = False
             break
         try:
             text = _read_index_text(path, vault=resolved_root)
@@ -346,7 +360,7 @@ def build_title_index(
             key = name.strip().casefold()
             if key:
                 titles.setdefault(key, path.resolve().as_uri())
-    return titles
+    return titles, complete
 
 
 def safe_vault_dir(path: str) -> Path:
@@ -499,11 +513,12 @@ def reindex_vault(
     current_refs = {path.resolve().as_uri() for path in paths}
     # A capped or deadline-stopped scan is partial work: report it as truncated.
     truncated = (not complete) or (deadline is not None and time.perf_counter() >= deadline)
-    title_index = (
-        {}
-        if truncated
-        else build_title_index(vault, deadline=deadline)
-    )
+    title_index: dict[str, str] = {}
+    titles_complete = False
+    if not truncated:
+        title_index, titles_complete = build_title_index_checked(vault, deadline=deadline)
+    if not titles_complete:
+        truncated = True  # link resolution would be partial; treat the run as truncated
     truncated = truncated or (
         deadline is not None and time.perf_counter() >= deadline
     )
@@ -616,7 +631,8 @@ def reindex_vault(
             indexed += result.indexed
             skipped += result.skipped
             removed += result.removed
-        _sync_vault_links(session, source_ref, text, title_index)
+        if titles_complete:
+            _sync_vault_links(session, source_ref, text, title_index)
         session.commit()
         bump_progress(
             progress,

@@ -268,6 +268,7 @@ def orphan_note_candidates(
     by_source: dict[str, list[Chunk]] = {}
     linked_ids: set[int] = set()
     last_id = 0
+    complete = False
     while True:
         if _expired(deadline):
             break
@@ -281,6 +282,7 @@ def orphan_note_candidates(
             .limit(SCOUT_CHECK_EVERY)
         ).all()
         if not chunks:
+            complete = True
             break
         chunk_ids = [chunk.id for chunk in chunks if chunk.id is not None]
         if _expired(deadline):
@@ -296,7 +298,12 @@ def orphan_note_candidates(
             by_source.setdefault(chunk.source_ref, []).append(chunk)
         last_id = int(chunks[-1].id or last_id)
         if len(chunks) < SCOUT_CHECK_EVERY:
+            complete = True
             break
+    if not complete:
+        # A note is "orphan" only when ALL its chunks were seen untagged; an interrupted scan
+        # cannot prove that, so it yields no orphan-note evidence at all.
+        return []
 
     candidates = []
     for position, (source_ref, note_chunks) in enumerate(by_source.items()):

@@ -500,3 +500,34 @@ def test_capped_scan_reports_truncated(session, tmp_path, monkeypatch):
         (tmp_path / f"{name}.md").write_text(f"# {name}\n\nbody {name}", encoding="utf-8")
     result = reindex_vault(session, topic.id, str(tmp_path))
     assert result.truncated is True
+
+
+def test_title_index_honours_deadline_and_incomplete_index_skips_links(session, tmp_path):
+    import time
+
+    from adaptive_academy.engine.vault import build_title_index_checked, reindex_vault
+    from adaptive_academy.models import VaultLink
+
+    (tmp_path / "a.md").write_text("# A\n\nlinks to [[B]]", encoding="utf-8")
+    (tmp_path / "b.md").write_text("# B\n\nbody", encoding="utf-8")
+    titles, complete = build_title_index_checked(tmp_path, deadline=time.perf_counter() - 1)
+    assert titles == {} and complete is False
+    titles, complete = build_title_index_checked(tmp_path)
+    assert complete is True and "b" in titles
+
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    # A deadline that expires right after the scan leaves the title index incomplete:
+    # the run is truncated and no links are synchronized from a partial index.
+    ticks = iter([0.0, 0.0, 5.0] + [5.0] * 50)
+    import adaptive_academy.engine.vault as vault_mod
+
+    real = vault_mod.time.perf_counter
+    vault_mod.time.perf_counter = lambda: next(ticks, 5.0)
+    try:
+        result = reindex_vault(session, topic.id, str(tmp_path), deadline=1.0)
+    finally:
+        vault_mod.time.perf_counter = real
+    assert result.truncated is True
+    assert session.exec(select(VaultLink)).all() == []

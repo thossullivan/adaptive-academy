@@ -1,3 +1,4 @@
+from sqlmodel import select
 from datetime import datetime, timedelta
 import re
 import time
@@ -438,3 +439,34 @@ def test_helper_queries_respect_the_deadline(session, monkeypatch):
     assert scout.frontier_candidates(session, 1, deadline=expired) == []
     assert scout.extension_candidates(session, 1, deadline=expired) == []
     assert calls["n"] == 0
+
+
+def test_incomplete_orphan_scan_yields_no_candidates(session, monkeypatch):
+    from adaptive_academy.engine import scout
+    from adaptive_academy.engine.memory import index_text
+    from adaptive_academy.models import ChunkConcept, Concept, Topic, Track
+
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    track = Track(topic_id=topic.id, title="T")
+    session.add(track)
+    session.commit()
+    concept = Concept(track_id=track.id, name="Tagged Concept")
+    session.add(concept)
+    session.commit()
+    # One source with two chunks; only the SECOND chunk is tagged.
+    index_text(session, kind="vault_note", text="first part\n\n" + "x" * 1300 + "\n\nsecond part",
+               source_ref="file:///v/n.md", topic_id=topic.id)
+    session.commit()
+    chunks = session.exec(select(scout.Chunk).order_by(scout.Chunk.id)).all()
+    assert len(chunks) >= 2
+    session.add(ChunkConcept(chunk_id=chunks[-1].id, concept_id=concept.id))
+    session.commit()
+    # Full scan: the note is NOT orphaned.
+    assert scout.orphan_note_candidates(session) == []
+    # Interrupt after the first single-row batch: no false orphan evidence.
+    monkeypatch.setattr(scout, "SCOUT_CHECK_EVERY", 1)
+    ticks = iter([False, False, True, True, True, True])
+    monkeypatch.setattr(scout, "_expired", lambda _d: next(ticks, True))
+    assert scout.orphan_note_candidates(session, deadline=1.0) == []

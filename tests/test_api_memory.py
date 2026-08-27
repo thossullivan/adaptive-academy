@@ -401,3 +401,20 @@ def test_search_rejects_concept_from_another_topic(session, memory_api):
     )
     assert mismatched.status_code == 400
     assert matched.status_code == 200
+
+
+def test_all_topic_reindex_checks_deadline_before_any_topic_work(memory_api, monkeypatch, tmp_path):
+    calls = {"n": 0}
+
+    def never(*_a, **_k):
+        calls["n"] += 1
+        raise AssertionError("reindex_topic must not run after the deadline")
+
+    monkeypatch.setattr(routes_memory, "reindex_topic", never)
+    monkeypatch.setattr(routes_memory, "REINDEX_DEADLINE_S", 0.0)
+    client, _topic, _ = memory_api
+    (tmp_path / "a.md").write_text("# A\n\nbody", encoding="utf-8")
+    response = client.post("/api/memory/reindex", json={"vault_path": str(tmp_path)})
+    assert response.status_code == 200
+    assert response.json()["truncated"] is True
+    assert calls["n"] == 0
