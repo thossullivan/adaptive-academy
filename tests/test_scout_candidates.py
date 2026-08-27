@@ -417,3 +417,24 @@ def test_frontier_candidates_pass_deadline_to_graph(session, monkeypatch):
 
     assert frontier_candidates(session, program.id, deadline=deadline) == []
     assert calls == [(session, track.id, deadline)]
+
+
+def test_helper_queries_respect_the_deadline(session, monkeypatch):
+    import time
+
+    from adaptive_academy.engine import scout
+
+    calls = {"n": 0}
+    original = scout.Session.exec
+
+    def counting_exec(self, *args, **kwargs):
+        calls["n"] += 1
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(scout.Session, "exec", counting_exec)
+    expired = time.monotonic() - 1
+    assert scout._known_concept_names(session, deadline=expired) == []
+    assert scout._program_topic_ids(session, 1, deadline=expired) == []
+    assert scout.frontier_candidates(session, 1, deadline=expired) == []
+    assert scout.extension_candidates(session, 1, deadline=expired) == []
+    assert calls["n"] == 0
