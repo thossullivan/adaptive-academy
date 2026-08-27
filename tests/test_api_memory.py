@@ -378,3 +378,26 @@ def test_vault_ingest_returns_409_while_reindex_lock_is_held(memory_api, tmp_pat
     finally:
         REINDEX_LOCK.release()
     assert response.status_code == 409
+
+
+def test_search_rejects_concept_from_another_topic(session, memory_api):
+    from adaptive_academy.models import Concept, Track
+
+    client, topic, _ = memory_api
+    other = Topic(title="Other")
+    session.add(other)
+    session.commit()
+    track = Track(topic_id=other.id, title="Other")
+    session.add(track)
+    session.commit()
+    concept = Concept(track_id=track.id, name="Foreign")
+    session.add(concept)
+    session.commit()
+    mismatched = client.get(
+        "/api/memory/search", params={"q": "x", "topic_id": topic.id, "concept_id": concept.id}
+    )
+    matched = client.get(
+        "/api/memory/search", params={"q": "x", "topic_id": other.id, "concept_id": concept.id}
+    )
+    assert mismatched.status_code == 400
+    assert matched.status_code == 200

@@ -358,3 +358,29 @@ def test_source_reindex_truncates_during_stale_cleanup_without_loading_docs(sess
                            kinds=("source_doc",), deadline_s=0.0)
     assert result.truncated is True
     assert fetched["n"] == 0
+
+
+def test_accepted_docs_are_not_loaded_when_the_deadline_passes_after_stale_scan(session, monkeypatch):
+
+    from adaptive_academy.engine import memory as memory_mod
+    from adaptive_academy.engine.memory import reindex_topic
+    from adaptive_academy.models import SourceDoc, Topic
+
+    topic = Topic(title="Sources")
+    session.add(topic)
+    session.commit()
+    session.add(SourceDoc(topic_id=topic.id, title="Live", url="https://example.org/a", status="accepted"))
+    session.commit()
+    # The (empty) stale-scan query consumes the whole budget; the doc query must not run.
+    ticks = iter([0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0])
+    monkeypatch.setattr(memory_mod.time, "perf_counter", lambda: next(ticks, 10.0))
+    fetched = {"n": 0}
+
+    def fetch(url):
+        fetched["n"] += 1
+        return "text"
+
+    result = reindex_topic(session, topic.id, vault_path="", fetch=fetch,
+                           kinds=("source_doc",), deadline_s=1.0)
+    assert result.truncated is True
+    assert fetched["n"] == 0

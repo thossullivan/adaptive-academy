@@ -947,24 +947,38 @@ def reindex_topic(
                 break
 
     if "source_doc" in selected and not truncated:
-        docs = session.exec(
-            select(SourceDoc)
-            .where(
-                SourceDoc.topic_id == topic_id,
-                SourceDoc.status == "accepted",
-            )
-            .order_by(SourceDoc.id)
-        ).all()
-        for doc in docs:
+        last_doc_id = 0
+        while True:
+            # Deadline before every query, including the first: a slow empty stale-scan
+            # query above must not be followed by an unbounded document load.
             if time.perf_counter() >= deadline:
                 truncated = True
                 break
-            result = index_source_doc(session, doc, fetch=fetch, retriever=retriever)
-            indexed += result.indexed
-            skipped += result.skipped
-            removed += result.removed
-            session.commit()
-            bump_progress(progress, indexed=result.indexed, skipped=result.skipped, removed=result.removed)
+            docs = session.exec(
+                select(SourceDoc)
+                .where(
+                    SourceDoc.topic_id == topic_id,
+                    SourceDoc.status == "accepted",
+                    SourceDoc.id > last_doc_id,
+                )
+                .order_by(SourceDoc.id)
+                .limit(REEMBED_BATCH)
+            ).all()
+            if not docs:
+                break
+            last_doc_id = max(doc.id for doc in docs if doc.id is not None)
+            for doc in docs:
+                if time.perf_counter() >= deadline:
+                    truncated = True
+                    break
+                result = index_source_doc(session, doc, fetch=fetch, retriever=retriever)
+                indexed += result.indexed
+                skipped += result.skipped
+                removed += result.removed
+                session.commit()
+                bump_progress(progress, indexed=result.indexed, skipped=result.skipped, removed=result.removed)
+            if truncated:
+                break
 
     if not truncated:
         truncated = _reembed_stale_chunks(
