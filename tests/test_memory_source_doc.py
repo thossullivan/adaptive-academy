@@ -328,3 +328,33 @@ def test_reindex_topic_reports_committed_stale_source_removals_in_progress(sessi
                            kinds=("source_doc",), progress=progress)
     assert result.removed == 1
     assert progress["removed"] == 1
+
+
+def test_source_reindex_truncates_during_stale_cleanup_without_loading_docs(session, monkeypatch):
+
+    from adaptive_academy.engine.memory import index_text, reindex_topic
+    from adaptive_academy.models import SourceDoc, Topic
+
+    topic = Topic(title="Sources")
+    session.add(topic)
+    session.commit()
+    pruned = SourceDoc(topic_id=topic.id, title="Pruned", url="https://example.org/p", status="pruned")
+    accepted = SourceDoc(topic_id=topic.id, title="Live", url="https://example.org/a", status="accepted")
+    session.add(pruned)
+    session.add(accepted)
+    session.commit()
+    index_text(session, kind="source_doc", text="stale", topic_id=topic.id,
+               source_ref=f"sourcedoc:{pruned.id}", doc_title="Pruned")
+    session.commit()
+    fetched = {"n": 0}
+
+    def fetch(url):
+        fetched["n"] += 1
+        return "live text"
+
+    # Deadline already expired: stale discovery stops before any batch; accepted docs are
+    # never fetched; truncated is reported.
+    result = reindex_topic(session, topic.id, vault_path="", fetch=fetch,
+                           kinds=("source_doc",), deadline_s=0.0)
+    assert result.truncated is True
+    assert fetched["n"] == 0

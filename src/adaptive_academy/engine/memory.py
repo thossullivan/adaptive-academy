@@ -905,31 +905,48 @@ def reindex_topic(
             truncated = result.truncated
 
     if "source_doc" in selected and not truncated:
-        source_chunks = session.exec(
-            select(Chunk).where(
-                Chunk.kind == "source_doc",
-                Chunk.topic_id == topic_id,
-            )
-        ).all()
-        stale_refs: set[str] = set()
-        for chunk in source_chunks:
-            prefix, separator, raw_id = chunk.source_ref.partition(":")
-            try:
-                source_id = int(raw_id) if prefix == "sourcedoc" and separator else None
-            except ValueError:
-                source_id = None
-            source = session.get(SourceDoc, source_id) if source_id is not None else None
-            if source is None or source.status != "accepted":
-                stale_refs.add(chunk.source_ref)
-        for source_ref in sorted(stale_refs):
+        # Stale-source discovery in deadline-first keyset batches: chunks whose SourceDoc is
+        # gone or no longer accepted are removed one source at a time, each committed.
+        last_id = 0
+        while True:
             if time.perf_counter() >= deadline:
                 truncated = True
                 break
-            gone = remove_source(session, source_ref)
-            session.commit()
-            removed += gone
-            bump_progress(progress, removed=gone)
+            batch = session.exec(
+                select(Chunk)
+                .where(
+                    Chunk.kind == "source_doc",
+                    Chunk.topic_id == topic_id,
+                    Chunk.id > last_id,
+                )
+                .order_by(Chunk.id)
+                .limit(REEMBED_BATCH)
+            ).all()
+            if not batch:
+                break
+            last_id = max(chunk.id for chunk in batch if chunk.id is not None)
+            stale_refs: set[str] = set()
+            for chunk in batch:
+                prefix, separator, raw_id = chunk.source_ref.partition(":")
+                try:
+                    source_id = int(raw_id) if prefix == "sourcedoc" and separator else None
+                except ValueError:
+                    source_id = None
+                source = session.get(SourceDoc, source_id) if source_id is not None else None
+                if source is None or source.status != "accepted":
+                    stale_refs.add(chunk.source_ref)
+            for source_ref in sorted(stale_refs):
+                if time.perf_counter() >= deadline:
+                    truncated = True
+                    break
+                gone = remove_source(session, source_ref)
+                session.commit()
+                removed += gone
+                bump_progress(progress, removed=gone)
+            if truncated:
+                break
 
+    if "source_doc" in selected and not truncated:
         docs = session.exec(
             select(SourceDoc)
             .where(
