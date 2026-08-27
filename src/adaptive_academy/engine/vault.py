@@ -7,8 +7,10 @@ lives in the API layer; this module stays side-effect-light and unit-testable.
 
 from __future__ import annotations
 
+import io
 import os
 import re
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -49,6 +51,11 @@ EXPORT_FOLDER = "Adaptive Academy"
 _SUMMARY_CAP = 280
 _MAX_SCAN_FILES = 2000
 _MAX_READ_CHARS = 100_000  # only the head is needed for title/summary
+_HAS_DESCRIPTOR_WALK = (
+    os.open in os.supports_dir_fd
+    and hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NOFOLLOW")
+)
 
 
 def slugify(name: str) -> str:
@@ -192,6 +199,70 @@ def _frontmatter_list(value: object) -> list[str]:
 
 
 def _read_text(
+    path: Path,
+    *,
+    vault: Path,
+    limit: int,
+    errors: str,
+) -> str:
+    if _HAS_DESCRIPTOR_WALK:
+        return _read_text_descriptor(
+            path,
+            vault=vault,
+            limit=limit,
+            errors=errors,
+        )
+
+    return _read_text_fallback(
+        path,
+        vault=vault,
+        limit=limit,
+        errors=errors,
+    )
+
+
+def _read_text_descriptor(
+    path: Path,
+    *,
+    vault: Path,
+    limit: int,
+    errors: str,
+) -> str:
+    root = vault.resolve()
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise OSError("outside-vault-or-symlink") from exc
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise OSError("outside-vault-or-symlink")
+
+    root_flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_CLOEXEC"):
+        root_flags |= os.O_CLOEXEC
+    descriptor = os.open(root, root_flags)
+    try:
+        for index, name in enumerate(relative.parts):
+            flags = os.O_RDONLY | os.O_NOFOLLOW
+            if index < len(relative.parts) - 1:
+                flags |= os.O_DIRECTORY
+            if hasattr(os, "O_CLOEXEC"):
+                flags |= os.O_CLOEXEC
+            child_descriptor = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child_descriptor
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError("outside-vault-or-symlink")
+        final_descriptor = descriptor
+        descriptor = -1
+        with os.fdopen(final_descriptor, "rb") as raw:
+            with io.TextIOWrapper(raw, encoding="utf-8", errors=errors) as handle:
+                return handle.read(limit)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _read_text_fallback(
     path: Path,
     *,
     vault: Path,
@@ -364,6 +435,7 @@ def reindex_vault(
     *,
     subfolder: str = "",
     only_refs: set[str] | None = None,
+    progress: dict[str, int] | None = None,
     retriever: Retriever | None = None,
 ) -> IndexResult:
     """Index vault note text and wikilinks with one transaction per file.
@@ -373,6 +445,7 @@ def reindex_vault(
     """
     from adaptive_academy.engine.memory import (
         IndexResult,
+        bump_progress,
         content_hash,
         index_text,
         make_context,
@@ -390,6 +463,8 @@ def reindex_vault(
     indexed = 0
     skipped = len(rejected_paths)
     removed = 0
+    bump_progress(progress, skipped=len(rejected_paths))
+    progress_seen = {"indexed": 0, "skipped": skipped, "removed": 0}
 
     for path in rejected_paths:
         session.add(
@@ -425,11 +500,22 @@ def reindex_vault(
                 )
             )
             session.commit()
+            bump_progress(progress, skipped=1)
+            progress_seen["skipped"] += 1
             continue
         try:
             text = _read_index_text(path, vault=vault)
             source_mtime = path.stat(follow_symlinks=False).st_mtime
-        except (OSError, UnicodeError) as exc:
+        except OSError:
+            skipped += 1
+            session.add(AgentEvent(
+                topic_id=topic_id,
+                kind="memory:reindex_skipped",
+                detail=f"{source_ref} outside-vault-or-symlink",
+            ))
+            session.commit()
+            continue
+        except UnicodeError as exc:
             skipped += 1
             session.add(AgentEvent(
                 topic_id=topic_id, kind="memory:reindex_skipped",
@@ -474,6 +560,13 @@ def reindex_vault(
             removed += result.removed
         _sync_vault_links(session, source_ref, text, title_index)
         session.commit()
+        bump_progress(
+            progress,
+            indexed=indexed - progress_seen["indexed"],
+            skipped=skipped - progress_seen["skipped"],
+            removed=removed - progress_seen["removed"],
+        )
+        progress_seen = {"indexed": indexed, "skipped": skipped, "removed": removed}
 
     root_prefix = root.resolve().as_uri().rstrip("/") + "/"
     existing_refs = {
@@ -489,8 +582,10 @@ def reindex_vault(
     if only_refs is not None:
         existing_refs &= only_refs
     for source_ref in sorted(existing_refs - current_refs):
-        removed += _remove_vault_source(session, source_ref)
+        gone = _remove_vault_source(session, source_ref)
+        removed += gone
         session.commit()
+        bump_progress(progress, removed=gone)
 
     session.add(
         AgentEvent(

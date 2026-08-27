@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
 from adaptive_academy.api.deps import get_retriever, get_session
+from adaptive_academy.engine.memory import REINDEX_LOCK, REINDEX_LOCK_TIMEOUT_S
 from adaptive_academy.api.schemas import (
     VaultExportAllOut,
     VaultExportIn,
@@ -43,6 +44,18 @@ def ingest(
     body: VaultIngestIn,
     session: Session = Depends(get_session),
     retriever: Retriever = Depends(get_retriever),
+) -> VaultIngestOut:
+    # Ingest reindexes the vault; serialize with /api/memory/reindex.
+    if not REINDEX_LOCK.acquire(timeout=REINDEX_LOCK_TIMEOUT_S):
+        raise HTTPException(409, "reindex already running")
+    try:
+        return _ingest_locked(topic_id, body, session, retriever)
+    finally:
+        REINDEX_LOCK.release()
+
+
+def _ingest_locked(
+    topic_id: int, body: VaultIngestIn, session: Session, retriever: Retriever
 ) -> VaultIngestOut:
     try:
         res = ingest_vault(

@@ -11,7 +11,11 @@ from adaptive_academy.db import ensure_fts, ensure_vec
 from adaptive_academy.engine.memory import ChunkFilter, content_hash
 from adaptive_academy.llm.fts_retriever import FtsRetriever
 from adaptive_academy.llm.hybrid_retriever import HybridRetriever
-from adaptive_academy.llm.onnx_embedder import OnnxEmbedder, TextEmbedding
+from adaptive_academy.llm.onnx_embedder import (
+    OnnxEmbedder,
+    TextEmbedding,
+    _model_is_cached,
+)
 from adaptive_academy.llm.scripted_embedder import ScriptedEmbedder
 from adaptive_academy.models import Chunk, Topic
 
@@ -141,6 +145,37 @@ def test_hybrid_rrf_merges_exact_and_semantic_hits_with_filters(vec_session):
     assert 0.0 < first[1][1] < first[0][1]
 
 
+def test_hybrid_returns_fts_results_when_vector_embedding_fails(vec_session, caplog, monkeypatch):
+    from adaptive_academy.llm import hybrid_retriever
+
+    class FailingEmbedder(ScriptedEmbedder):
+        def embed(self, texts):
+            raise RuntimeError("model cache is incomplete")
+
+    topic = Topic(title="Fallback")
+    vec_session.add(topic)
+    vec_session.flush()
+    assert topic.id is not None
+    chunk = _chunk("lexical fallback", "vault:fallback", topic_id=topic.id)
+    vec_session.add(chunk)
+    vec_session.flush()
+    where = ChunkFilter(topic_id=topic.id)
+    fts = FtsRetriever()
+    expected = fts.search(vec_session, "lexical fallback", where=where, k=3)
+    retriever = HybridRetriever(fts, FailingEmbedder())
+    monkeypatch.setattr(hybrid_retriever, "_logged_vector_failure", False)
+
+    with caplog.at_level("WARNING"):
+        first = retriever.search(vec_session, "lexical fallback", where=where, k=3)
+        second = retriever.search(vec_session, "lexical fallback", where=where, k=3)
+
+    assert expected
+    assert first == second == expected
+    assert caplog.messages.count(
+        "Vector retrieval failed; returning FTS5 results."
+    ) == 1
+
+
 def test_hybrid_is_selected_when_both_optional_components_are_available(monkeypatch):
     from adaptive_academy.api import deps
 
@@ -240,6 +275,32 @@ def test_hybrid_degrades_once_when_the_embedder_is_unavailable(monkeypatch, capl
     deps.reset_retriever_cache()
 
 
+def test_hybrid_warmup_failure_is_cached_as_fts(monkeypatch):
+    from adaptive_academy.api import deps
+
+    class FailingWarmupEmbedder(ScriptedEmbedder):
+        calls = 0
+
+        def embed(self, texts):
+            type(self).calls += 1
+            raise RuntimeError("cannot load local model")
+
+    embedder = FailingWarmupEmbedder()
+    monkeypatch.setattr(deps.settings, "retriever", "hybrid")
+    monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
+    monkeypatch.setattr(deps, "ensure_vec", lambda _engine: True)
+    monkeypatch.setattr(deps, "get_embedder", lambda: embedder)
+    deps.reset_retriever_cache()
+
+    first = deps.get_retriever()
+    second = deps.get_retriever()
+
+    assert isinstance(first, FtsRetriever)
+    assert isinstance(second, FtsRetriever)
+    assert embedder.calls == 1
+    deps.reset_retriever_cache()
+
+
 def test_hybrid_degrades_once_when_downloads_disabled_and_model_not_cached(
     monkeypatch,
     caplog,
@@ -250,6 +311,7 @@ def test_hybrid_degrades_once_when_downloads_disabled_and_model_not_cached(
     monkeypatch.setattr(deps.settings, "retriever", "hybrid")
     monkeypatch.setattr(deps.settings, "embedding_allow_download", False)
     monkeypatch.setattr(deps.settings, "embedding_cache_dir", str(tmp_path))
+    (tmp_path / "models--BAAI--bge-small-en-v1.5").mkdir()
     monkeypatch.setattr(deps, "ensure_fts", lambda _engine: True)
     monkeypatch.setattr(deps, "ensure_vec", lambda _engine: True)
     monkeypatch.setattr(deps, "_logged_retriever_degradations", set())
@@ -265,6 +327,19 @@ def test_hybrid_degrades_once_when_downloads_disabled_and_model_not_cached(
     deps.reset_retriever_cache()
 
 
+def test_model_cache_requires_onnx_file_under_matching_directory(tmp_path):
+    model_dir = tmp_path / "models--BAAI--bge-small-en-v1.5"
+    model_dir.mkdir()
+
+    assert not _model_is_cached("BAAI/bge-small-en-v1.5", str(tmp_path))
+
+    snapshot = model_dir / "snapshots" / "revision"
+    snapshot.mkdir(parents=True)
+    (snapshot / "model.onnx").write_bytes(b"dummy")
+
+    assert _model_is_cached("BAAI/bge-small-en-v1.5", str(tmp_path))
+
+
 def test_onnx_embedder_uses_fake_cached_model_when_downloads_disabled(
     monkeypatch,
     tmp_path,
@@ -272,7 +347,9 @@ def test_onnx_embedder_uses_fake_cached_model_when_downloads_disabled(
     from adaptive_academy.llm import onnx_embedder
 
     cache_dir = tmp_path / "fastembed_cache"
-    (cache_dir / "models--BAAI--bge-small-en-v1.5").mkdir(parents=True)
+    model_dir = cache_dir / "models--BAAI--bge-small-en-v1.5"
+    model_dir.mkdir(parents=True)
+    (model_dir / "model.onnx").write_bytes(b"dummy")
     calls = []
 
     class FakeVector:

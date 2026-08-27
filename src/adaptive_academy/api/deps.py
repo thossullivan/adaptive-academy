@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _logged_retriever_degradations: set[str] = set()
 _fts_available: bool | None = None
 _vec_available: bool | None = None
+_hybrid_available: bool | None = None
 _embedder: Embedder | None = None
 
 
@@ -112,17 +113,21 @@ def get_retriever() -> Retriever:
     if configured == "fts":
         return fts
 
-    global _vec_available
+    global _hybrid_available, _vec_available
     if _vec_available is None:
         _vec_available = ensure_vec(engine)
-    if _vec_available:
+    if _vec_available and _hybrid_available is not False:
         try:
             embedder = get_embedder()
             from adaptive_academy.llm.hybrid_retriever import HybridRetriever
 
-            return HybridRetriever(fts, embedder)
-        except (ImportError, RuntimeError, ValueError):
-            pass
+            if _hybrid_available is None:
+                embedder.embed(["warm-up"])
+            retriever = HybridRetriever(fts, embedder)
+            _hybrid_available = True
+            return retriever
+        except Exception:
+            _hybrid_available = False
 
     _warn_retriever_degradation_once(
         "hybrid",
@@ -133,9 +138,10 @@ def get_retriever() -> Retriever:
 
 def reset_retriever_cache() -> None:
     """Clear the cached FTS5 and sqlite-vec availability results."""
-    global _embedder, _fts_available, _vec_available
+    global _embedder, _fts_available, _hybrid_available, _vec_available
     _embedder = None
     _fts_available = None
+    _hybrid_available = None
     _vec_available = None
 
 

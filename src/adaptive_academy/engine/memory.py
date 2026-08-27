@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import threading
 import time
 import unicodedata
 from collections.abc import Callable, Iterable
@@ -46,6 +47,17 @@ INJECT_BUDGET_CHARS = 2400
 MEMORY_SNIPPET_CHARS = 240
 REINDEX_KINDS = ("vault_note", "source_doc")
 REINDEX_DEADLINE_S = 60.0
+# One reindex at a time per process (vault ingest and /api/memory/reindex share it).
+REINDEX_LOCK = threading.Lock()
+REINDEX_LOCK_TIMEOUT_S = 0.5
+
+
+def bump_progress(progress: dict[str, int] | None, **deltas: int) -> None:
+    """Add per-unit counts to a caller-owned progress dict (survives a later conflict)."""
+    if progress is None:
+        return
+    for key, value in deltas.items():
+        progress[key] = progress.get(key, 0) + value
 TUTOR_GROUNDING_K = 4
 TUTOR_COVERED_K = 3
 GROUNDING_K = 3
@@ -834,8 +846,12 @@ def reindex_topic(
     deadline_s: float = REINDEX_DEADLINE_S,
     vault_only_refs: set[str] | None = None,
     retriever: Retriever | None = None,
+    progress: dict[str, int] | None = None,
 ) -> ReindexResult:
     """Reindex one topic and return partial counts when the deadline expires.
+
+    ``progress`` (indexed/skipped/removed) is bumped after every committed unit so a caller
+    can report work that was already persisted if a later unit raises.
 
     ``vault_only_refs`` restricts the vault sweep to notes this topic already owns.
     """
@@ -859,7 +875,7 @@ def reindex_topic(
                 vault_path,
                 only_refs=vault_only_refs,
                 retriever=retriever,
-            )
+             progress=progress)
             indexed += result.indexed
             skipped += result.skipped
             removed += result.removed
@@ -901,6 +917,7 @@ def reindex_topic(
             skipped += result.skipped
             removed += result.removed
             session.commit()
+            bump_progress(progress, indexed=result.indexed, skipped=result.skipped, removed=result.removed)
 
     reembed_truncated = _reembed_stale_chunks(
         session,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import struct
 from typing import Any
 
@@ -19,6 +20,9 @@ from adaptive_academy.engine.memory import (
 from adaptive_academy.llm.embedder_types import Embedder
 from adaptive_academy.llm.fts_retriever import FtsRetriever
 from adaptive_academy.models import Chunk
+
+logger = logging.getLogger(__name__)
+_logged_vector_failure = False
 
 
 class HybridRetriever:
@@ -50,8 +54,12 @@ class HybridRetriever:
             where=where,
             k=HYBRID_CANDIDATE_K,
         )
-        eligible_ids = _eligible_chunk_ids(session, where)
-        semantic = self._vector_search(session, query, eligible_ids)
+        try:
+            eligible_ids = _eligible_chunk_ids(session, where)
+            semantic = self._vector_search(session, query, eligible_ids)
+        except Exception:
+            _warn_vector_failure_once()
+            return lexical[:k]
 
         fused: dict[int, float] = {}
         for ranking in (lexical, semantic):
@@ -172,3 +180,11 @@ def _validate_vectors(vectors: list[list[float]], *, expected: int, dim: int) ->
         raise ValueError(f"embedder returned {len(vectors)} vectors for {expected} texts")
     if any(len(vector) != dim for vector in vectors):
         raise ValueError(f"embedder must return {dim}-dimensional vectors")
+
+
+def _warn_vector_failure_once() -> None:
+    global _logged_vector_failure
+    if _logged_vector_failure:
+        return
+    _logged_vector_failure = True
+    logger.warning("Vector retrieval failed; returning FTS5 results.")

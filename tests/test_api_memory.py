@@ -327,3 +327,54 @@ def test_search_unknown_topic_or_concept_is_404(memory_api):
     client, _, _ = memory_api
     assert client.get("/api/memory/search", params={"q": "x", "topic_id": 99999}).status_code == 404
     assert client.get("/api/memory/search", params={"q": "x", "concept_id": 99999}).status_code == 404
+
+
+def test_reindex_operational_error_before_topic_work_returns_409(memory_api, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    client, topic, _ = memory_api
+
+    def locked_exec(*_args, **_kwargs):
+        raise OperationalError("select", {}, RuntimeError("database is locked"))
+
+    # The very first DB call of the handler (topic lookup) fails; still 409, never 500.
+    monkeypatch.setattr(routes_memory.Session, "exec", locked_exec)
+    response = client.post(
+        "/api/memory/reindex", json={"topic_id": topic.id, "kinds": ["source_doc"]}
+    )
+    assert response.status_code == 409
+    assert "partial counts" in response.json()["note"]
+
+
+def test_reindex_conflict_after_committed_files_reports_partial_counts(memory_api, monkeypatch):
+    client, topic, _ = memory_api
+
+    def two_files_then_conflict(*_args, progress=None, **_kwargs):
+        progress["indexed"] += 2
+        progress["skipped"] += 1
+        raise IntegrityError("reindex", {}, RuntimeError("collision"))
+
+    monkeypatch.setattr(routes_memory, "reindex_topic", two_files_then_conflict)
+    response = client.post(
+        "/api/memory/reindex", json={"topic_id": topic.id, "kinds": ["source_doc"]}
+    )
+    assert response.status_code == 409
+    body = response.json()
+    assert body["indexed"] == 2
+    assert body["skipped"] == 1
+    assert body["truncated"] is True
+
+
+def test_vault_ingest_returns_409_while_reindex_lock_is_held(memory_api, tmp_path):
+    from adaptive_academy.engine.memory import REINDEX_LOCK
+
+    client, topic, _ = memory_api
+    (tmp_path / "a.md").write_text("# A\n\nnote", encoding="utf-8")
+    assert REINDEX_LOCK.acquire(timeout=0.1)
+    try:
+        response = client.post(
+            f"/api/topics/{topic.id}/vault/ingest", json={"vault_path": str(tmp_path)}
+        )
+    finally:
+        REINDEX_LOCK.release()
+    assert response.status_code == 409

@@ -72,5 +72,6 @@ def _model_is_cached(model_name: str, cache_dir: str | None) -> bool:
             candidate.name.casefold() == expected_hf_name
             or model_slug in candidate.name.casefold()
         )
+        and any(candidate.rglob("*.onnx"))
         for candidate in candidates
     )
