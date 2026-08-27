@@ -89,11 +89,24 @@ def ensure_graph_backfill(db_engine: Engine) -> bool:
 
 
 def ensure_fts(db_engine: Engine) -> bool:
-    """Create the FTS5 shadow table and triggers when FTS5 is available."""
+    """Create the FTS5 shadow table and triggers when FTS5 is available.
+
+    If chunks were written while FTS5 was unavailable (triggers absent), the external-content
+    index is stale; the integrity check detects that and a `rebuild` re-indexes every row.
+    """
     try:
         with db_engine.begin() as connection:
+            existed = connection.exec_driver_sql(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chunk_fts'"
+            ).first() is not None
             for statement in FTS_DDL:
                 connection.exec_driver_sql(statement)
+            if not existed:
+                # FTS5's integrity-check does not compare an external-content index against
+                # its content table, so a freshly created index is rebuilt unconditionally:
+                # rows written while FTS5 was unavailable become searchable.
+                connection.exec_driver_sql("INSERT INTO chunk_fts(chunk_fts) VALUES('rebuild')")
+                logger.info("chunk_fts created and rebuilt from existing chunk rows")
     except OperationalError:
         return False
     return True

@@ -322,3 +322,30 @@ def test_digest_wraps_program_context_and_survives_a_huge_title(session):
     assert "Ignore evidence" in digest  # present, but inside the untrusted PROGRAM block
     assert digest.index("<<<PROGRAM>>>") < digest.index("Ignore evidence") < digest.index("<<<END_PROGRAM>>>")
     assert "XXXX" * 100 not in digest  # title capped
+
+
+def test_generators_stop_at_the_deadline(session):
+    import time
+
+    from adaptive_academy.engine.memory import index_text
+    from adaptive_academy.engine.scout import orphan_note_candidates, run_scout
+    from adaptive_academy.llm.scripted_client import ScriptedLLMClient
+    from adaptive_academy.models import Program, Topic
+
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    for i in range(3):
+        index_text(session, kind="vault_note", text=f"# N{i}\n\nbody {i}",
+                   source_ref=f"file:///v/n{i}.md", topic_id=topic.id)
+    session.commit()
+    assert len(orphan_note_candidates(session)) == 3
+    # An already-expired deadline stops the generator at its first check.
+    assert orphan_note_candidates(session, deadline=time.monotonic() - 1) == []
+
+    program = Program(title="P")
+    session.add(program)
+    session.commit()
+    result = run_scout(session, program, llm=ScriptedLLMClient([]), deadline_s=0.0)
+    assert result.truncated is True
+    assert result.suggestions == []
