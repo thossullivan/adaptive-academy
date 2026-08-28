@@ -1,3 +1,4 @@
+from adaptive_academy.engine.runlock import RunInProgress
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
@@ -305,6 +306,8 @@ def revise_map(
     ).first()
     try:
         result = run_revision(session, program, intent, researcher=researcher, llm=llm)
+    except RunInProgress as e:
+        raise HTTPException(409, str(e)) from e
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return _revision_out(session, result.revision)

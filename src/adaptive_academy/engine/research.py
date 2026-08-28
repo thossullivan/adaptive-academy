@@ -5,6 +5,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from sqlmodel import Session
 
 from adaptive_academy.engine.fanout import fan_out_with_retry
+from adaptive_academy.engine.runlock import exclusive_run
 from adaptive_academy.engine.memory import (
     ALREADY_COVERED_MARKER,
     DEFAULT_K,
@@ -169,7 +170,30 @@ def research_topic(
     max_workers: int = 5,
     retriever: Retriever | None = None,
 ) -> ResearchResult:
-    """Fan out over briefs, dedupe+rank, synthesize a foundation, persist, and trace."""
+    """Fan out over briefs, dedupe+rank, synthesize a foundation, persist, and trace.
+
+    Raises `RunInProgress` when research for this topic is already running.
+    """
+    with exclusive_run(f"research:{topic.id}"):
+        return _research_topic_locked(
+            session, topic, intent, researcher=researcher, llm=llm,
+            max_subagents=max_subagents, cap=cap, max_workers=max_workers,
+            retriever=retriever,
+        )
+
+
+def _research_topic_locked(
+    session: Session,
+    topic: Topic,
+    intent: TopicIntent,
+    *,
+    researcher: ResearcherClient,
+    llm: LLMClient,
+    max_subagents: int,
+    cap: int,
+    max_workers: int,
+    retriever: Retriever | None,
+) -> ResearchResult:
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:

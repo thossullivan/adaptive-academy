@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from typing import Optional
 
+from adaptive_academy.engine.runlock import RunInProgress
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
@@ -195,14 +196,17 @@ def run_research(
     if intent is None:
         raise HTTPException(status_code=400, detail="topic has no intent")
 
-    result = research_topic(
-        session,
-        topic,
-        intent,
-        researcher=researcher,
-        llm=llm,
-        retriever=retriever,
-    )
+    try:
+        result = research_topic(
+            session,
+            topic,
+            intent,
+            researcher=researcher,
+            llm=llm,
+            retriever=retriever,
+        )
+    except RunInProgress as e:
+        raise HTTPException(409, str(e)) from e
     return ResearchOut(
         foundation=FoundationOut(
             overview=result.foundation.overview,

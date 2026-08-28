@@ -17,6 +17,7 @@ from adaptive_academy.engine.gates import evaluate_concept, milestone_load_beari
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
 from adaptive_academy.llm.structured import structured_json
 from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.engine.runlock import exclusive_run
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
@@ -248,13 +249,34 @@ def run_revision(
     llm: LLMClient,
     max_workers: int = 3,
 ) -> RevisionResult:
-    """Fan out the freshness angles, synthesize a diff, persist it as proposals."""
-    open_change = session.exec(
+    """Fan out the freshness angles, synthesize a diff, persist it as proposals.
+
+    Raises `RunInProgress` when a revision for this program is already running in
+    this process, and `ValueError` when the program has an open (unresolved) revision.
+    """
+    with exclusive_run(f"revision:{program.id}"):
+        return _run_revision_locked(session, program, intent, researcher=researcher,
+                                    llm=llm, max_workers=max_workers)
+
+
+def _open_change(session: Session, program: Program) -> MapChange | None:
+    return session.exec(
         select(MapChange)
         .join(MapRevision)
         .where(MapRevision.program_id == program.id, MapChange.status == "proposed")
     ).first()
-    if open_change is not None:
+
+
+def _run_revision_locked(
+    session: Session,
+    program: Program,
+    intent: ProgramIntent | None,
+    *,
+    researcher: ResearcherClient,
+    llm: LLMClient,
+    max_workers: int,
+) -> RevisionResult:
+    if _open_change(session, program) is not None:
         raise ValueError("program has an open revision; resolve it first")
 
     events: list[AgentEvent] = []
@@ -301,6 +323,13 @@ def run_revision(
     data = structured_json(llm, PROGRAM_REVISION,
                            [{"role": "user", "content": user_msg}],
                            schema=REVISION_SCHEMA, tool_name="emit_revision")
+
+    # The guard above ran before the network calls released the write lock; another
+    # process may have proposed a revision meanwhile. Re-check before persisting.
+    if _open_change(session, program) is not None:
+        emit("program_revision:aborted", "an open revision appeared during the run")
+        session.commit()
+        raise ValueError("program has an open revision; resolve it first")
 
     revision = MapRevision(program_id=program.id, map_health=str(data.get("map_health", "")))
     session.add(revision)

@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+import time
 
 import pytest
 from sqlalchemy import event
-from sqlalchemy.exc import OperationalError
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from adaptive_academy import db
 from adaptive_academy.engine import scout
@@ -188,41 +189,158 @@ def test_scout_rank_releases_write_lock_before_llm(file_session):
     assert probe.results == [True]
 
 
-def test_search_survives_a_locked_trace_write(session, memory_api_client):
-    """The memory:retrieve trace is best-effort: a locked DB must not turn hits into a 500."""
-    client, topic = memory_api_client
-    calls = {"n": 0}
-    real_commit = session.commit
+def _hold_write_lock(path: str, seconds: float, held: threading.Event) -> threading.Thread:
+    def _hold() -> None:
+        conn = sqlite3.connect(path, timeout=1)
+        conn.execute("BEGIN IMMEDIATE")
+        held.set()
+        time.sleep(seconds)
+        conn.execute("ROLLBACK")
+        conn.close()
 
-    def flaky_commit():
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise OperationalError("COMMIT", {}, sqlite3.OperationalError("database is locked"))
-        real_commit()
-
-    session.commit = flaky_commit  # type: ignore[method-assign]
-    try:
-        response = client.get("/api/memory/search", params={"q": "attention", "topic_id": topic.id})
-    finally:
-        session.commit = real_commit  # type: ignore[method-assign]
-    assert response.status_code == 200
-    assert response.json() == {"hits": []}
+    thread = threading.Thread(target=_hold, daemon=True)
+    thread.start()
+    return thread
 
 
-@pytest.fixture
-def memory_api_client(session):
+def test_search_returns_hits_promptly_while_another_writer_holds_the_lock(file_session, tmp_path):
+    """Real contention: a writer holds BEGIN IMMEDIATE for 3 s. The search must answer well
+    inside that window (not wait on the 30 s busy timeout) and the trace row must still
+    land once the lock is released."""
     from fastapi.testclient import TestClient
 
+    from adaptive_academy.api import routes_memory
     from adaptive_academy.api.app import create_app
     from adaptive_academy.api.deps import get_retriever, get_session
+    from adaptive_academy.engine.memory import index_text
     from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
+    from adaptive_academy.models import AgentEvent, Chunk
 
+    session, probe = file_session
     topic = Topic(title="Memory API")
     session.add(topic)
     session.commit()
+    index_text(session, kind="vault_note", text="Attention is all you need.",
+               source_ref="file:///vault/attention.md", doc_title="Attention",
+               topic_id=topic.id, heading="Mechanism")
+    session.commit()
+    chunk_id = session.exec(select(Chunk)).first().id
+    retriever = ScriptedRetriever({"attention": [chunk_id]})
+
     app = create_app()
     app.dependency_overrides[get_session] = lambda: session
-    app.dependency_overrides[get_retriever] = lambda: ScriptedRetriever({})
+    app.dependency_overrides[get_retriever] = lambda: retriever
     client = TestClient(app)
-    yield client, topic
-    app.dependency_overrides.clear()
+    try:
+        held = threading.Event()
+        holder = _hold_write_lock(probe.path, 3.0, held)
+        assert held.wait(2)
+        started = time.perf_counter()
+        response = client.get("/api/memory/search", params={"q": "attention", "topic_id": topic.id})
+        elapsed = time.perf_counter() - started
+        assert response.status_code == 200
+        assert [hit["chunk_id"] for hit in response.json()["hits"]] == [chunk_id]
+        assert elapsed < 1.5, f"search waited on the write lock: {elapsed:.1f}s"
+        holder.join(5)
+        writer = routes_memory.last_trace_writer
+        assert writer is not None
+        writer.join(10)
+        session.expire_all()
+        kinds = [e.kind for e in session.exec(select(AgentEvent)).all()]
+        assert "memory:retrieve" in kinds
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_second_concurrent_revision_is_refused_while_first_is_in_flight(file_session):
+    """Two requests, two sessions. The second must be refused while the first is inside its
+    LLM call — the early commits released SQLite's lock, so the guard must be explicit."""
+    from adaptive_academy.engine.runlock import RunInProgress
+    from adaptive_academy.models import MapRevision
+
+    session, probe = file_session
+    program = Program(title="PhD prep", goal_statement="research-ready")
+    session.add(program)
+    session.commit()
+    intent = ProgramIntent(program_id=program.id, focus_area="custom LLMs")
+    session.add(intent)
+    session.commit()
+    program_id = program.id
+
+    in_llm = threading.Event()
+    release = threading.Event()
+
+    class BlockingLLM(ScriptedLLMClient):
+        def complete(self, system, messages, tools) -> LLMResponse:
+            in_llm.set()
+            assert release.wait(10)
+            return super().complete(system, messages, tools)
+
+    outcome: dict = {}
+
+    def first_request() -> None:
+        with Session(session.get_bind()) as other:
+            prog = other.get(Program, program_id)
+            intent_row = other.exec(
+                select(ProgramIntent).where(ProgramIntent.program_id == program_id)
+            ).first()
+            llm = BlockingLLM(
+                [LLMResponse(text=json.dumps({"map_health": "fine", "changes": []}))]
+            )
+            outcome["first"] = run_revision(
+                other, prog, intent_row, researcher=ProbingResearcher(probe), llm=llm
+            )
+
+    worker = threading.Thread(target=first_request, daemon=True)
+    worker.start()
+    assert in_llm.wait(10)
+    with pytest.raises(RunInProgress):
+        run_revision(
+            session, program, intent, researcher=ProbingResearcher(probe),
+            llm=ScriptedLLMClient([LLMResponse(text=json.dumps({"map_health": "dup", "changes": []}))]),
+        )
+    release.set()
+    worker.join(10)
+    assert outcome["first"].revision.map_health == "fine"
+    session.expire_all()
+    revisions = session.exec(select(MapRevision).where(MapRevision.program_id == program_id)).all()
+    assert len(revisions) == 1
+    # a later, sequential run is allowed again
+    run_revision(
+        session, program, intent, researcher=ProbingResearcher(probe),
+        llm=ScriptedLLMClient([LLMResponse(text=json.dumps({"map_health": "later", "changes": []}))]),
+    )
+
+
+def test_revision_rechecks_open_revision_after_the_llm_call(file_session):
+    """If an open revision appears while the LLM call runs (another process), the run must
+    abort without persisting a second MapRevision."""
+    from adaptive_academy.models import MapChange, MapRevision
+
+    session, probe = file_session
+    program = Program(title="PhD prep", goal_statement="research-ready")
+    session.add(program)
+    session.commit()
+    intent = ProgramIntent(program_id=program.id, focus_area="custom LLMs")
+    session.add(intent)
+    session.commit()
+    program_id = program.id
+
+    class InterferingLLM(ScriptedLLMClient):
+        def complete(self, system, messages, tools) -> LLMResponse:
+            with Session(session.get_bind()) as other:
+                rev = MapRevision(program_id=program_id, map_health="elsewhere")
+                other.add(rev)
+                other.flush()
+                other.add(MapChange(revision_id=rev.id, kind="add_topic",
+                                    payload={"title": "X"}, why="", source_urls=[]))
+                other.commit()
+            return super().complete(system, messages, tools)
+
+    llm = InterferingLLM([LLMResponse(text=json.dumps({"map_health": "mine", "changes": []}))])
+    with pytest.raises(ValueError, match="open revision"):
+        run_revision(session, program, intent, researcher=ProbingResearcher(probe), llm=llm)
+    session.expire_all()
+    healths = [r.map_health for r in session.exec(
+        select(MapRevision).where(MapRevision.program_id == program_id)).all()]
+    assert healths == ["elsewhere"]
