@@ -158,6 +158,10 @@ class ResearchResult:
     events: list[AgentEvent]
 
 
+class ResearchAlreadyDone(RuntimeError):
+    """The topic already has a foundation; research runs once per topic."""
+
+
 def research_topic(
     session: Session,
     topic: Topic,
@@ -199,7 +203,7 @@ def _research_topic_locked(
     ).first() is not None:
         # TopicFoundation.topic_id is unique; a re-run used to spend the whole
         # fan-out and then fail on commit. Refuse before any paid work.
-        raise ValueError("topic already has a foundation; research runs once per topic")
+        raise ResearchAlreadyDone("topic already has a foundation; research runs once per topic")
 
     events: list[AgentEvent] = []
 

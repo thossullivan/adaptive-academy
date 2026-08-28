@@ -36,7 +36,7 @@ from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone_gate
 from adaptive_academy.engine.memory import index_source_doc, remove_source
-from adaptive_academy.engine.research import research_topic
+from adaptive_academy.engine.research import research_topic, ResearchAlreadyDone
 from adaptive_academy.engine.revision import revision_suggested
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
@@ -205,7 +205,9 @@ def run_research(
             llm=llm,
             retriever=retriever,
         )
-    except (RunInProgress, ValueError) as e:
+    except (RunInProgress, ResearchAlreadyDone) as e:
+        # Only these two are state conflicts. A ValueError here would swallow
+        # json.JSONDecodeError (malformed model output), which has its own 502 handler.
         raise HTTPException(409, str(e)) from e
     return ResearchOut(
         foundation=FoundationOut(

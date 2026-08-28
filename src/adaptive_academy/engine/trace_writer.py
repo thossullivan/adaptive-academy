@@ -78,10 +78,14 @@ class TraceWriter:
             bind, rows = self._queue.get()
             try:
                 self._write(bind, rows)
+            except Exception:  # noqa: BLE001 - the sole writer must survive anything
+                self.dropped += len(rows)
+                logger.exception("trace writer: unexpected failure; %d row(s) dropped", len(rows))
             finally:
                 self._queue.task_done()
 
     def _write(self, bind: Engine, rows: list[AgentEvent]) -> None:
+        """Write one batch; a failure of any kind drops the batch, never propagates."""
         try:
             with Session(bind) as session:
                 session.add_all(rows)
@@ -90,6 +94,13 @@ class TraceWriter:
         except OperationalError as exc:
             self.dropped += len(rows)
             logger.warning("trace dropped (%d rows): %s", len(rows), exc)
+        except Exception:  # noqa: BLE001 - trace rows are best-effort by contract
+            self.dropped += len(rows)
+            logger.exception("trace dropped (%d rows): unexpected failure", len(rows))
+
+    @property
+    def alive(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
 
 
 TRACE_WRITER = TraceWriter()

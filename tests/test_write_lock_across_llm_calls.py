@@ -493,7 +493,90 @@ def test_research_rerun_is_refused_before_any_paid_work(file_session):
     session.add(TopicFoundation(topic_id=topic.id, overview="done", key_concepts=[], prerequisite_map={}))
     session.commit()
 
+    from adaptive_academy.engine.research import ResearchAlreadyDone
+
     llm = ProbingLLM([LLMResponse(text="{}")], probe)
-    with pytest.raises(ValueError, match="already has a foundation"):
+    with pytest.raises(ResearchAlreadyDone, match="already has a foundation"):
         research_topic(session, topic, intent, researcher=ProbingResearcher(probe), llm=llm)
     assert probe.results == [], "no researcher or LLM call may run"
+    assert not issubclass(ResearchAlreadyDone, ValueError), "must not shadow JSONDecodeError"
+
+
+def _research_client(session, llm, researcher):
+    from fastapi.testclient import TestClient
+
+    from adaptive_academy.api.app import create_app
+    from adaptive_academy.api.deps import get_llm, get_researcher, get_retriever, get_session
+    from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_llm] = lambda: llm
+    app.dependency_overrides[get_researcher] = lambda: researcher
+    app.dependency_overrides[get_retriever] = lambda: ScriptedRetriever({})
+    return app, TestClient(app, raise_server_exceptions=False)
+
+
+def test_research_route_keeps_502_for_malformed_model_json_and_409_for_rerun(file_session):
+    """Round-3 review: a broad `except ValueError` turned json.JSONDecodeError (malformed
+    model output, which has a 502 handler) into a 409 state conflict."""
+    session, probe = file_session
+    topic = Topic(title="Graph memory")
+    session.add(topic)
+    session.commit()
+    session.add(TopicIntent(topic_id=topic.id, goal="build graph memory systems"))
+    session.commit()
+
+    bad_llm = ScriptedLLMClient([LLMResponse(text='{"overview": "truncated"')])
+    app, client = _research_client(session, bad_llm, ProbingResearcher(probe))
+    try:
+        response = client.post(f"/api/topics/{topic.id}/research")
+        assert response.status_code == 502, response.text
+    finally:
+        app.dependency_overrides.clear()
+    session.rollback()
+
+    session.add(TopicFoundation(topic_id=topic.id, overview="done", key_concepts=[], prerequisite_map={}))
+    session.commit()
+    app, client = _research_client(session, bad_llm, ProbingResearcher(probe))
+    try:
+        response = client.post(f"/api/topics/{topic.id}/research")
+        assert response.status_code == 409
+        assert "already has a foundation" in response.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_trace_writer_survives_a_failing_batch_and_keeps_writing(file_session):
+    """Round-3 review: a non-OperationalError (here an FK IntegrityError) must not kill the
+    sole writer thread or strand the batches queued behind it."""
+    from adaptive_academy.engine.trace_writer import TraceWriter
+    from adaptive_academy.models import AgentEvent
+
+    session, _probe = file_session
+    bind = session.get_bind()
+    writer = TraceWriter()
+    bad = [AgentEvent(topic_id=999_999, kind="memory:retrieve", detail="dangling fk")]
+    good = [AgentEvent(kind="memory:retrieve", detail="fine")]
+    assert writer.submit(bind, bad)
+    assert writer.submit(bind, good)
+    assert writer.submit(bind, [AgentEvent(kind="memory:retrieve", detail="also fine")])
+    assert writer.flush(10), "queue must drain even after a failing batch"
+    assert writer.alive
+    assert writer.dropped == 1
+    assert writer.written == 2
+    session.expire_all()
+    details = sorted(e.detail for e in session.exec(select(AgentEvent)).all() if e.kind == "memory:retrieve")
+    assert details == ["also fine", "fine"]
+
+
+def test_trace_writer_staticpool_path_never_raises(session):
+    """The inline (StaticPool) path must not turn a trace failure into a request failure."""
+    from adaptive_academy.engine.trace_writer import TraceWriter
+    from adaptive_academy.models import AgentEvent
+
+    writer = TraceWriter()
+    assert writer.submit(session.get_bind(), [AgentEvent(topic_id=999_999, kind="memory:retrieve", detail="x")])
+    assert writer.dropped == 1
+    assert writer.submit(session.get_bind(), [AgentEvent(kind="memory:retrieve", detail="ok")])
+    assert writer.written == 1
