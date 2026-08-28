@@ -137,7 +137,7 @@ def test_onnx_embedder_reads_model_and_cache_settings_at_construction(monkeypatc
         def __init__(self, *, model_name, cache_dir, lazy_load, local_files_only=None):
             calls.append((model_name, cache_dir, lazy_load))
 
-        def embed(self, texts):
+        def embed(self, texts, **_kwargs):
             return [FakeVector() for _ in texts]
 
     monkeypatch.setattr(onnx_embedder, "TextEmbedding", RecordingTextEmbedding)
@@ -404,7 +404,7 @@ def test_onnx_embedder_uses_fake_cached_model_when_downloads_disabled(
             assert local_files_only is True  # downloads disabled -> offline-only load
             calls.append((model_name, cache_dir, lazy_load))
 
-        def embed(self, texts):
+        def embed(self, texts, **_kwargs):
             return [FakeVector() for _ in texts]
 
     monkeypatch.setattr(onnx_embedder, "TextEmbedding", RecordingTextEmbedding)
@@ -448,7 +448,7 @@ def test_offline_mode_passes_local_files_only_to_fastembed(monkeypatch, tmp_path
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-        def embed(self, texts):
+        def embed(self, texts, **_kwargs):
             import numpy as np
 
             return [np.zeros(384, dtype="float32") for _ in texts]
@@ -459,6 +459,30 @@ def test_offline_mode_passes_local_files_only_to_fastembed(monkeypatch, tmp_path
     embedder = onnx_embedder.OnnxEmbedder()
     embedder.embed(["x"])
     assert captured.get("local_files_only") is True
+
+
+def test_onnx_embedder_bounds_fastembed_batch_size(monkeypatch):
+    """Embedding must never use fastembed's 256 default: it OOM-kills a 6 GB container."""
+    from adaptive_academy.llm import onnx_embedder
+
+    captured: dict = {}
+
+    class FakeModel:
+        def __init__(self, **kwargs):
+            pass
+
+        def embed(self, texts, batch_size=256, **kwargs):
+            import numpy as np
+
+            captured["batch_size"] = batch_size
+            return [np.zeros(384, dtype="float32") for _ in texts]
+
+    monkeypatch.setattr(onnx_embedder, "TextEmbedding", FakeModel)
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_allow_download", True)
+    embedder = onnx_embedder.OnnxEmbedder()
+    embedder.embed(["x"] * 300)
+    assert captured["batch_size"] == onnx_embedder.EMBED_BATCH_SIZE
+    assert captured["batch_size"] <= 16
 
 
 def test_vector_leg_ignores_vectors_from_another_model(session):

@@ -2,9 +2,10 @@ import json
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from adaptive_academy.engine.fanout import fan_out_with_retry
+from adaptive_academy.engine.runlock import exclusive_run
 from adaptive_academy.engine.memory import (
     ALREADY_COVERED_MARKER,
     DEFAULT_K,
@@ -157,6 +158,10 @@ class ResearchResult:
     events: list[AgentEvent]
 
 
+class ResearchAlreadyDone(RuntimeError):
+    """The topic already has a foundation; research runs once per topic."""
+
+
 def research_topic(
     session: Session,
     topic: Topic,
@@ -169,7 +174,37 @@ def research_topic(
     max_workers: int = 5,
     retriever: Retriever | None = None,
 ) -> ResearchResult:
-    """Fan out over briefs, dedupe+rank, synthesize a foundation, persist, and trace."""
+    """Fan out over briefs, dedupe+rank, synthesize a foundation, persist, and trace.
+
+    Raises `RunInProgress` when research for this topic is already running.
+    """
+    with exclusive_run(f"research:{topic.id}"):
+        return _research_topic_locked(
+            session, topic, intent, researcher=researcher, llm=llm,
+            max_subagents=max_subagents, cap=cap, max_workers=max_workers,
+            retriever=retriever,
+        )
+
+
+def _research_topic_locked(
+    session: Session,
+    topic: Topic,
+    intent: TopicIntent,
+    *,
+    researcher: ResearcherClient,
+    llm: LLMClient,
+    max_subagents: int,
+    cap: int,
+    max_workers: int,
+    retriever: Retriever | None,
+) -> ResearchResult:
+    if session.exec(
+        select(TopicFoundation).where(TopicFoundation.topic_id == topic.id)
+    ).first() is not None:
+        # TopicFoundation.topic_id is unique; a re-run used to spend the whole
+        # fan-out and then fail on commit. Refuse before any paid work.
+        raise ResearchAlreadyDone("topic already has a foundation; research runs once per topic")
+
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:
@@ -179,6 +214,7 @@ def research_topic(
 
     briefs = build_briefs(topic.title, intent.goal, max_subagents)
     emit("research:plan", f"{len(briefs)} briefs")
+    session.commit()  # never hold the SQLite write lock across a network call (F5)
 
     # Fan out concurrently (results kept in brief order for deterministic tracing);
     # a failed angle must not abort the run and gets one second-chance pass.
@@ -217,6 +253,7 @@ def research_topic(
         covered_block = _vault_heading_block(vault_hits)
 
     emit("prompt", RESEARCH_FOUNDATION.tag)
+    session.commit()  # release the lock before the LLM call (F5)
     foundation_data = synthesize_foundation(
         topic.title,
         intent.goal,

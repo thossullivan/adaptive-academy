@@ -1,6 +1,7 @@
 from collections.abc import Callable
 from typing import Optional
 
+from adaptive_academy.engine.runlock import RunInProgress
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
@@ -35,7 +36,7 @@ from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone_gate
 from adaptive_academy.engine.memory import index_source_doc, remove_source
-from adaptive_academy.engine.research import research_topic
+from adaptive_academy.engine.research import research_topic, ResearchAlreadyDone
 from adaptive_academy.engine.revision import revision_suggested
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
@@ -195,14 +196,19 @@ def run_research(
     if intent is None:
         raise HTTPException(status_code=400, detail="topic has no intent")
 
-    result = research_topic(
-        session,
-        topic,
-        intent,
-        researcher=researcher,
-        llm=llm,
-        retriever=retriever,
-    )
+    try:
+        result = research_topic(
+            session,
+            topic,
+            intent,
+            researcher=researcher,
+            llm=llm,
+            retriever=retriever,
+        )
+    except (RunInProgress, ResearchAlreadyDone) as e:
+        # Only these two are state conflicts. A ValueError here would swallow
+        # json.JSONDecodeError (malformed model output), which has its own 502 handler.
+        raise HTTPException(409, str(e)) from e
     return ResearchOut(
         foundation=FoundationOut(
             overview=result.foundation.overview,
@@ -360,7 +366,10 @@ def generate_curriculum_route(
     if not accepted:
         raise HTTPException(400, "no accepted sources; review the reading list first")
     accepted.sort(key=lambda s: s.rank)
-    result = generate_curriculum(session, topic, intent, foundation, accepted, llm=llm)
+    try:
+        result = generate_curriculum(session, topic, intent, foundation, accepted, llm=llm)
+    except RunInProgress as e:
+        raise HTTPException(409, str(e)) from e
     apply_program_aliases(session, topic_id)
     return _curriculum_out(session, result.track, result.events)
 

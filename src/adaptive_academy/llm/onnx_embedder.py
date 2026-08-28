@@ -14,6 +14,12 @@ except ImportError:
     TextEmbedding = None  # type: ignore[assignment,misc]
 
 
+# fastembed's default batch (256) runs one ONNX forward pass over 256 x 512 tokens; on
+# bge-small that peaks near 4.7 GB RSS for a 184-chunk document and OOM-kills the app on a
+# 6 GB VM. 16 peaks under 0.9 GB at the same throughput (measured 2026-08-28).
+EMBED_BATCH_SIZE = 16
+
+
 class OnnxEmbedder:
     """Load the configured FastEmbed model only when text is first embedded."""
 
@@ -47,7 +53,10 @@ class OnnxEmbedder:
             if not self.allow_download:
                 kwargs["local_files_only"] = True
             self._model = TextEmbedding(**kwargs)
-        vectors = [vector.tolist() for vector in self._model.embed(texts)]
+        vectors = [
+            vector.tolist()
+            for vector in self._model.embed(texts, batch_size=EMBED_BATCH_SIZE)
+        ]
         if any(len(vector) != self.dim for vector in vectors):
             raise ValueError(f"embedding model must return {self.dim} dimensions")
         return vectors

@@ -13,6 +13,7 @@ from adaptive_academy.engine.track_markdown import (
     SidebarView,
     TrackView,
 )
+from adaptive_academy.engine.runlock import exclusive_run
 from adaptive_academy.llm.structured import structured_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import CURRICULUM
@@ -205,7 +206,23 @@ def generate_curriculum(
     llm: LLMClient,
 ) -> CurriculumResult:
     """Single LLM call -> TrackView; enforce spacing; persist Track/Phase/Item/
-    Deliverable/Sidebar/Concept(+estimate); trace; return."""
+    Deliverable/Sidebar/Concept(+estimate); trace; return.
+
+    Raises `RunInProgress` when curriculum generation for this topic is already running.
+    """
+    with exclusive_run(f"curriculum:{topic.id}"):
+        return _generate_curriculum_locked(session, topic, intent, foundation, sources, llm=llm)
+
+
+def _generate_curriculum_locked(
+    session: Session,
+    topic: Topic,
+    intent: TopicIntent,
+    foundation: TopicFoundation,
+    sources: list[SourceDoc],
+    *,
+    llm: LLMClient,
+) -> CurriculumResult:
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:
@@ -216,6 +233,7 @@ def generate_curriculum(
     emit("curriculum:plan", f"{len(foundation.key_concepts)} concepts, {len(sources)} sources")
     emit("prompt", CURRICULUM.tag)
     system, user = build_curriculum_prompt(topic.title, intent, foundation, sources)
+    session.commit()  # release the lock before the LLM call (F5)
     data = structured_json(
         llm, system, [{"role": "user", "content": user}],
         schema=CURRICULUM_SCHEMA, tool_name="emit_track")

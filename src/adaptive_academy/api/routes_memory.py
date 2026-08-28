@@ -33,7 +33,8 @@ from adaptive_academy.engine.memory import (
     retrieve,
 )
 from adaptive_academy.llm.retriever_types import Hit, Retriever
-from adaptive_academy.models import Chunk, Concept, Topic
+from adaptive_academy.engine.trace_writer import TRACE_WRITER
+from adaptive_academy.models import AgentEvent, Chunk, Concept, Topic
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 _reindex_lock = REINDEX_LOCK  # shared with the vault ingest route
@@ -100,8 +101,24 @@ def search_memory(
         event_target=event_target,
     )
     output = MemorySearchOut(hits=[memory_hit_out(hit) for hit in hits])
-    session.commit()
+    persist_trace_async(session)
     return output
+
+
+def persist_trace_async(session: Session) -> bool:
+    """Hand the pending memory:* trace rows to the bounded background writer.
+
+    A search is a read; its trace row must never make the request wait on SQLite's
+    write lock (a long agent run can hold it for a minute) nor turn hits into a 500
+    (F5). One writer thread and a capped queue keep this from costing a pooled
+    connection per request. Returns False when the trace was dropped.
+    """
+    pending = [obj for obj in session.new if isinstance(obj, AgentEvent)]
+    if not pending:
+        return True
+    for obj in pending:
+        session.expunge(obj)
+    return TRACE_WRITER.submit(session.get_bind(), pending)
 
 
 @router.post("/reindex", response_model=MemoryReindexOut)

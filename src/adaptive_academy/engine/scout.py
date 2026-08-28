@@ -22,6 +22,7 @@ from sqlmodel import Session, col, select
 from adaptive_academy.engine import graph
 from adaptive_academy.engine.aliases import normalize_name
 from adaptive_academy.engine.memory import escape_markers
+from adaptive_academy.engine.runlock import exclusive_run
 from adaptive_academy.llm.structured import SCOUT_SCHEMA, structured_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
@@ -592,6 +593,7 @@ def rank(
         _program_milestones(session, program.id),
     )
     session.add(AgentEvent(program_id=program.id, kind="prompt", detail=SCOUT_RANK.tag))
+    session.commit()  # release the lock before the LLM call (F5)
     data = structured_json(
         llm,
         SCOUT_RANK,
@@ -676,9 +678,24 @@ def run_scout(
     llm: LLMClient,
     deadline_s: float = SCOUT_DEADLINE_S,
 ) -> ScoutResult:
-    """Generate candidates within the deadline, then rank them once."""
+    """Generate candidates within the deadline, then rank them once.
+
+    Raises `RunInProgress` when a Scout run for this program is already running.
+    """
     if program.id is None:
         raise ValueError("program must be persisted before scouting")
+    with exclusive_run(f"scout:{program.id}"):
+        return _run_scout_locked(session, program, llm=llm, deadline_s=deadline_s)
+
+
+def _run_scout_locked(
+    session: Session,
+    program: Program,
+    *,
+    llm: LLMClient,
+    deadline_s: float,
+) -> ScoutResult:
+    assert program.id is not None
     started = time.monotonic()
     deadline = started + max(deadline_s, 0.0)
     counts = {kind: 0 for kind in SCOUT_KINDS}
