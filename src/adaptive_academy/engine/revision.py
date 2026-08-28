@@ -268,6 +268,7 @@ def run_revision(
     briefs = build_revision_briefs(program.goal_statement or program.title,
                                    focus, _since_label(session, program))
     emit("program_revision:plan", f"{len(briefs)} briefs")
+    session.commit()  # never hold the SQLite write lock across a network call (F5)
 
     per_brief, failures, recovered = fan_out_with_retry(briefs, researcher, max_workers)
     raw: list[RawSource] = []
@@ -296,6 +297,7 @@ def run_revision(
         "\n".join(_source_line(s) for s in raw),
         "<<<END_SOURCES>>>",
     ])
+    session.commit()  # trace rows are flushed by the queries above; release the lock (F5)
     data = structured_json(llm, PROGRAM_REVISION,
                            [{"role": "user", "content": user_msg}],
                            schema=REVISION_SCHEMA, tool_name="emit_revision")

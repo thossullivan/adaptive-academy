@@ -216,6 +216,7 @@ def generate_curriculum(
     emit("curriculum:plan", f"{len(foundation.key_concepts)} concepts, {len(sources)} sources")
     emit("prompt", CURRICULUM.tag)
     system, user = build_curriculum_prompt(topic.title, intent, foundation, sources)
+    session.commit()  # release the lock before the LLM call (F5)
     data = structured_json(
         llm, system, [{"role": "user", "content": user}],
         schema=CURRICULUM_SCHEMA, tool_name="emit_track")

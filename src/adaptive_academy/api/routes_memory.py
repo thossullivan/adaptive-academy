@@ -100,7 +100,12 @@ def search_memory(
         event_target=event_target,
     )
     output = MemorySearchOut(hits=[memory_hit_out(hit) for hit in hits])
-    session.commit()
+    try:
+        session.commit()  # persists the memory:retrieve trace row
+    except OperationalError:
+        # A long agent run may hold the write lock; the trace is best-effort and the
+        # hits are already in hand. Never turn a search into a 500 over its trace (F5).
+        session.rollback()
     return output
 
 

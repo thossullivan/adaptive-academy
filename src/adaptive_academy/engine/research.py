@@ -179,6 +179,7 @@ def research_topic(
 
     briefs = build_briefs(topic.title, intent.goal, max_subagents)
     emit("research:plan", f"{len(briefs)} briefs")
+    session.commit()  # never hold the SQLite write lock across a network call (F5)
 
     # Fan out concurrently (results kept in brief order for deterministic tracing);
     # a failed angle must not abort the run and gets one second-chance pass.
@@ -217,6 +218,7 @@ def research_topic(
         covered_block = _vault_heading_block(vault_hits)
 
     emit("prompt", RESEARCH_FOUNDATION.tag)
+    session.commit()  # release the lock before the LLM call (F5)
     foundation_data = synthesize_foundation(
         topic.title,
         intent.goal,

@@ -15,9 +15,16 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# SQLite serializes writers. sqlite3's default busy timeout (5 s) turned a long agent run
+# into 500 "database is locked" for every concurrent writer (UAT 2026-08-28, F5). Engine
+# paths also commit before every researcher/LLM call so no write lock spans a network
+# round trip; the timeout covers the short overlaps that remain.
+SQLITE_BUSY_TIMEOUT_S = 30
+CONNECT_ARGS: dict = {"check_same_thread": False, "timeout": SQLITE_BUSY_TIMEOUT_S}
+
 engine = create_engine(
     settings.database_url,
-    connect_args={"check_same_thread": False},
+    connect_args=CONNECT_ARGS,
 )
 
 FTS_DDL: list[str] = [

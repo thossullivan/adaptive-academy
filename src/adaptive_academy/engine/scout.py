@@ -592,6 +592,7 @@ def rank(
         _program_milestones(session, program.id),
     )
     session.add(AgentEvent(program_id=program.id, kind="prompt", detail=SCOUT_RANK.tag))
+    session.commit()  # release the lock before the LLM call (F5)
     data = structured_json(
         llm,
         SCOUT_RANK,
