@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import threading
 import time
 from collections.abc import Callable
 
@@ -35,9 +33,8 @@ from adaptive_academy.engine.memory import (
     retrieve,
 )
 from adaptive_academy.llm.retriever_types import Hit, Retriever
+from adaptive_academy.engine.trace_writer import TRACE_WRITER
 from adaptive_academy.models import AgentEvent, Chunk, Concept, Topic
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/memory", tags=["memory"])
 _reindex_lock = REINDEX_LOCK  # shared with the vault ingest route
@@ -108,39 +105,20 @@ def search_memory(
     return output
 
 
-# Tests join this to observe the trace write deterministically.
-last_trace_writer: threading.Thread | None = None
-
-
-def persist_trace_async(session: Session) -> threading.Thread | None:
-    """Write the pending memory:* trace rows from a worker thread.
+def persist_trace_async(session: Session) -> bool:
+    """Hand the pending memory:* trace rows to the bounded background writer.
 
     A search is a read; its trace row must never make the request wait on SQLite's
     write lock (a long agent run can hold it for a minute) nor turn hits into a 500
-    (F5). The worker uses its own session and the engine's busy timeout; if the lock
-    is still held after that, the trace is dropped with a warning.
+    (F5). One writer thread and a capped queue keep this from costing a pooled
+    connection per request. Returns False when the trace was dropped.
     """
-    global last_trace_writer
     pending = [obj for obj in session.new if isinstance(obj, AgentEvent)]
     if not pending:
-        return None
+        return True
     for obj in pending:
         session.expunge(obj)
-    bind = session.get_bind()
-
-    def _write() -> None:
-        try:
-            with Session(bind) as worker:
-                for row in pending:
-                    worker.add(row)
-                worker.commit()
-        except OperationalError as exc:
-            logger.warning("memory trace dropped (%d rows): %s", len(pending), exc)
-
-    thread = threading.Thread(target=_write, name="memory-trace", daemon=True)
-    thread.start()
-    last_trace_writer = thread
-    return thread
+    return TRACE_WRITER.submit(session.get_bind(), pending)
 
 
 @router.post("/reindex", response_model=MemoryReindexOut)

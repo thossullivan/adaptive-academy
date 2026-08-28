@@ -18,6 +18,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from adaptive_academy import db
 from adaptive_academy.engine import scout
+from adaptive_academy.engine.trace_writer import TRACE_WRITER
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.research import research_topic
 from adaptive_academy.engine.revision import run_revision
@@ -209,7 +210,6 @@ def test_search_returns_hits_promptly_while_another_writer_holds_the_lock(file_s
     land once the lock is released."""
     from fastapi.testclient import TestClient
 
-    from adaptive_academy.api import routes_memory
     from adaptive_academy.api.app import create_app
     from adaptive_academy.api.deps import get_retriever, get_session
     from adaptive_academy.engine.memory import index_text
@@ -242,9 +242,7 @@ def test_search_returns_hits_promptly_while_another_writer_holds_the_lock(file_s
         assert [hit["chunk_id"] for hit in response.json()["hits"]] == [chunk_id]
         assert elapsed < 1.5, f"search waited on the write lock: {elapsed:.1f}s"
         holder.join(5)
-        writer = routes_memory.last_trace_writer
-        assert writer is not None
-        writer.join(10)
+        assert TRACE_WRITER.flush(10)
         session.expire_all()
         kinds = [e.kind for e in session.exec(select(AgentEvent)).all()]
         assert "memory:retrieve" in kinds
@@ -344,3 +342,158 @@ def test_revision_rechecks_open_revision_after_the_llm_call(file_session):
     healths = [r.map_health for r in session.exec(
         select(MapRevision).where(MapRevision.program_id == program_id)).all()]
     assert healths == ["elsewhere"]
+
+
+def _search_app(session, retriever):
+    from fastapi.testclient import TestClient
+
+    from adaptive_academy.api.app import create_app
+    from adaptive_academy.api.deps import get_retriever, get_session
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_retriever] = lambda: retriever
+    return app, TestClient(app)
+
+
+def test_many_searches_during_a_long_write_lock_do_not_exhaust_the_pool(file_session):
+    """Round-2 review: a thread per search could park up to the pool capacity (5 + 10
+    overflow) on the busy timeout and starve the next read. With one bounded writer,
+    20 searches during a 3 s lock each answer promptly and every trace still lands."""
+    from adaptive_academy.engine.memory import index_text
+    from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
+    from adaptive_academy.models import AgentEvent, Chunk
+
+    session, probe = file_session
+    topic = Topic(title="Memory API")
+    session.add(topic)
+    session.commit()
+    index_text(session, kind="vault_note", text="Attention is all you need.",
+               source_ref="file:///vault/attention.md", doc_title="Attention",
+               topic_id=topic.id, heading="Mechanism")
+    session.commit()
+    chunk_id = session.exec(select(Chunk)).first().id
+    app, client = _search_app(session, ScriptedRetriever({"attention": [chunk_id]}))
+    before = TRACE_WRITER.dropped
+    try:
+        held = threading.Event()
+        holder = _hold_write_lock(probe.path, 3.0, held)
+        assert held.wait(2)
+        n = 20
+        started = time.perf_counter()
+        for _ in range(n):
+            response = client.get(
+                "/api/memory/search", params={"q": "attention", "topic_id": topic.id}
+            )
+            assert response.status_code == 200
+            assert len(response.json()["hits"]) == 1
+        elapsed = time.perf_counter() - started
+        assert elapsed < 2.5, f"{n} searches took {elapsed:.1f}s under a held write lock"
+        holder.join(5)
+        assert TRACE_WRITER.flush(20)
+        assert TRACE_WRITER.dropped == before
+        session.expire_all()
+        traces = [e for e in session.exec(select(AgentEvent)).all() if e.kind == "memory:retrieve"]
+        assert len(traces) == n
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _blocking_llm(response_text: str, in_llm: threading.Event, release: threading.Event):
+    class BlockingLLM(ScriptedLLMClient):
+        def complete(self, system, messages, tools) -> LLMResponse:
+            in_llm.set()
+            assert release.wait(10)
+            return super().complete(system, messages, tools)
+
+    return BlockingLLM([LLMResponse(text=response_text)])
+
+
+def test_second_concurrent_curriculum_generation_is_refused(file_session):
+    from adaptive_academy.engine.runlock import RunInProgress
+    from adaptive_academy.models import Track
+
+    session, _probe = file_session
+    topic = Topic(title="Transformers")
+    session.add(topic)
+    session.commit()
+    intent = TopicIntent(topic_id=topic.id, goal="Build a transformer")
+    foundation = TopicFoundation(topic_id=topic.id, key_concepts=["Attention"], prerequisite_map={})
+    source = SourceDoc(topic_id=topic.id, title="A", url="https://example.test/a", status="accepted")
+    session.add_all([intent, foundation, source])
+    session.commit()
+    topic_id = topic.id
+    in_llm, release = threading.Event(), threading.Event()
+    payload = json.dumps({"overview": "A path", "phases": []})
+
+    def first() -> None:
+        with Session(session.get_bind()) as other:
+            t = other.get(Topic, topic_id)
+            i = other.exec(select(TopicIntent).where(TopicIntent.topic_id == topic_id)).first()
+            f = other.exec(select(TopicFoundation).where(TopicFoundation.topic_id == topic_id)).first()
+            srcs = other.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
+            generate_curriculum(other, t, i, f, list(srcs), llm=_blocking_llm(payload, in_llm, release))
+
+    worker = threading.Thread(target=first, daemon=True)
+    worker.start()
+    assert in_llm.wait(10)
+    with pytest.raises(RunInProgress):
+        generate_curriculum(session, topic, intent, foundation, [source],
+                            llm=ScriptedLLMClient([LLMResponse(text=payload)]))
+    release.set()
+    worker.join(10)
+    session.expire_all()
+    assert len(session.exec(select(Track).where(Track.topic_id == topic_id)).all()) == 1
+
+
+def test_second_concurrent_scout_run_is_refused(file_session):
+    from adaptive_academy.engine.runlock import RunInProgress
+    from adaptive_academy.models import TopicSuggestion
+
+    session, _probe = file_session
+    program = Program(title="PhD prep", goal_statement="research-ready")
+    session.add(program)
+    session.commit()
+    program_id = program.id
+    in_llm, release = threading.Event(), threading.Event()
+    payload = json.dumps({"items": []})
+
+    def first() -> None:
+        with Session(session.get_bind()) as other:
+            p = other.get(Program, program_id)
+            # force a ranking call: one candidate via a monkeypatched generator
+            scout.run_scout(other, p, llm=_blocking_llm(payload, in_llm, release))
+
+    orig = scout.orphan_note_candidates
+    scout.orphan_note_candidates = lambda session, deadline=None: [
+        scout.Candidate(kind="orphan_note", label="Calculus for AI",
+                        evidence=[{"kind": "chunk", "ref": "file:///v/calc.md"}], weight=1.0)
+    ]
+    try:
+        worker = threading.Thread(target=first, daemon=True)
+        worker.start()
+        assert in_llm.wait(10)
+        with pytest.raises(RunInProgress):
+            scout.run_scout(session, program, llm=ScriptedLLMClient([LLMResponse(text=payload)]))
+        release.set()
+        worker.join(10)
+    finally:
+        scout.orphan_note_candidates = orig
+    session.expire_all()
+    assert session.exec(select(TopicSuggestion).where(TopicSuggestion.program_id == program_id)).all() == []
+
+
+def test_research_rerun_is_refused_before_any_paid_work(file_session):
+    session, probe = file_session
+    topic = Topic(title="Graph memory")
+    session.add(topic)
+    session.commit()
+    intent = TopicIntent(topic_id=topic.id, goal="build graph memory systems")
+    session.add(intent)
+    session.add(TopicFoundation(topic_id=topic.id, overview="done", key_concepts=[], prerequisite_map={}))
+    session.commit()
+
+    llm = ProbingLLM([LLMResponse(text="{}")], probe)
+    with pytest.raises(ValueError, match="already has a foundation"):
+        research_topic(session, topic, intent, researcher=ProbingResearcher(probe), llm=llm)
+    assert probe.results == [], "no researcher or LLM call may run"

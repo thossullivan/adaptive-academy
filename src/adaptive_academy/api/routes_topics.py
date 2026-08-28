@@ -205,7 +205,7 @@ def run_research(
             llm=llm,
             retriever=retriever,
         )
-    except RunInProgress as e:
+    except (RunInProgress, ValueError) as e:
         raise HTTPException(409, str(e)) from e
     return ResearchOut(
         foundation=FoundationOut(
@@ -364,7 +364,10 @@ def generate_curriculum_route(
     if not accepted:
         raise HTTPException(400, "no accepted sources; review the reading list first")
     accepted.sort(key=lambda s: s.rank)
-    result = generate_curriculum(session, topic, intent, foundation, accepted, llm=llm)
+    try:
+        result = generate_curriculum(session, topic, intent, foundation, accepted, llm=llm)
+    except RunInProgress as e:
+        raise HTTPException(409, str(e)) from e
     apply_program_aliases(session, topic_id)
     return _curriculum_out(session, result.track, result.events)
 

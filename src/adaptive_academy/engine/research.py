@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from adaptive_academy.engine.fanout import fan_out_with_retry
 from adaptive_academy.engine.runlock import exclusive_run
@@ -194,6 +194,13 @@ def _research_topic_locked(
     max_workers: int,
     retriever: Retriever | None,
 ) -> ResearchResult:
+    if session.exec(
+        select(TopicFoundation).where(TopicFoundation.topic_id == topic.id)
+    ).first() is not None:
+        # TopicFoundation.topic_id is unique; a re-run used to spend the whole
+        # fan-out and then fail on commit. Refuse before any paid work.
+        raise ValueError("topic already has a foundation; research runs once per topic")
+
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:

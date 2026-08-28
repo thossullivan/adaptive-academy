@@ -1,5 +1,6 @@
 """Scout routes for evidence-backed Program topic suggestions."""
 
+from adaptive_academy.engine.runlock import RunInProgress
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -68,7 +69,10 @@ def scout_program(
     llm: LLMClient = Depends(get_llm),
 ) -> ScoutOut:
     program = _program_or_404(session, program_id)
-    result = run_scout(session, program, llm=llm)
+    try:
+        result = run_scout(session, program, llm=llm)
+    except RunInProgress as e:
+        raise HTTPException(409, str(e)) from e
     return ScoutOut(
         suggestions=[_suggestion_out(item) for item in result.suggestions],
         candidates=result.counts,
