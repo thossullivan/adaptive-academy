@@ -77,7 +77,7 @@
   const conceptName = $derived(topic?.concepts.find((c) => c.id === conceptId)?.name ?? '');
 </script>
 
-<div class="flex h-screen flex-col">
+<div class="flex h-[calc(100dvh-3.5rem)] flex-col md:h-screen">
   <!-- Header -->
   <header class="flex flex-wrap items-center gap-3 border-b border-border px-6 py-4 md:px-10">
     <div class="min-w-0 flex-1">

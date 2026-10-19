@@ -34,7 +34,7 @@
   {...rest}
 >
   {#if eyebrow || title || header}
-    <div class={cn('flex items-baseline justify-between gap-3', pad ? 'mb-4' : 'p-5 pb-0')}>
+    <div class={cn('flex flex-wrap items-baseline justify-between gap-3 md:flex-nowrap', pad ? 'mb-4' : 'p-5 pb-0')}>
       <div class="min-w-0">
         {#if eyebrow}<div class="eyebrow">{eyebrow}</div>{/if}
         {#if title}<h2 class="mt-1 truncate text-lg text-fg">{title}</h2>{/if}

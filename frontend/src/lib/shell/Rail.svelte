@@ -4,6 +4,12 @@
   import TopicSwitcher from './TopicSwitcher.svelte';
   import ThemeToggle from './ThemeToggle.svelte';
   import Icon from './Icon.svelte';
+  import BrandMark from './BrandMark.svelte';
+  import { cn } from '$lib/utils';
+
+  // The same rail renders as the static desktop sidebar and inside the phone drawer
+  // (see MobileNav); callers adjust only positioning/visibility through `class`.
+  let { class: className = '' }: { class?: string } = $props();
 
   const tid = $derived(topics.current?.id ?? null);
 
@@ -63,16 +69,15 @@
 </script>
 
 <aside
-  class="sticky top-0 flex h-screen w-[248px] shrink-0 flex-col gap-5 border-r border-border bg-[color-mix(in_oklab,var(--surface)_55%,transparent)] px-3.5 py-5 backdrop-blur-xl"
+  class={cn(
+    'sticky top-0 flex h-screen w-[248px] shrink-0 flex-col gap-5 border-r border-border bg-[color-mix(in_oklab,var(--surface)_55%,transparent)] px-3.5 py-5 backdrop-blur-xl',
+    className
+  )}
 >
   <!-- Brand -->
   <a href="/" class="flex items-center gap-2.5 px-1.5">
     <span class="relative grid size-8 place-items-center">
-      <svg viewBox="0 0 32 32" class="size-8">
-        <circle cx="16" cy="16" r="13" fill="none" stroke="var(--border-strong)" stroke-width="1.5" />
-        <circle cx="16" cy="16" r="4.5" fill="var(--accent)" />
-        <circle cx="16" cy="16" r="9" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="2 4" opacity="0.7" />
-      </svg>
+      <BrandMark />
     </span>
     <span class="font-display text-[1.05rem] leading-tight text-fg">Adaptive<br /><span class="text-accent">Academy</span></span>
   </a>
