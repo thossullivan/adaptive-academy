@@ -2,7 +2,7 @@
 
 After a program topic's curriculum materializes concepts, link them by normalized name
 to prior concepts in the same program (ConceptAlias groups). A matched concept's
-KnowledgeEstimate is seeded from the group's most recently assessed member instead of
+KnowledgeEstimate is seeded from the group's most recently graded member instead of
 the cold default — the Tutor opens at the right assistance level and the curriculum
 skips what the learner verifiably kept. Name-match only (Plan 6 pattern); LLM-assisted
 matching is deferred until this demonstrably misses.
@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine.assess import GRADING_KINDS
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
@@ -48,18 +49,21 @@ def _program_for_topic(session: Session, topic_id: int) -> int | None:
 
 
 def group_level(session: Session, member_ids: list[int]) -> str | None:
-    """Level of the group's most recently assessed member; falls back to the
-    newest member's estimate when nothing was ever assessed."""
+    """Level of the group's most recently GRADED member, or None when no member was ever
+    graded. Only GRADING_KINDS write the estimate; any other member's estimate is still the
+    curriculum prior, and copying it would carry over a grade nobody earned."""
     if not member_ids:
         return None
     latest = session.exec(
         select(Assessment)
-        .where(Assessment.concept_id.in_(member_ids))
+        .where(Assessment.concept_id.in_(member_ids),
+               Assessment.kind.in_(sorted(GRADING_KINDS)))
         .order_by(Assessment.id.desc())
     ).first()
-    source_id = latest.concept_id if latest else max(member_ids)
+    if latest is None:
+        return None
     est = session.exec(
-        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == source_id)
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == latest.concept_id)
     ).first()
     return est.level if est else None
 

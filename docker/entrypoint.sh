@@ -26,8 +26,8 @@ if [ "$(id -u)" = 0 ]; then
 	if [ "$uid" = 0 ]; then
 		# AA_UID=0 asks for root: there is no one to drop to (re-running as uid 0 would land
 		# back here). Serve as root, and say so. /data needs no chown: root can write it.
-		echo "entrypoint: warning: AA_UID=0, so the app is running as root" \
-			"(unset AA_UID/AA_GID to run as the unprivileged user 1000:1000)" >&2
+		echo "entrypoint: warning: AA_UID=0, so the app is running as root:root" \
+			"(AA_GID is ignored; unset AA_UID/AA_GID to run as the unprivileged user 1000:1000)" >&2
 	else
 		# Volumes created by images that ran as root are root-owned, and anything copied in by
 		# a root container (`just db-migrate-to-volume`, a restore) is too. Walk /data only
