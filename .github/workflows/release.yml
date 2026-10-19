@@ -1,0 +1,61 @@
+name: Release image
+
+# Builds the app image (API + built SPA, see Dockerfile) and publishes it to GHCR when a
+# version tag is pushed. See docs/RELEASING.md.
+on:
+  push:
+    # Stable releases only (v1.2.3). A pre-release tag such as v1.2.3-rc.1 doesn't match,
+    # so it can't be published as `latest`; use a manual run to build one.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  # The same suites as CI, so a tag on a red commit never publishes.
+  tests:
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    name: Build and push (amd64 + arm64)
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # v1.2.3 -> 1.2.3, 1.2, and latest (flavor latest=auto adds it for stable semver
+          # tags only). A manual run off a branch gets just the commit sha.
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # A registry cache, not the GHA cache: tag runs can't read each other's GHA caches,
+          # and ~2 GB per release would crowd CI's uv/npm caches out of the 10 GB quota.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max

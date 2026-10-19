@@ -1,5 +1,6 @@
 # --- Stage 1: build the SvelteKit SPA ---------------------------------------
-FROM node:22-slim AS frontend
+# The SPA build is CPU-independent, so run it natively even when building arm64 on amd64.
+FROM --platform=$BUILDPLATFORM node:22-slim AS frontend
 WORKDIR /fe
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci

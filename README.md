@@ -312,8 +312,9 @@ alone, and the most interesting part to read if you're here to learn from the pr
 
 Pre-1.0 and actively built in public — expect rough edges and moving parts. Issues, ideas, and PRs
 that help people learn are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md), the
-[Code of Conduct](CODE_OF_CONDUCT.md), and the [security policy](SECURITY.md). (A smoother
-first-run / PWA path is still on the near-term list.)
+[Code of Conduct](CODE_OF_CONDUCT.md), and the [security policy](SECURITY.md). What's planned is in
+[`ROADMAP.md`](ROADMAP.md); how releases and the container image are published is in
+[`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## License
 
