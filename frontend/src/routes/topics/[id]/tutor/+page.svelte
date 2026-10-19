@@ -128,8 +128,7 @@
                 ? 'rounded-br-sm bg-surface-3 text-fg'
                 : 'rounded-bl-sm border border-border bg-surface text-fg-dim'}"
             >
-              {#if m.role === 'tutor'}<div class="eyebrow mb-1.5 !text-[0.55rem] text-accent">tutor</div>{/if}
-              {m.content}
+              {#if m.role === 'tutor'}<div class="eyebrow mb-1.5 !text-[0.55rem] text-accent">tutor</div>{/if}{m.content}
             </div>
             {#if m.role === 'tutor'}
               <MemoryDisclosure hits={m.memory ?? []} />

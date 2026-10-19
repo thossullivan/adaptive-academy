@@ -14,6 +14,23 @@ The signature behaviour: the Tutor **withholds full solutions until you've logge
 enforced in code (a gated `reveal_solution` tool), not just in the prompt. That "generation-first"
 stance runs through the whole system.
 
+## See it
+
+![The dashboard of the demo topic: track progress, concepts solid, cards due and mean score, then every concept with its five competence signals and triangulated verdict, beside a calibration plot](docs/images/dashboard.png)
+
+The dashboard of the built-in demo topic, which you can load from the empty home page without
+an API key. New here? [Your first hour](docs/FIRST_HOUR.md) walks through it.
+
+| | |
+|---|---|
+| ![Today's session: warm up with due decay checks and cards, build the next track items, probe the shakiest concept, teach back](docs/images/today.png) | ![A tutor conversation in which the tutor asks questions until the learner logs an attempt, then gives the full picture](docs/images/tutor.png) |
+| **Today**: the daily loop, assembled from where you are. | **Tutor**: questions until you log an attempt, then the worked answer (a conversation from the demo's data). |
+| ![The Constellation: concepts as stars coloured by verdict, with one concept's prerequisite chain highlighted](docs/images/constellation.png) | ![The knowledge map with two concepts opened to show which signals made one shaky and the other verified](docs/images/competence.png) |
+| **Constellation**: the concept graph, lit by triangulated verdicts. | **Why this verdict**: each concept's signals and what would move it up. |
+
+Also: the [Usage page](docs/images/usage.png) and the [phone layout](docs/images/phone-today.png).
+The images are generated from the demo by `cd frontend && npm run screenshots`.
+
 ## What it does
 
 - **An orchestrated agent crew** you can watch work: a Researcher (fan-out source gathering), a
@@ -100,6 +117,7 @@ just up                # build the image and start it (docker compose up -d --bu
 
 Open http://localhost:8000. No `just`? Run `mkdir -p data/vault && docker compose up -d --build`
 instead (`docker compose logs -f` and `docker compose down` for the other two below).
+Then follow [Your first hour](docs/FIRST_HOUR.md): a tour of the demo topic, then your own.
 
 ```bash
 just logs                  # follow logs
@@ -148,6 +166,7 @@ just dev     # API on :8000 + frontend on :5173 in one terminal; Ctrl-C stops bo
 Open http://localhost:5173. Start from the dashboard, generate a curriculum for a topic, then work
 the daily loop (warm up → build → probe → teach back). The header surfaces the adaptive levers
 (assistance / challenge) and "What the agents did" expands the observability trace.
+[Your first hour](docs/FIRST_HOUR.md) walks through all of it, starting with the demo topic.
 
 Models default to `claude-sonnet-5-5` / `claude-haiku-5-5` (in Docker too). If one is retired or
 not available to your key, set `AA_MODEL_REASONING` / `AA_MODEL_COPY` in `.env` and restart the API.
