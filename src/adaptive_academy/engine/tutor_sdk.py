@@ -150,6 +150,12 @@ def run_tutor_turn_sdk(
         return text
 
     emit("tutor:sdk", "subscription tutor turn")
+    # Release the write lock before the SDK run (F5): pending events, flushed by the lazy
+    # load in format_history, would otherwise hold it for the whole multi-turn query. The
+    # refresh reloads convo so the in-process tools only set attributes / add rows (no
+    # query, so no autoflush) until the reply is persisted below.
+    session.commit()
+    session.refresh(convo)
     reply = asyncio.run(_run())
     if not reply:
         emit("max_steps_exhausted")

@@ -1,4 +1,5 @@
 from adaptive_academy.engine.runlock import RunInProgress
+from adaptive_academy.llm.types import StructuredOutputError
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
@@ -140,6 +141,8 @@ def run_program_research(
         raise HTTPException(400, "program has no intent")
     try:
         research_program(session, program, intent, researcher=researcher, llm=llm)
+    except StructuredOutputError:
+        raise  # a model failure, not bad input: the app-level 502 handler
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return _detail(session, program)
@@ -308,6 +311,8 @@ def revise_map(
         result = run_revision(session, program, intent, researcher=researcher, llm=llm)
     except RunInProgress as e:
         raise HTTPException(409, str(e)) from e
+    except StructuredOutputError:
+        raise  # a model failure, not bad input: the app-level 502 handler
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return _revision_out(session, result.revision)

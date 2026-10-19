@@ -50,6 +50,9 @@ class AnthropicResearcherClient:
         # also covers the thinking. At 2048 it hit max_tokens and truncated mid-JSON, so every
         # angle silently parsed to 0 sources. Billing is per output token actually generated,
         # so the headroom is free. Stays under the SDK's non-streaming limit (~21.3k).
+        # Known limit: the SDK's own retries (after a read timeout or dropped connection)
+        # happen inside messages.create and their usage is never reported back, so a
+        # retried search is recorded (and counted against the daily limit) only once.
         self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=2)
         self._role = role
         self._model = get_model(role)
@@ -64,7 +67,7 @@ class AnthropicResearcherClient:
         texts: list[str] = []
         for _ in range(1 + MAX_PAUSE_CONTINUATIONS):
             messages = [user, {"role": "assistant", "content": paused}] if paused else [user]
-            check_budget()
+            check_budget(self._model)
             resp = self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,

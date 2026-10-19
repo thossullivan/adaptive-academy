@@ -27,6 +27,32 @@ test('usage page shows recorded spend, breakdowns, and the unset limit', async (
   await expect(page.getByText('AA_DAILY_BUDGET_USD=5')).toBeVisible();
 });
 
+test('a setup warning about the limit is shown on the usage page', async ({ page }) => {
+  const warning =
+    "A daily spending limit is set (AA_DAILY_BUDGET_USD) but the model 'claude-opus-5-5' has no known price, so its spend can't be capped.";
+  await page.route('**/api/setup', (route) =>
+    route.fulfill({
+      json: {
+        llm_backend: 'anthropic',
+        llm_ready: true,
+        message: 'ok',
+        models: { reasoning: 'claude-opus-5-5', copy: 'claude-haiku-5-5' },
+        warnings: [warning]
+      }
+    })
+  );
+  await page.goto('/usage');
+  await expect(page.getByTestId('usage-report')).toBeVisible();
+  await expect(page.getByTestId('budget-warning')).toContainText("has no known price");
+});
+
+test('no budget warning without one from setup', async ({ page }) => {
+  await page.goto('/usage');
+  await expect(page.getByTestId('usage-report')).toBeVisible();
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTestId('budget-warning')).toHaveCount(0);
+});
+
 test('the nav links to the usage page', async ({ page }) => {
   await page.goto('/fleet');
   await page.waitForLoadState('networkidle');

@@ -44,6 +44,79 @@ def test_dotenv_file_overrides(tmp_path):
     assert s.copy_model == "claude-haiku-5-5"  # blank in .env → default
 
 
+@pytest.mark.parametrize("name", ["REASONING_MODEL", "reasoning_model"])
+def test_unprefixed_reasoning_env_name_is_ignored(monkeypatch, name):
+    # Only AA_MODEL_REASONING configures the model; a stray REASONING_MODEL in the shell
+    # must not silently win over .env.
+    monkeypatch.setenv(name, "claude-opus-5-5")
+    assert Settings(_env_file=None).reasoning_model == "claude-sonnet-5-5"
+
+
+@pytest.mark.parametrize("name", ["COPY_MODEL", "copy_model"])
+def test_unprefixed_copy_env_name_is_ignored(monkeypatch, name):
+    monkeypatch.setenv(name, "claude-opus-5-5")
+    assert Settings(_env_file=None).copy_model == "claude-haiku-5-5"
+
+
+def test_unprefixed_name_in_dotenv_is_ignored(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("REASONING_MODEL=claude-opus-5-5\nCOPY_MODEL=claude-opus-5-5\n"
+                   "AA_REASONING_MODEL=claude-opus-5-5\n")
+    s = Settings(_env_file=env)
+    assert s.reasoning_model == "claude-sonnet-5-5"
+    assert s.copy_model == "claude-haiku-5-5"
+
+
+def test_prefixed_env_beats_unprefixed(monkeypatch, tmp_path):
+    monkeypatch.setenv("REASONING_MODEL", "claude-haiku-4-5")
+    env = tmp_path / ".env"
+    env.write_text("AA_MODEL_REASONING=claude-opus-5-5\n")
+    assert Settings(_env_file=env).reasoning_model == "claude-opus-5-5"
+
+
+def test_fields_can_still_be_set_by_name_in_code():
+    s = Settings(_env_file=None, reasoning_model="claude-opus-5-5", copy_model="claude-sonnet-5-5")
+    assert s.reasoning_model == "claude-opus-5-5"
+    assert s.copy_model == "claude-sonnet-5-5"
+
+
+# --- AA_DAILY_BUDGET_USD ----------------------------------------------------------------
+
+
+@pytest.fixture
+def _no_budget_env(monkeypatch):
+    monkeypatch.delenv("AA_DAILY_BUDGET_USD", raising=False)
+
+
+@pytest.mark.usefixtures("_no_budget_env")
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("", None), ("  ", None), ("5", 5.0), ("0.25", 0.25), ("0", 0.0),
+])
+def test_budget_accepts_blank_zero_and_positive(monkeypatch, raw, expected):
+    monkeypatch.setenv("AA_DAILY_BUDGET_USD", raw)
+    assert Settings(_env_file=None).daily_budget_usd == expected
+
+
+@pytest.mark.usefixtures("_no_budget_env")
+@pytest.mark.parametrize("raw", ["nan", "NaN", "inf", "-inf", "Infinity", "-1", "-0.01"])
+def test_budget_rejects_non_finite_and_negative(monkeypatch, raw):
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("AA_DAILY_BUDGET_USD", raw)
+    with pytest.raises(ValidationError, match="AA_DAILY_BUDGET_USD"):
+        Settings(_env_file=None)
+
+
+@pytest.mark.usefixtures("_no_budget_env")
+def test_budget_rejected_in_dotenv_too(tmp_path):
+    from pydantic import ValidationError
+
+    env = tmp_path / ".env"
+    env.write_text("AA_DAILY_BUDGET_USD=nan\n")
+    with pytest.raises(ValidationError, match="AA_DAILY_BUDGET_USD"):
+        Settings(_env_file=env)
+
+
 def test_model_fields_do_not_shadow_pydantic_methods():
     # A field named `model_copy` would replace BaseModel.model_copy() with a str.
     assert callable(Settings(_env_file=None).model_copy)

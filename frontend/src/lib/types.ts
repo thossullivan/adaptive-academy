@@ -42,7 +42,15 @@ export interface SourceDoc {
 export interface Foundation { overview: string; key_concepts: string[]; prerequisite_map: Record<string, string[]>; }
 export interface ResearchResult { foundation: Foundation; sources: SourceDoc[]; events: EventOut[]; }
 /** GET /api/setup — can the API make LLM calls? Never carries the key itself. */
-export interface SetupStatus { llm_backend: 'anthropic' | 'agent_sdk'; llm_ready: boolean; message: string; models?: Record<string, string>; }
+export interface SetupStatus {
+  llm_backend: 'anthropic' | 'agent_sdk';
+  llm_ready: boolean;
+  message: string;
+  models?: Record<string, string>;
+  /** Config problems that change behaviour without blocking it (e.g. a daily limit that
+   *  can't cap an unpriced model, so that model's calls are refused). */
+  warnings?: string[];
+}
 export interface CreateTopicBody { title: string; goal: string; prior_knowledge?: string; time_budget?: string; }
 export interface Item { id: number; text: string; type: string; status: string; position: number; is_remediation?: boolean; }
 export interface Remediation { items: Item[]; events: EventOut[]; }
@@ -232,7 +240,13 @@ export type RoleplaySession = {
   outcome?: { result: string; summary: string } | null;
   scorecard?: ScorecardRow[] | null;
 };
-export type RoleplayTurnResult = { reply: string; status: RoleplaySession['status'] };
+/** POST /api/roleplay/{sid}/turns. `recorded: false`: the persona gave no usable reply, so
+ *  neither turn was stored and `reply` is a system notice, not a persona line. */
+export type RoleplayTurnResult = {
+  reply: string;
+  status: RoleplaySession['status'];
+  recorded?: boolean;
+};
 
 export type PaperQuestion = { index: number; axis: string; prompt: string };
 export type PaperAnswerRow = { question_index: number; content: string };

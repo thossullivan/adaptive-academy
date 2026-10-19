@@ -10,14 +10,17 @@
     formatUsd,
     totalTokens
   } from '$lib/usage';
+  import { setup } from '$lib/setup.svelte';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Stat } from '$lib/ui';
 
   let report = $state<UsageReport | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
+  const warnings = $derived(setup.status?.warnings ?? []);
 
   onMount(async () => {
+    setup.refresh(); // limit warnings (GET /api/setup); a failure just shows none
     try {
       report = await api.getUsage();
     } catch (e) {
@@ -83,7 +86,16 @@
       </div>
 
       <!-- Daily limit -->
-      <Card eyebrow="API key" title="Daily spending limit" accent={report.budget.exceeded}>
+      <Card eyebrow="API key" title="Daily spending limit" accent={report.budget.exceeded || warnings.length > 0}>
+        {#each warnings as warning (warning)}
+          <p
+            class="mb-3 rounded-[var(--radius-sm)] border border-[color-mix(in_oklab,var(--warn)_35%,var(--border))] bg-[color-mix(in_oklab,var(--warn)_6%,var(--surface))] px-3 py-2 text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]"
+            role="status"
+            data-testid="budget-warning"
+          >
+            {warning}
+          </p>
+        {/each}
         {#if report.budget.limit_usd == null}
           <p class="text-sm text-muted">
             No limit set. Today's API-key spend so far:

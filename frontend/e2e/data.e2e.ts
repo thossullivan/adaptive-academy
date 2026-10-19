@@ -45,6 +45,26 @@ test('download full record gives the versioned JSON export', async ({ page }) =>
   expect(doc.tables.topic.length).toBeGreaterThan(0);
 });
 
+for (const [testId, endpoint] of [
+  ['download-backup', '**/api/export/backup'],
+  ['download-record', '**/api/export/record']
+] as const) {
+  test(`a failing ${testId} shows the API's error instead of saving it as a file`, async ({ page }) => {
+    await page.route(endpoint, (route) =>
+      route.fulfill({ status: 500, json: { detail: 'Backups need a SQLite database.' } })
+    );
+    let downloaded = false;
+    page.on('download', () => {
+      downloaded = true;
+    });
+    await page.goto('/data');
+    await settle(page);
+    await page.getByTestId(testId).click();
+    await expect(page.getByTestId('download-error')).toContainText('Backups need a SQLite database.');
+    expect(downloaded).toBe(false);
+  });
+}
+
 test('the rail links to the page', async ({ page }) => {
   await page.goto('/');
   await page.waitForLoadState('networkidle');

@@ -215,13 +215,13 @@ def test_complete_json_retry_respects_the_daily_budget(session, api_key, monkeyp
 
     checks: list = []
     monkeypatch.setattr("adaptive_academy.llm.anthropic_client.check_budget",
-                        lambda: checks.append(1))
+                        lambda model=None: checks.append(model))
     calls: list = []
     _fake_anthropic(monkeypatch, "anthropic_client",
                     [_resp(_text("prose")), _resp(_tool_use("emit", {"answer": "a"}))], calls)
     AnthropicLLMClient().complete_json(
         "s", [{"role": "user", "content": "x"}], schema=SCHEMA, tool_name="emit")
-    assert len(checks) == 2
+    assert checks == ["claude-sonnet-5-5"] * 2  # each check is for the call's model
 
 
 @pytest.mark.parametrize("stop_reason", ["max_tokens", "refusal"])
@@ -414,7 +414,7 @@ def test_researcher_continues_a_paused_turn_until_it_finishes(session, api_key, 
 
     checks: list = []
     monkeypatch.setattr("adaptive_academy.llm.anthropic_researcher.check_budget",
-                        lambda: checks.append(1))
+                        lambda model=None: checks.append(model))
     payload = '[{"title": "T", "url": "https://example.org/final"}]'
     first = _resp(_thinking(), _text("Searching."), _search_block("srvtoolu_1"),
                   stop_reason="pause_turn",
@@ -429,7 +429,7 @@ def test_researcher_continues_a_paused_turn_until_it_finishes(session, api_key, 
     out = AnthropicResearcherClient().search(SearchBrief(angle="ang", query="q"))
     assert [(s.url, s.angle) for s in out] == [("https://example.org/final", "ang")]
 
-    assert len(calls) == 3 and len(checks) == 3
+    assert len(calls) == 3 and checks == ["claude-sonnet-5-5"] * 3
     user = {"role": "user", "content": "q"}
     assert calls[0]["messages"] == [user]
     assert calls[1]["messages"] == [user, {"role": "assistant", "content": [

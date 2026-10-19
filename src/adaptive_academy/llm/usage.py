@@ -10,12 +10,14 @@ Feature attribution: a contextvar holds a short label for the API route that tri
 call (set by a FastAPI dependency in api/app.py, from the matched route template), so engine
 code needs no extra parameters. Non-request callers (CLI, scripts) record feature=NULL.
 
-Budget: `check_budget()` runs before every API-key (backend="anthropic") call. When
+Budget: `check_budget(model)` runs before every API-key (backend="anthropic") call. When
 AA_DAILY_BUDGET_USD is set and today's recorded API-key spend already meets or exceeds it, it
 raises BudgetExceededError (→ HTTP 429). "Today" is the server's local calendar day (UTC in
 the Docker image unless TZ is set). A single call can overshoot the limit — the check runs
-before the call, and the call's cost is only known after it. Agent SDK calls are billed to
-the Claude subscription, not the key, so they are recorded but never blocked.
+before the call, and the call's cost is only known after it. A call on a model with no known
+price (llm/pricing.py) would be recorded at $0 and never trip the limit, so while a limit is
+set such a call is refused up front (UnpricedModelError, also → 429). Agent SDK calls are
+billed to the Claude subscription, not the key, so they are recorded but never blocked.
 """
 
 from __future__ import annotations
@@ -55,6 +57,30 @@ class BudgetExceededError(RuntimeError):
             "AA_DAILY_BUDGET_USD in .env and restart the API, or wait until tomorrow "
             "(the server's local day). See the Usage page for where it went."
         )
+
+
+class UnpricedModelError(BudgetExceededError):
+    """A daily limit is set but the call's model has no known price (→ HTTP 429).
+
+    Its spend would be recorded as unknown ($0 to the budget), so the limit could not cap it.
+    A BudgetExceededError subclass so every path that stops on the budget (the 429 handler,
+    the research fan-out) stops on this too.
+    """
+
+    def __init__(self, model: str, limit_usd: float):
+        self.model = model
+        self.spent_usd = None
+        self.limit_usd = limit_usd
+        RuntimeError.__init__(self, unpriced_model_message(model))
+
+
+def unpriced_model_message(model: str) -> str:
+    return (
+        f"A daily spending limit is set (AA_DAILY_BUDGET_USD) but the model '{model}' has no "
+        "known price, so its spend can't be capped. Use a priced model "
+        "(AA_MODEL_REASONING / AA_MODEL_COPY) or unset AA_DAILY_BUDGET_USD, then restart "
+        "the API."
+    )
 
 
 # --- where usage rows go --------------------------------------------------------------
@@ -230,7 +256,8 @@ def record_usage(
             return
         row = _build_row(backend=backend, model=model, role=role, operation=operation,
                          usage=usage, total_cost_usd=total_cost_usd)
-        TRACE_WRITER.submit(bind, [row])
+        # One retry on a lock timeout: this row is what the daily limit counts.
+        TRACE_WRITER.submit(bind, [row], retries=1)
     except Exception:  # noqa: BLE001 - accounting must never break a billed call
         logger.exception("usage recording failed for %s/%s; the call itself succeeded",
                          backend, operation)
@@ -278,15 +305,18 @@ def spent_today_usd(now: datetime | None = None) -> float:
     return float(total or 0.0)
 
 
-def check_budget() -> None:
-    """Raise BudgetExceededError if today's API-key spend meets the configured limit.
+def check_budget(model: str | None = None) -> None:
+    """Raise BudgetExceededError if today's API-key spend meets the configured limit, or
+    UnpricedModelError if a limit is set and `model` (the call's model) has no known price.
 
-    Fails open: if today's spend can't be read, the call proceeds and a warning is logged
-    — a broken usage store must not take every LLM feature down with it.
+    Fails open on a read error: if today's spend can't be read, the call proceeds and a
+    warning is logged — a broken usage store must not take every LLM feature down with it.
     """
     limit = settings.daily_budget_usd
     if limit is None:
         return
+    if model is not None and pricing.price_for(model) is None:
+        raise UnpricedModelError(model, limit)
     try:
         spent = spent_today_usd()
     except Exception:  # noqa: BLE001
@@ -295,6 +325,27 @@ def check_budget() -> None:
         return
     if spent >= limit:
         raise BudgetExceededError(spent, limit)
+
+
+def budget_warnings() -> list[str]:
+    """Configuration problems with the daily limit, for GET /api/setup (empty when fine).
+
+    Today: a limit is set but a configured role's model has no known price, so every
+    API-key call on that role will be refused (see check_budget).
+    """
+    if settings.daily_budget_usd is None:
+        return []
+    from adaptive_academy.llm.registry import MODEL_ENV_VARS, resolved_models
+
+    by_model: dict[str, list[str]] = {}
+    for role, model in resolved_models().items():
+        if pricing.price_for(model) is None:
+            by_model.setdefault(model, []).append(MODEL_ENV_VARS[role])
+    return [
+        f"{unpriced_model_message(model)} Until then, calls on {' / '.join(env_vars)} are "
+        "refused."
+        for model, env_vars in by_model.items()
+    ]
 
 
 # --- reporting (GET /api/usage) -------------------------------------------------------

@@ -1,8 +1,9 @@
 """Download the learning record: a .db snapshot or the full JSON export.
 
 For container users, who cannot easily reach the db inside the Docker volume. Each request
-builds its file in a private temp dir that a BackgroundTask removes once the response is sent.
-No new auth: the app binds 127.0.0.1 and every record is already readable over GET.
+builds its file in a private temp dir that is removed when the response ends — however it
+ends (see _ScratchFileResponse). No new auth: the app binds 127.0.0.1 and every record is
+already readable over GET.
 """
 
 import shutil
@@ -12,11 +13,38 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
+from starlette.types import Receive, Scope, Send
 
 from adaptive_academy.engine.backup import BackupError, default_name, export_record, snapshot
 
 router = APIRouter(prefix="/api/export", tags=["export"])
+
+_PATHSEND = "http.response.pathsend"
+
+
+class _ScratchFileResponse(FileResponse):
+    """A FileResponse that always removes its scratch dir once the response is over.
+
+    A BackgroundTask is not enough: FileResponse returns early (skipping it) for a malformed
+    or unsatisfiable Range header, and a client disconnect aborts the send before it runs,
+    either way leaving a full copy of the learning record in the temp dir.
+    """
+
+    def __init__(self, path: Path, scratch: Path, **kwargs) -> None:
+        super().__init__(path, **kwargs)
+        self._scratch = scratch
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # With pathsend the server reads the file only after this call returns, i.e. after
+        # the scratch dir is gone, so hide the extension and stream the bytes ourselves.
+        extensions = scope.get("extensions") or {}
+        if _PATHSEND in extensions:
+            scope = {**scope,
+                     "extensions": {k: v for k, v in extensions.items() if k != _PATHSEND}}
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            shutil.rmtree(self._scratch, ignore_errors=True)
 
 
 def _download(write: Callable[[Path], Path], name: str, media_type: str) -> FileResponse:
@@ -29,12 +57,7 @@ def _download(write: Callable[[Path], Path], name: str, media_type: str) -> File
     except BaseException:
         shutil.rmtree(scratch, ignore_errors=True)
         raise
-    return FileResponse(
-        path,
-        media_type=media_type,
-        filename=name,
-        background=BackgroundTask(shutil.rmtree, scratch, ignore_errors=True),
-    )
+    return _ScratchFileResponse(path, scratch, media_type=media_type, filename=name)
 
 
 @router.get("/backup")

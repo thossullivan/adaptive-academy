@@ -1,11 +1,30 @@
 <script lang="ts">
   import Page from '$lib/shell/Page.svelte';
+  import { fetchDownload, saveBlob } from '$lib/download';
   import { Button, Card } from '$lib/ui';
 
-  // Plain links: the API builds each file on request and sends it as an attachment, so the
-  // browser's own download handles it (works the same through the Vite proxy and the container).
+  // Fetched, not plain links: the API builds each file on request, and a plain `download`
+  // link would save an error response (a JSON body) as if it were the file. The server's
+  // filename (Content-Disposition) is kept.
   const BACKUP_URL = '/api/export/backup';
   const RECORD_URL = '/api/export/record';
+
+  let busy = $state<string | null>(null);
+  let error = $state('');
+
+  async function download(url: string, fallbackName: string) {
+    if (busy) return;
+    busy = url;
+    error = '';
+    try {
+      const { blob, name } = await fetchDownload(url, fallbackName);
+      saveBlob(blob, name);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      busy = null;
+    }
+  }
 </script>
 
 <Page
@@ -33,15 +52,26 @@
     <Card eyebrow="Download" title="Take it with you" accent>
       <div class="grid gap-4 sm:grid-cols-2">
         <div class="flex min-w-0 flex-col gap-2">
-          <Button href={BACKUP_URL} download data-testid="download-backup">Download backup (.db)</Button>
+          <Button
+            data-testid="download-backup"
+            disabled={busy !== null}
+            onclick={() => download(BACKUP_URL, 'adaptive_academy.db')}
+          >
+            {busy === BACKUP_URL ? 'Preparing…' : 'Download backup (.db)'}
+          </Button>
           <p class="text-xs leading-relaxed text-faint">
             A consistent snapshot of the whole database, safe to take while you work. This is the
             file you restore from.
           </p>
         </div>
         <div class="flex min-w-0 flex-col gap-2">
-          <Button href={RECORD_URL} download variant="outline" data-testid="download-record">
-            Download full record (.json)
+          <Button
+            variant="outline"
+            data-testid="download-record"
+            disabled={busy !== null}
+            onclick={() => download(RECORD_URL, 'adaptive_academy.json')}
+          >
+            {busy === RECORD_URL ? 'Preparing…' : 'Download full record (.json)'}
           </Button>
           <p class="text-xs leading-relaxed text-faint">
             Every table as versioned JSON, for reading or moving elsewhere. Search indexes are left
@@ -49,6 +79,11 @@
           </p>
         </div>
       </div>
+      {#if error}
+        <p class="mt-4 text-sm text-danger" role="alert" data-testid="download-error">
+          Download failed: {error}
+        </p>
+      {/if}
       <p class="mt-4 text-xs text-faint">
         From a terminal: <code class="code">just backup</code> or <code class="code">just export</code>
         write the same files to <code class="code">backups/</code>.

@@ -86,6 +86,10 @@ def run_tutor_turn(
 
     for step in range(_MAX_STEPS):
         emit("llm_call", f"step={step + 1}")
+        # Release the write lock before every model call (F5): pending trace events (and
+        # the lazy load in _history) would otherwise hold it for the whole round trip,
+        # stalling every other writer, the usage row this call records included.
+        session.commit()
         resp: LLMResponse = llm.complete(system=system, messages=messages, tools=TOOLS)
 
         if resp.stop_reason == "refusal":

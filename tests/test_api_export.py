@@ -99,3 +99,73 @@ def test_export_does_not_widen_cors(client, file_db):
 def test_temp_dir_never_lands_in_repo(file_db, scratch_tmp):
     """Sanity: the fixture redirect actually took (else the cleanup asserts prove nothing)."""
     assert Path(tempfile.gettempdir()) == scratch_tmp
+
+
+# --- the scratch copy is removed however the response ends -----------------------------
+# Starlette's FileResponse returns early for a bad / unsatisfiable Range header and skips
+# its BackgroundTask, and a client disconnect aborts the send; any of those used to leave
+# an aa-download-* dir holding a full copy of the db.
+
+
+@pytest.mark.parametrize("endpoint", ["/api/export/backup", "/api/export/record"])
+@pytest.mark.parametrize(("range_header", "status"), [
+    ("bytes=abc", 400),
+    ("bytes=999999999-", 416),
+])
+def test_bad_range_leaves_no_temp_copy(client, file_db, scratch_tmp, endpoint,
+                                       range_header, status):
+    response = client.get(endpoint, headers={"Range": range_header})
+    assert response.status_code == status
+    assert list(scratch_tmp.iterdir()) == []
+
+
+def test_satisfiable_range_still_works_and_cleans_up(client, file_db, scratch_tmp):
+    response = client.get("/api/export/backup", headers={"Range": "bytes=0-15"})
+    assert response.status_code == 206
+    assert response.content == b"SQLite format 3\x00"
+    assert list(scratch_tmp.iterdir()) == []
+
+
+def test_client_disconnect_mid_download_leaves_no_temp_copy(file_db, scratch_tmp):
+    import anyio
+
+    from adaptive_academy.api.routes_export import download_backup
+
+    response = download_backup()
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            raise OSError("client went away")
+
+    scope = {"type": "http", "method": "GET", "headers": [], "extensions": {}}
+    with pytest.raises(OSError):
+        anyio.run(response, scope, receive, send)
+    assert list(scratch_tmp.iterdir()) == []
+
+
+def test_pathsend_is_not_used_for_the_scratch_copy(file_db, scratch_tmp):
+    """With http.response.pathsend the server reads the file after the app returns, by
+    which time the scratch dir is gone, so the download streams the bytes itself."""
+    import anyio
+
+    from adaptive_academy.api.routes_export import download_backup
+
+    response = download_backup()
+    sent = []
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {"type": "http", "method": "GET", "headers": [],
+             "extensions": {"http.response.pathsend": {}}}
+    anyio.run(response, scope, receive, send)
+    assert not any(m["type"] == "http.response.pathsend" for m in sent)
+    body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+    assert body.startswith(b"SQLite format 3\x00")
+    assert list(scratch_tmp.iterdir()) == []

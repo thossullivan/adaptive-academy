@@ -429,6 +429,91 @@ def test_budget_counts_only_today_and_only_api_key_spend(session, api_key, monke
     assert AnthropicLLMClient().complete("s", [{"role": "user", "content": "x"}], []).text
 
 
+UNPRICED = "claude-opus-5-5"
+
+
+def test_unpriced_model_with_a_limit_is_refused_before_any_call(session, api_key,
+                                                                monkeypatch):
+    # A call on a model with no known price records cost NULL (= $0 to the budget), so a set
+    # limit could never trip: refuse rather than spend uncapped.
+    from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
+    from adaptive_academy.llm.anthropic_researcher import AnthropicResearcherClient
+
+    assert pricing.price_for(UNPRICED) is None
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", 5.0)
+    monkeypatch.setattr(usage.settings, "reasoning_model", UNPRICED)
+    calls: list = []
+    _fake_anthropic(monkeypatch, "anthropic_client", _text_response(), calls)
+    _fake_anthropic(monkeypatch, "anthropic_researcher", _text_response(text="[]"), calls)
+
+    client = AnthropicLLMClient()
+    with pytest.raises(usage.BudgetExceededError) as exc:
+        client.complete("s", [{"role": "user", "content": "x"}], [])
+    assert isinstance(exc.value, usage.UnpricedModelError)
+    message = str(exc.value)
+    assert UNPRICED in message
+    assert "no known price" in message
+    assert "AA_DAILY_BUDGET_USD" in message
+    with pytest.raises(usage.UnpricedModelError):
+        client.complete_json("s", [{"role": "user", "content": "x"}],
+                             schema=_SCHEMA, tool_name="emit")
+    with pytest.raises(usage.UnpricedModelError):
+        AnthropicResearcherClient().search(SearchBrief(angle="a", query="q"))
+    assert calls == []
+
+
+def test_unpriced_model_without_a_limit_still_runs(session, api_key, no_budget, monkeypatch):
+    from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
+
+    monkeypatch.setattr(usage.settings, "reasoning_model", UNPRICED)
+    _fake_anthropic(monkeypatch, "anthropic_client", _text_response())
+    assert AnthropicLLMClient().complete("s", [{"role": "user", "content": "x"}], []).text
+    assert _rows(session)[-1].cost_usd is None
+
+
+def test_priced_role_still_runs_when_only_the_other_role_is_unpriced(session, api_key,
+                                                                     monkeypatch):
+    from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
+
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", 5.0)
+    monkeypatch.setattr(usage.settings, "reasoning_model", UNPRICED)
+    monkeypatch.setattr(usage.settings, "copy_model", "claude-haiku-5-5")
+    _fake_anthropic(monkeypatch, "anthropic_client", _text_response())
+    assert AnthropicLLMClient(role="copy").complete(
+        "s", [{"role": "user", "content": "x"}], []).text
+
+
+def test_zero_limit_blocks_every_api_key_call(session, api_key, monkeypatch):
+    from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
+
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", 0.0)
+    calls: list = []
+    _fake_anthropic(monkeypatch, "anthropic_client", _text_response(), calls)
+    with pytest.raises(usage.BudgetExceededError):
+        AnthropicLLMClient().complete("s", [{"role": "user", "content": "x"}], [])
+    assert calls == []
+
+
+def test_budget_warnings_name_an_unpriced_model(monkeypatch):
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", 5.0)
+    monkeypatch.setattr(usage.settings, "reasoning_model", UNPRICED)
+    monkeypatch.setattr(usage.settings, "copy_model", "claude-haiku-5-5")
+    warnings = usage.budget_warnings()
+    assert len(warnings) == 1
+    assert UNPRICED in warnings[0] and "AA_MODEL_REASONING" in warnings[0]
+    assert "AA_DAILY_BUDGET_USD" in warnings[0]
+
+
+def test_budget_warnings_empty_without_a_limit_or_with_priced_models(monkeypatch):
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", None)
+    monkeypatch.setattr(usage.settings, "reasoning_model", UNPRICED)
+    assert usage.budget_warnings() == []
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", 5.0)
+    monkeypatch.setattr(usage.settings, "reasoning_model", "claude-sonnet-5-5")
+    monkeypatch.setattr(usage.settings, "copy_model", "claude-haiku-5-5")
+    assert usage.budget_warnings() == []
+
+
 def test_budget_exceeded_error_is_not_swallowed_by_the_research_fanout(session, api_key,
                                                                        monkeypatch):
     from adaptive_academy.engine.fanout import fan_out_with_retry

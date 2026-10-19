@@ -63,12 +63,23 @@ the last 7 and 30 days, and all time, broken down by feature and by model. Model
 price still have their tokens recorded and show "price unknown". In `agent_sdk` mode the dollar
 figure is the Agent SDK's own estimate; your Claude subscription pays, not an API key.
 
-**Cap it.** Set `AA_DAILY_BUDGET_USD=5` (any dollar amount) in `.env` and restart the API. Before
-each API-key model call the app checks today's recorded spend; once it meets the limit, new calls
-are refused with a 429 that says what was spent and how to raise the limit. "Today" is the server's
-local day (UTC in the Docker image unless you set `TZ`). The check runs before a call and a call's
-cost is only known after it, so the call that crosses the limit (or a research run's parallel
-searches) can overshoot it. Agent SDK (subscription) calls are recorded but never blocked.
+**Cap it.** Set `AA_DAILY_BUDGET_USD=5` (any dollar amount, `0` to block every API-key call) in
+`.env` and restart the API. Before each API-key model call the app checks today's recorded spend;
+once it meets the limit, new calls are refused with a 429 that says what was spent and how to raise
+the limit. "Today" is the server's local day (UTC in the Docker image unless you set `TZ`). It is a
+soft cap on *recorded* spend at list price, not a hard billing limit:
+
+- The check runs before a call and a call's cost is only known after it, so the call that crosses
+  the limit (and any research searches already in flight alongside it) can overshoot it. Searches
+  not yet started are cancelled.
+- The SDK's own automatic retries (after a timeout or a dropped connection) aren't reported back,
+  so the rare retried call is undercounted.
+- A model with no known price can't be capped, so while a limit is set, calls on such a model
+  (e.g. `AA_MODEL_REASONING=` a model not in the price table) are refused with a 429 that names it,
+  and `GET /api/setup` and the Usage page warn about it. Use a priced model or unset the limit.
+
+Agent SDK (subscription) calls are recorded but never blocked. For a hard ceiling, also set a
+spend limit on the key in the Anthropic Console.
 
 ## Stack
 

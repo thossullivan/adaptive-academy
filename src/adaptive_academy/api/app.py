@@ -48,7 +48,7 @@ from adaptive_academy.api.routes_scout import router as scout_router
 from adaptive_academy.db import create_db_and_tables
 from adaptive_academy.llm.keys import MissingAPIKeyError
 from adaptive_academy.llm.registry import MODEL_ENV_VARS, ROLES, get_model
-from adaptive_academy.llm.types import AgentSDKError
+from adaptive_academy.llm.types import AgentSDKError, StructuredOutputError
 from adaptive_academy.llm.usage import BudgetExceededError, feature_from_route, set_feature
 
 
@@ -160,6 +160,13 @@ def create_app() -> FastAPI:
         """Agent SDK (subscription-backend) failures → legible 502, like APIError."""
         return JSONResponse(status_code=502,
                             content={"detail": f"Agent SDK request failed: {exc}"[:300]})
+
+    @app.exception_handler(StructuredOutputError)
+    def _structured_output_error(request: Request, exc: StructuredOutputError) -> JSONResponse:
+        """A structured completion ended without its tool call (truncated at max_tokens,
+        refused, context window exceeded, or prose twice) → a legible, retryable 502 instead
+        of a bare 500. Run guards are context managers, so they are already released."""
+        return JSONResponse(status_code=502, content={"detail": exc.detail})
 
     @app.exception_handler(json.JSONDecodeError)
     def _bad_llm_json(request: Request, exc: json.JSONDecodeError) -> JSONResponse:

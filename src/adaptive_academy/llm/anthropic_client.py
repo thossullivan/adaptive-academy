@@ -6,7 +6,7 @@ from anthropic import Anthropic
 from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.strict_schema import to_strict_schema
-from adaptive_academy.llm.types import LLMResponse, ToolCall
+from adaptive_academy.llm.types import LLMResponse, StructuredOutputError, ToolCall
 from adaptive_academy.llm.usage import BACKEND_ANTHROPIC, check_budget, record_usage
 from adaptive_academy.prompts import STRUCTURED_TOOL_INSTRUCTION, STRUCTURED_TOOL_RETRY
 
@@ -43,6 +43,9 @@ class AnthropicLLMClient:
         # and thinking tokens bill as output only when generated — the ceiling itself is free
         # insurance against a structured answer (e.g. a full curriculum track) being cut off
         # mid-JSON. 20k stays under the SDK's non-streaming limit (~21.3k, the 10-minute rule).
+        # Known limit: the SDK's own retries (after a read timeout or dropped connection)
+        # happen inside messages.create and their usage is never reported back, so a
+        # retried call is recorded (and counted against the daily limit) only once.
         self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3)
         self._role = role
         self._model = get_model(role)
@@ -59,7 +62,7 @@ class AnthropicLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> LLMResponse:
-        check_budget()
+        check_budget(self._model)
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -97,7 +100,8 @@ class AnthropicLLMClient:
         Forced tool_choice is a 400 on Claude Sonnet 5.5, so this uses tool_choice=auto with
         a `strict: true` tool (supported on every model this app configures) and tells the
         model to answer through the tool. `auto` lets the model reply in text instead; that
-        gets one corrective retry (a second, separately recorded call), then a ValueError.
+        gets one corrective retry (a second, separately recorded call), then a
+        StructuredOutputError (a ValueError; the API maps it to a legible 502).
         """
         tool = {
             "name": tool_name,
@@ -119,16 +123,13 @@ class AnthropicLLMClient:
                          "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}],
         ]
         for attempt in attempts:
-            check_budget()
+            check_budget(self._model)
             resp = self._client.messages.create(messages=attempt, **request)
             self._record(resp, "complete_json")
             stop_reason = getattr(resp, "stop_reason", None)
             if stop_reason in _NO_RETRY_STOP_REASONS:
-                raise ValueError(
-                    f"structured completion stopped with stop_reason={stop_reason} "
-                    "before a complete tool call"
-                )
+                raise StructuredOutputError(stop_reason)
             for block in resp.content:
                 if block.type == "tool_use" and block.name == tool_name:
                     return block.input
-        raise ValueError("structured completion returned no tool use")
+        raise StructuredOutputError("no_tool_use")

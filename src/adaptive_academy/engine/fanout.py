@@ -38,7 +38,10 @@ def fan_out_briefs(
                 try:
                     per_brief[idx] = fut.result()
                 except BudgetExceededError:
-                    # The daily limit is a stop, not a per-angle failure to retry.
+                    # The daily limit is a stop, not a per-angle failure to retry. Cancel
+                    # the angles not yet started so they don't run (and bill) only to be
+                    # discarded; calls already in flight can't be stopped and finish.
+                    ex.shutdown(wait=False, cancel_futures=True)
                     raise
                 except Exception as e:  # noqa: BLE001
                     logger.exception("research subagent failed: %s", briefs[idx].angle)
