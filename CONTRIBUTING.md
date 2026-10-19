@@ -69,8 +69,8 @@ direction before investing in a full spec.
 
 ## Finding something to work on
 
-[`ROADMAP.md`](ROADMAP.md) lists what's planned; items marked *good first issue* there (and the
-`good first issue` label on issues) are self-contained starting points.
+[`ROADMAP.md`](ROADMAP.md) lists what's planned; items marked *good first issue* there are
+self-contained starting points. Issues get the `good first issue` label as they're filed.
 
 ## Reporting bugs & ideas
 

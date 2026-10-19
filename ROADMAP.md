@@ -42,9 +42,8 @@ Items marked **good first issue** are self-contained and a good way into the cod
 - **Research mix.** Weight open courses, books, and canonical docs alongside papers when
   searching technical topics. *Good first issue (prompt change in `prompts.py`).*
 
-## Not planned
+## Principles that won't change
 
-- **Hosted or multi-user service.** The app is local-first: your learning record stays on your
-  machine. (Each model call does send its content to Anthropic's API; see the README's cost and
-  privacy note.)
-- **Telemetry.** None, by design.
+- **Local-first records.** Your learning record stays on your machine. (Each model call does
+  send its content to Anthropic's API; see the README's cost and privacy note.)
+- **No telemetry.** None, by design.
