@@ -1,0 +1,32 @@
+name: Idea or feature request
+description: Suggest a capability or a change to how the app teaches.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [ROADMAP.md](https://github.com/thossullivan/adaptive-academy/blob/main/ROADMAP.md)
+        first; your idea may already be planned.
+        Bigger features start as a short design spec (see CONTRIBUTING.md), so an issue to agree
+        the direction is the right first step.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The learning problem
+      description: What are you trying to learn or do, and where does the app get in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: The behaviour you have in mind. Sketches and examples help.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence (optional)
+      description: |
+        The project is grounded in learning science (docs/research). A link to research or a
+        real use case that supports the idea makes it much easier to evaluate.

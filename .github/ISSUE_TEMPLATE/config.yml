@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/thossullivan/adaptive-academy/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.
+  - name: First-hour guide
+    url: https://github.com/thossullivan/adaptive-academy/blob/main/docs/FIRST_HOUR.md
+    about: How to explore the demo and run your first sessions.
