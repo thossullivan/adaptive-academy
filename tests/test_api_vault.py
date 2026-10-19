@@ -1,3 +1,7 @@
+import os
+import sys
+
+import pytest
 from fastapi.testclient import TestClient
 
 from adaptive_academy.api.app import app
@@ -65,3 +69,30 @@ def test_vault_status_unconfigured():
     client = TestClient(app)
     st = client.get("/api/vault/status")
     assert st.status_code == 200 and st.json()["configured"] is False
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0, reason="root ignores directory permissions"
+)
+@pytest.mark.parametrize("route", ["one", "all"])
+def test_vault_export_to_unwritable_vault_says_why(session, tmp_path, route):
+    """The container's uid may not own a bind-mounted vault: explain it, don't 500."""
+    app.dependency_overrides[get_session] = lambda: session
+    topic = Topic(title="Build LLMs")
+    session.add(topic)
+    session.commit()
+    session.refresh(topic)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    vault.chmod(0o555)
+    try:
+        client = TestClient(app)
+        url = f"/api/topics/{topic.id}/vault/export" if route == "one" else "/api/vault/export-all"
+        r = client.post(url, json={"vault_path": str(vault)})
+    finally:
+        vault.chmod(0o755)
+        app.dependency_overrides.clear()
+    assert r.status_code == 400
+    detail = r.json()["detail"]
+    assert "can't write to" in detail and "Permission denied" in detail
+    assert f"uid {os.getuid()}" in detail and "AA_UID" in detail

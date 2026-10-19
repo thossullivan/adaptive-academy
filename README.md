@@ -86,54 +86,114 @@ spend limit on the key in the Anthropic Console.
 Python 3.12 · FastAPI · SQLModel · SQLite (WAL) · Alembic · Anthropic SDK ·
 SvelteKit 2 / Svelte 5 / Tailwind 4. Package manager: `uv`. Task runner: `just`.
 
-## Prerequisites
+## Quickstart (Docker)
 
-- [`uv`](https://docs.astral.sh/uv/) (Python)
-- Node.js (for the SvelteKit frontend)
-- An `ANTHROPIC_API_KEY` — copy `.env.example` to `.env` and set it:
-
-  ```bash
-  cp .env.example .env
-  # then edit .env and set ANTHROPIC_API_KEY=sk-ant-...
-  ```
-
-  Models default to `claude-sonnet-5-5` / `claude-haiku-5-5`. If one is retired or not
-  available to your key, set `AA_MODEL_REASONING` / `AA_MODEL_COPY` in `.env` and restart the API.
-
-## Setup (run once)
+The shortest path: the whole app (API + built frontend) as one container on
+http://localhost:8000, with the SQLite db in a named volume. You need
+[Docker](https://docs.docker.com/get-docker/) or [OrbStack](https://orbstack.dev/), and
+[`just`](https://github.com/casey/just).
 
 ```bash
-just install                  # uv sync (installs Python deps)
-uv run alembic upgrade head   # create the SQLite schema
-just seed                     # optional: drop in a starter "Build LLMs from scratch" topic
-cd frontend && npm install && cd ..
-uv sync --extra memory        # optional: sqlite-vec + fastembed for hybrid (BM25 + vector) retrieval
+cp .env.example .env   # then edit .env and set ANTHROPIC_API_KEY=sk-ant-...
+just up                # build the image and start it (docker compose up -d --build)
 ```
 
-> **Hybrid retrieval** needs the `memory` extra. The `bge-small` embedding model (~130 MB)
-> downloads once into `AA_EMBEDDING_CACHE_DIR` (the container keeps it on the data volume).
-> Without the extra, retrieval is FTS5/BM25 only — everything still works.
-> Set `AA_EMBEDDING_ALLOW_DOWNLOAD=false` on strict offline hosts to require a cached model.
-
-> **`just seed` is optional** — it seeds one starter topic so there's something to explore
-> immediately. Otherwise you start from an empty state and create your own **Program** (a
-> researched milestone map) or topic from the app — that's the real entry point.
-
-## Run
-
-Two terminals:
+Open http://localhost:8000. No `just`? Run `mkdir -p data/vault && docker compose up -d --build`
+instead (`docker compose logs -f` and `docker compose down` for the other two below).
 
 ```bash
-just api        # FastAPI on http://localhost:8000
-just frontend   # SvelteKit on http://localhost:5173  (proxies /api → :8000)
+just logs                  # follow logs
+just down                  # stop
+just db-migrate-to-volume  # optional: copy an existing local db into the volume
+```
+
+`OBSIDIAN_VAULT_PATH` in `.env` is optional (see the vault note below).
+
+Notes:
+- The container uses API-key mode only (`ANTHROPIC_API_KEY`); the `agent_sdk`
+  subscription backend is host-only.
+- Data lives in the `adaptive-academy-data` volume; the repo's
+  `adaptive_academy.db` is untouched after migration. Avoid running host
+  and container against the same db file.
+- The app runs as an unprivileged user, uid/gid 1000 by default (`AA_UID` / `AA_GID` in
+  `.env`), not as root. On start the container hands `/data` to that user; volumes from
+  earlier versions, which ran as root, are root-owned, and the first start fixes them. It
+  never changes ownership of anything in your vault.
+- On Linux, set `AA_UID=$(id -u)` and `AA_GID=$(id -g)` in `.env` so the notes the app
+  exports into your vault are owned by you. `.env` doesn't run commands, so write the numbers:
+  `echo "AA_UID=$(id -u)" >> .env && echo "AA_GID=$(id -g)" >> .env`. On macOS, Docker
+  Desktop and OrbStack give bind-mounted files your own user whatever the uid, so the default
+  is fine. If the vault isn't writable by that uid, the app still starts (the log says so) and
+  a vault export fails with a message saying what to set.
+- The Obsidian vault is bind-mounted read-write at `/vault`
+  (`AA_OBSIDIAN_VAULT_PATH=/vault`). With `OBSIDIAN_VAULT_PATH` unset, the
+  mount is the gitignored `./data/vault`, and vault exports land there. `just up`
+  creates that folder first; if you run `docker compose up` directly on Linux,
+  run `mkdir -p data/vault` before it, or Docker creates the folder as root.
+- Quote `OBSIDIAN_VAULT_PATH` in `.env` if the path contains spaces (e.g.
+  `OBSIDIAN_VAULT_PATH="/Users/you/Library/Mobile Documents/..."`) —
+  unquoted values with spaces break `just`'s dotenv parsing.
+
+## Quickstart (local)
+
+For working on the code. You need [`uv`](https://docs.astral.sh/uv/) (it fetches Python 3.12
+itself), Node.js 22.12+ (or 20.19+) with npm, and [`just`](https://github.com/casey/just).
+
+```bash
+just setup   # once: checks prerequisites, installs deps, creates the db schema and .env
+             # then edit .env and set ANTHROPIC_API_KEY=sk-ant-...
+just dev     # API on :8000 + frontend on :5173 in one terminal; Ctrl-C stops both
 ```
 
 Open http://localhost:5173. Start from the dashboard, generate a curriculum for a topic, then work
 the daily loop (warm up → build → probe → teach back). The header surfaces the adaptive levers
 (assistance / challenge) and "What the agents did" expands the observability trace.
 
-> **Tip:** start the API via `just api` (it loads `.env`). Running `uv run uvicorn …` directly
-> skips `.env`, so `ANTHROPIC_API_KEY` is missing and any model-backed call returns a 500.
+Models default to `claude-sonnet-5-5` / `claude-haiku-5-5` (in Docker too). If one is retired or
+not available to your key, set `AA_MODEL_REASONING` / `AA_MODEL_COPY` in `.env` and restart the API.
+
+`just setup` is safe to re-run and never overwrites an existing `.env`. By hand, it amounts to:
+
+```bash
+cp .env.example .env          # only if .env doesn't exist yet
+just install                  # uv sync (installs Python deps)
+uv run alembic upgrade head   # create the SQLite schema
+cd frontend && npm ci && cd ..
+```
+
+Optional extras:
+
+```bash
+just seed               # drop in a starter "Build LLMs from scratch" topic
+just setup --memory     # or `uv sync --extra memory`: sqlite-vec + fastembed for hybrid (BM25 + vector) retrieval
+```
+
+`just dev` prefixes each server's output with `[api]` / `[web]`, and if either server exits it
+stops the other. Set `AA_API_PORT` / `AA_WEB_PORT` to move it off 8000 / 5173 (e.g.
+`AA_API_PORT=8001 just dev` while the container holds 8000); the frontend's `/api` proxy
+follows. Prefer two terminals? `just api` (FastAPI on http://localhost:8000) and
+`just frontend` (SvelteKit on http://localhost:5173, proxies `/api` → :8000) still work.
+
+> **Hybrid retrieval** needs the `memory` extra. The `bge-small` embedding model (~130 MB)
+> downloads once into `AA_EMBEDDING_CACHE_DIR` (the container keeps it on the data volume).
+> Without the extra, retrieval is FTS5/BM25 only — everything still works.
+> Set `AA_EMBEDDING_ALLOW_DOWNLOAD=false` on strict offline hosts to require a cached model.
+> A plain `just setup` (or `uv sync`) removes the extra again; re-run with `--memory`.
+
+> **`just seed` is optional** — it seeds one starter topic so there's something to explore
+> immediately. Otherwise you start from an empty state and create your own **Program** (a
+> researched milestone map) or topic from the app — that's the real entry point.
+
+> **Tip:** start the API via `just dev` or `just api` (both load `.env`). Running
+> `uv run uvicorn …` directly skips `.env`, so `ANTHROPIC_API_KEY` is missing and any
+> model-backed call returns a 500.
+
+> **Stale SPA:** running `cd frontend && npm run build` leaves a
+> `frontend/build/` directory on the host (the Docker image builds its own copy inside the
+> image and never writes one); host-dev `just api` will then
+> serve that increasingly stale SPA at http://localhost:8000/ instead of
+> a 404/API-only response. Run `rm -rf frontend/build` to restore pure-API
+> host dev (frontend dev via `npm run dev` stays on :5173 either way).
 
 ## Test
 
@@ -155,41 +215,6 @@ The e2e run starts its own API (via `uv`) on a fresh, seeded SQLite db with no
 `ANTHROPIC_API_KEY`, plus a Vite server on its own ports (18765 and 14173; override with
 `E2E_API_PORT` / `E2E_WEB_PORT`). It never touches your db, your vault, or your dev
 servers, and no test spends tokens. CI (`.github/workflows/ci.yml`) runs all four suites.
-
-## Run in a container (Docker / OrbStack)
-
-Build and run the whole app (API + built frontend) as one service on
-http://localhost:8000, with the SQLite db in a named volume:
-
-```bash
-cp .env.example .env       # set ANTHROPIC_API_KEY (OBSIDIAN_VAULT_PATH is optional)
-just db-migrate-to-volume  # optional: copy an existing local db into the volume
-just up                    # build image + start (docker compose up -d --build)
-just logs                  # follow logs
-just down                  # stop
-```
-
-Notes:
-- The container uses API-key mode only (`ANTHROPIC_API_KEY`); the `agent_sdk`
-  subscription backend is host-only.
-- Data lives in the `adaptive-academy-data` volume; the repo's
-  `adaptive_academy.db` is untouched after migration. Avoid running host
-  and container against the same db file.
-- The Obsidian vault is bind-mounted read-write at `/vault`
-  (`AA_OBSIDIAN_VAULT_PATH=/vault`). With `OBSIDIAN_VAULT_PATH` unset, the
-  mount is the gitignored `./data/vault`, and vault exports land there. `just up`
-  creates that folder first; if you run `docker compose up` directly on Linux,
-  run `mkdir -p data/vault` before it, or Docker creates the folder as root.
-  The container itself runs as root, so on Linux the notes it exports into any
-  vault are root-owned on the host; `sudo chown -R "$USER" <vault>` takes them back.
-- Quote `OBSIDIAN_VAULT_PATH` in `.env` if the path contains spaces (e.g.
-  `OBSIDIAN_VAULT_PATH="/Users/you/Library/Mobile Documents/..."`) —
-  unquoted values with spaces break `just`'s dotenv parsing.
-- Building the image (or running `cd frontend && npm run build`) leaves a
-  `frontend/build/` directory on the host; host-dev `just api` will then
-  serve that increasingly stale SPA at http://localhost:8000/ instead of
-  a 404/API-only response. Run `rm -rf frontend/build` to restore pure-API
-  host dev (frontend dev via `npm run dev` stays on :5173 either way).
 
 ## Back up and restore your data
 

@@ -1,5 +1,9 @@
 set dotenv-load := true
 
+# One-time local setup (prereqs, deps, db schema, .env); --memory adds hybrid retrieval.
+setup *args:
+	./scripts/setup.sh {{args}}
+
 install:
 	uv sync
 
@@ -22,6 +26,10 @@ api:
 
 frontend:
 	cd frontend && npm run dev
+
+# API + frontend in one terminal; Ctrl-C stops both. Ports: AA_API_PORT / AA_WEB_PORT.
+dev:
+	./scripts/dev.sh
 
 test:
 	uv run pytest -q

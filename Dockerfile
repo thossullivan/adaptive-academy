@@ -24,7 +24,18 @@ RUN uv sync --frozen --no-dev --extra memory
 COPY --from=frontend /fe/build ./frontend/build
 COPY docker/entrypoint.sh /entrypoint.sh
 
+# The app runs as an unprivileged user. The image (/app) stays root-owned and read-only to
+# it; only /data (the db + embedding cache volume) and /vault are written. The entrypoint
+# starts as root just long enough to hand /data to AA_UID:AA_GID (volumes created by older,
+# root-running images are root-owned), then drops privileges with setpriv (util-linux).
+RUN groupadd --gid 1000 app \
+ && useradd --uid 1000 --gid app --home-dir /home/app --create-home --shell /usr/sbin/nologin app \
+ && mkdir -p /data && chown app:app /data
+
 ENV PATH="/app/.venv/bin:$PATH" \
+    HOME=/home/app \
+    AA_UID=1000 \
+    AA_GID=1000 \
     AA_FRONTEND_DIST=/app/frontend/build \
     AA_DATABASE_URL=sqlite:////data/adaptive_academy.db
 EXPOSE 8000
