@@ -1,9 +1,10 @@
 import json
 import os
+import re
 from pathlib import Path
 
 import anthropic
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
@@ -12,6 +13,7 @@ from adaptive_academy.settings import settings
 from adaptive_academy.api import (
     routes_conversations,
     routes_deliverables,
+    routes_export,
     routes_items,
     routes_memory,
     routes_momentum,
@@ -20,6 +22,7 @@ from adaptive_academy.api import (
     routes_story,
     routes_teach,
     routes_topics,
+    routes_usage,
     routes_vault,
 )
 from adaptive_academy.api.routes_anchors import (
@@ -44,7 +47,27 @@ from adaptive_academy.api.routes_roleplay import router as roleplay_router
 from adaptive_academy.api.routes_scout import router as scout_router
 from adaptive_academy.db import create_db_and_tables
 from adaptive_academy.llm.keys import MissingAPIKeyError
+from adaptive_academy.llm.registry import MODEL_ENV_VARS, ROLES, get_model
 from adaptive_academy.llm.types import AgentSDKError
+from adaptive_academy.llm.usage import BudgetExceededError, feature_from_route, set_feature
+
+
+# Upstream says e.g. "model: claude-foo-1". Only an id-shaped token is lifted, so nothing
+# else from the upstream text (which we don't control) is echoed back.
+_MODEL_IN_MESSAGE = re.compile(r"\bmodel:\s*([A-Za-z0-9][A-Za-z0-9._:@/-]{0,99})")
+
+
+def model_unavailable_detail(exc: anthropic.NotFoundError) -> str:
+    """A legible fix for a model the API doesn't recognise: name the id and the setting."""
+    match = _MODEL_IN_MESSAGE.search(getattr(exc, "message", "") or str(exc))
+    model = match.group(1).rstrip(".,;:'\"") if match else None
+    env_vars = [MODEL_ENV_VARS[role] for role in ROLES if model and get_model(role) == model]
+    if not env_vars:
+        env_vars = [MODEL_ENV_VARS[role] for role in ROLES]
+    setting = env_vars[0] if len(env_vars) == 1 else f"{env_vars[0]} (or {', '.join(env_vars[1:])})"
+    subject = f"The model '{model}'" if model else "The configured model"
+    return (f"{subject} is not available to this API key. "
+            f"Set {setting} in .env to a current model and restart the API.")
 
 
 def drop_api_key_if_agent_sdk() -> None:
@@ -75,8 +98,17 @@ def _mount_spa(app: FastAPI) -> None:
         return FileResponse(index)
 
 
+async def _label_llm_usage(request: Request) -> None:
+    """Tag any model call this request makes with a feature label from the matched route
+    (e.g. "/api/topics/{topic_id}/research" → "research"), via a contextvar, so engine code
+    needs no extra parameters. Async on purpose: it runs in the request's own context, which
+    the sync endpoint's worker thread then inherits."""
+    route = request.scope.get("route")
+    set_feature(feature_from_route(getattr(route, "path", None)))
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Adaptive Academy")
+    app = FastAPI(title="Adaptive Academy", dependencies=[Depends(_label_llm_usage)])
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173"],
@@ -99,6 +131,9 @@ def create_app() -> FastAPI:
             detail = "LLM authentication failed — check ANTHROPIC_API_KEY in .env"
         elif isinstance(exc, anthropic.RateLimitError):
             detail = "LLM rate limit hit — wait a moment and retry"
+        elif isinstance(exc, anthropic.NotFoundError):
+            # 404 not_found_error is what an unknown/retired model id returns.
+            detail = model_unavailable_detail(exc)
         else:
             # Surface the upstream message — it's actionable (e.g. "credit balance is
             # too low") and a vague "(BadRequestError)" hides the real cause.
@@ -112,6 +147,13 @@ def create_app() -> FastAPI:
         user exactly how to fix it, instead of a bare KeyError 500. Raised when an LLM-backed
         route builds its Anthropic client, so it covers every such route at once."""
         return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+    @app.exception_handler(BudgetExceededError)
+    def _budget_exceeded(request: Request, exc: BudgetExceededError) -> JSONResponse:
+        """AA_DAILY_BUDGET_USD reached → 429 saying what was spent, the limit, and how to
+        raise it. Raised before the call that would have spent more; calls this request
+        already made (e.g. earlier research angles) were billed and recorded."""
+        return JSONResponse(status_code=429, content={"detail": str(exc)})
 
     @app.exception_handler(AgentSDKError)
     def _agent_sdk_error(request: Request, exc: AgentSDKError) -> JSONResponse:
@@ -150,12 +192,14 @@ def create_app() -> FastAPI:
     app.include_router(routes_teach.router)
     app.include_router(routes_deliverables.router)
     app.include_router(routes_vault.router)
+    app.include_router(routes_export.router)
     app.include_router(routes_memory.router)
     app.include_router(routes_momentum.router)
     app.include_router(programs_router)
     app.include_router(scout_router)
     app.include_router(roleplay_router)
     app.include_router(paper_probe_router)
+    app.include_router(routes_usage.router)
     _mount_spa(app)
     return app
 

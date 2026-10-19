@@ -18,6 +18,7 @@ export AA_OBSIDIAN_VAULT_PATH=""
 export AA_EMBEDDING_CACHE_DIR="$tmp/fastembed_cache"
 export AA_EMBEDDING_ALLOW_DOWNLOAD=false
 export AA_EMBEDDING_MODEL="BAAI/bge-small-en-v1.5"
+export AA_DAILY_BUDGET_USD=""
 
 cd "$repo"
 uv run alembic upgrade head

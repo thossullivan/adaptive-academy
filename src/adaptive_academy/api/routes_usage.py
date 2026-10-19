@@ -1,0 +1,70 @@
+"""What the model calls cost: recorded tokens, list-price dollars, and the daily limit."""
+
+from typing import Literal
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
+from sqlmodel import Session
+
+from adaptive_academy.api.deps import get_session, use_agent_sdk
+from adaptive_academy.llm import pricing
+from adaptive_academy.llm.usage import usage_summary
+
+router = APIRouter(prefix="/api/usage", tags=["usage"])
+
+
+class UsageTotalsOut(BaseModel):
+    calls: int
+    cost_usd: float  # all recorded cost, incl. the Agent SDK's own estimate
+    api_cost_usd: float  # API-key (backend="anthropic") spend only
+    unpriced_calls: int  # calls whose model price is unknown (cost not counted)
+    input_tokens: int
+    output_tokens: int
+    cache_creation_input_tokens: int
+    cache_read_input_tokens: int
+    web_search_requests: int
+
+
+class UsageWindowsOut(BaseModel):
+    today: UsageTotalsOut
+    last_7_days: UsageTotalsOut
+    last_30_days: UsageTotalsOut
+    all_time: UsageTotalsOut
+
+
+class FeatureUsageOut(UsageTotalsOut):
+    feature: str | None
+
+
+class ModelUsageOut(UsageTotalsOut):
+    model: str
+
+
+class BudgetOut(BaseModel):
+    limit_usd: float | None
+    spent_today_usd: float
+    remaining_usd: float | None
+    exceeded: bool
+
+
+class UsageOut(BaseModel):
+    backend: Literal["anthropic", "agent_sdk"]
+    totals: UsageWindowsOut
+    by_feature: list[FeatureUsageOut]  # last 30 days
+    by_model: list[ModelUsageOut]  # last 30 days
+    budget: BudgetOut
+    priced_models: list[str]
+    pricing_source: str
+    pricing_as_of: str
+
+
+@router.get("", response_model=UsageOut)
+def get_usage(session: Session = Depends(get_session)) -> UsageOut:
+    summary = usage_summary(session)
+    return UsageOut(
+        backend="agent_sdk" if use_agent_sdk() else "anthropic",
+        priced_models=sorted(pricing.PRICES),
+        pricing_source=pricing.PRICING_SOURCE_URL,
+        pricing_as_of=pricing.PRICING_READ_ON,
+        **summary,
+    )

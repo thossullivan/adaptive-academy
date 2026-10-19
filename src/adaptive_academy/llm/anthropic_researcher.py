@@ -6,6 +6,7 @@ from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
+from adaptive_academy.llm.usage import BACKEND_ANTHROPIC, check_budget, record_usage
 from adaptive_academy.prompts import RESEARCH_SEARCH
 
 
@@ -40,11 +41,13 @@ class AnthropicResearcherClient:
         # source JSON; at 2048 it hit max_tokens and truncated mid-JSON, so every angle
         # silently parsed to 0 sources. Billing is per output token, so the headroom is free.
         self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=2)
+        self._role = role
         self._model = get_model(role)
         self._max_tokens = max_tokens
         self._max_searches = max_searches
 
     def search(self, brief: SearchBrief) -> list[RawSource]:
+        check_budget()
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -52,6 +55,9 @@ class AnthropicResearcherClient:
             tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": self._max_searches}],
             messages=[{"role": "user", "content": brief.query}],
         )
+        # usage.server_tool_use.web_search_requests is billed per search on top of tokens.
+        record_usage(backend=BACKEND_ANTHROPIC, model=self._model, role=self._role,
+                     operation="research_search", usage=getattr(resp, "usage", None))
         text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
         sources = parse_sources_json(text)
         for s in sources:

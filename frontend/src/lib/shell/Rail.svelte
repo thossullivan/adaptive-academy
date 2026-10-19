@@ -20,7 +20,8 @@
     label: 'Voyages',
     items: [
       { label: 'Fleet', icon: 'fleet', href: '/fleet', match: (p) => p === '/fleet' },
-      { label: 'Programs', icon: 'map', href: '/programs', match: (p) => p.startsWith('/programs') }
+      { label: 'Programs', icon: 'map', href: '/programs', match: (p) => p.startsWith('/programs') },
+      { label: 'Usage', icon: 'usage', href: '/usage', match: (p) => p === '/usage' }
     ]
   };
 
@@ -118,6 +119,13 @@
 
   <!-- Footer -->
   <div class="flex flex-col gap-1 border-t border-border pt-3">
+    <a
+      href="/data"
+      class="flex h-9 items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 text-sm transition-colors hover:bg-surface-2 hover:text-fg {pathname === '/data' ? 'bg-surface-2 text-fg' : 'text-muted'}"
+    >
+      <span class="grid size-5 place-items-center {pathname === '/data' ? 'text-accent' : 'text-faint'}"><Icon name="data" class="size-4" /></span>
+      Your data
+    </a>
     <ThemeToggle />
     <div class="flex items-center gap-2 px-2.5 pt-1">
       <span class="size-1.5 rounded-full bg-success"></span>

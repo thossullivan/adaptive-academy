@@ -24,6 +24,9 @@ frontend/build/
 *.db-wal
 *.db-shm
 
+# `aa backup` / `aa export` output (your learning record; never commit it)
+backups/
+
 .env
 
 # Visual-companion brainstorming scratch

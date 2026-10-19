@@ -5,6 +5,7 @@ from anthropic import Anthropic
 from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.types import LLMResponse, ToolCall
+from adaptive_academy.llm.usage import BACKEND_ANTHROPIC, check_budget, record_usage
 
 
 class AnthropicLLMClient:
@@ -16,8 +17,14 @@ class AnthropicLLMClient:
         # also bounds scope (6-12 phases), but billing is per output token generated, not per
         # max_tokens, so a high ceiling is free insurance against truncation.
         self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3)
+        self._role = role
         self._model = get_model(role)
         self._max_tokens = max_tokens
+
+    def _record(self, resp: Any, operation: str) -> None:
+        # Recorded as soon as the call returns: it was billed even if parsing fails below.
+        record_usage(backend=BACKEND_ANTHROPIC, model=self._model, role=self._role,
+                     operation=operation, usage=getattr(resp, "usage", None))
 
     def complete(
         self,
@@ -25,6 +32,7 @@ class AnthropicLLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> LLMResponse:
+        check_budget()
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -32,6 +40,7 @@ class AnthropicLLMClient:
             messages=messages,
             tools=tools,
         )
+        self._record(resp, "complete")
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for block in resp.content:
@@ -55,6 +64,7 @@ class AnthropicLLMClient:
             "description": "Emit the result as structured data matching the schema.",
             "input_schema": schema,
         }
+        check_budget()
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -63,6 +73,7 @@ class AnthropicLLMClient:
             tools=[tool],
             tool_choice={"type": "tool", "name": tool_name},
         )
+        self._record(resp, "complete_json")
         for block in resp.content:
             if block.type == "tool_use" and block.name == tool_name:
                 return block.input

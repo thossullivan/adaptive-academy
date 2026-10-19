@@ -2,8 +2,11 @@
 
 One topic shaped like a real learner's: a phased track whose first item is long enough to
 truncate, a 19-concept prerequisite graph with long names (the Constellation stress case),
-and a handful of graded assessments so the dashboard has a score history. No LLM calls.
+and a handful of graded assessments so the dashboard has a score history. No LLM calls —
+the LLMUsage rows below are recorded-looking fixtures so the Usage page shows real numbers.
 """
+
+from datetime import datetime, timedelta, timezone
 
 from sqlmodel import Session
 
@@ -14,6 +17,7 @@ from adaptive_academy.models import (
     ConceptEdge,
     Item,
     KnowledgeEstimate,
+    LLMUsage,
     Phase,
     Topic,
     Track,
@@ -69,6 +73,15 @@ PHASES = [
     ]),
 ]
 
+# (days ago, feature, model, input, output, web searches, cost_usd; None = price unknown)
+USAGE = [
+    (0, "tutor", "claude-sonnet-4-6", 12_000, 900, 0, 0.0495),
+    (0, "research", "claude-sonnet-4-6", 48_000, 6_000, 5, 0.284),
+    (0, "assess", "claude-custom-finetune-with-a-very-long-model-identifier", 3_000, 400, 0, None),
+    (3, "curriculum", "claude-sonnet-4-6", 20_000, 12_000, 0, 0.24),
+    (12, "tutor", "claude-haiku-4-5", 8_000, 700, 0, 0.0115),
+]
+
 # (concept index, kind, score)
 ASSESSMENTS = [
     (0, "self_explanation", 0.35),
@@ -117,6 +130,14 @@ def seed() -> None:
                 prompt=f"Explain {concepts[idx].name}.",
                 response="fixture",
                 score=score,
+            ))
+        now = datetime.now(timezone.utc)
+        for days, feature, model, inp, out, searches, cost in USAGE:
+            session.add(LLMUsage(
+                created_at=now - timedelta(days=days, minutes=1),
+                backend="anthropic", model=model, role="reasoning", operation="complete",
+                feature=feature, input_tokens=inp, output_tokens=out,
+                web_search_requests=searches, cost_usd=cost,
             ))
         # A second, minimal topic so topic-switching can be exercised. Created last, so the
         # main topic stays first in GET /api/topics.

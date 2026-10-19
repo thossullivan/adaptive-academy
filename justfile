@@ -9,6 +9,14 @@ seed:
 graph-backfill:
 	uv run aa graph-backfill
 
+# Consistent snapshot of the local db -> backups/adaptive_academy-<timestamp>.db (or PATH)
+backup *path:
+	uv run aa backup {{path}}
+
+# Full learning record as versioned JSON -> backups/adaptive_academy-<timestamp>.json (or PATH)
+export *path:
+	uv run aa export {{path}}
+
 api:
 	uv run uvicorn adaptive_academy.api.app:app --reload --port 8000
 

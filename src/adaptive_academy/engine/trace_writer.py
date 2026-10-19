@@ -7,6 +7,9 @@ park up to the pool's capacity on the busy timeout and starve the next read (Cod
 review of PR #7, round 2). So there is exactly one writer thread, fed by a capped
 queue; when the queue is full the trace is dropped and counted, never the request.
 
+LLM usage rows (llm/usage.py) ride the same writer for the same reasons: they are
+best-effort and must never hold a request on the write lock.
+
 Engines with a StaticPool (the in-memory test fixture) share one connection across
 threads, so the writer runs inline there to keep tests deterministic.
 """
@@ -22,9 +25,7 @@ from collections.abc import Sequence
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session
-
-from adaptive_academy.models import AgentEvent
+from sqlmodel import Session, SQLModel
 
 logger = logging.getLogger(__name__)
 
@@ -33,19 +34,23 @@ TRACE_QUEUE_MAX = 256
 
 class TraceWriter:
     def __init__(self, maxsize: int = TRACE_QUEUE_MAX):
-        self._queue: queue.Queue[tuple[Engine, list[AgentEvent]]] = queue.Queue(maxsize)
+        self._queue: queue.Queue[tuple[Engine, list[SQLModel]]] = queue.Queue(maxsize)
         self._thread: threading.Thread | None = None
         self._start_lock = threading.Lock()
+        # Inline (StaticPool) writes share one connection; callers on a thread pool (research
+        # fan-out recording LLM usage) must not interleave on it.
+        self._inline_lock = threading.Lock()
         self.dropped = 0
         self.written = 0
 
-    def submit(self, bind: Engine, rows: Sequence[AgentEvent]) -> bool:
+    def submit(self, bind: Engine, rows: Sequence[SQLModel]) -> bool:
         """Queue `rows` (already expunged/transient). Returns False if dropped."""
         rows = list(rows)
         if not rows:
             return True
         if isinstance(bind.pool, StaticPool):
-            self._write(bind, rows)
+            with self._inline_lock:
+                self._write(bind, rows)
             return True
         try:
             self._queue.put_nowait((bind, rows))
@@ -84,7 +89,7 @@ class TraceWriter:
             finally:
                 self._queue.task_done()
 
-    def _write(self, bind: Engine, rows: list[AgentEvent]) -> None:
+    def _write(self, bind: Engine, rows: list[SQLModel]) -> None:
         """Write one batch; a failure of any kind drops the batch, never propagates."""
         try:
             with Session(bind) as session:

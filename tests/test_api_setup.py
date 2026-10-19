@@ -164,3 +164,32 @@ def test_anthropic_clients_raise_typed_error_without_key(monkeypatch, no_network
     for ctor in (AnthropicLLMClient, AnthropicResearcherClient, AnthropicAnchorClient):
         with pytest.raises(MissingAPIKeyError):
             ctor()
+
+
+def test_setup_reports_resolved_models(client, monkeypatch):
+    from adaptive_academy.settings import settings
+
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    monkeypatch.setattr(settings, "reasoning_model", "claude-opus-5-5")
+    monkeypatch.setattr(settings, "copy_model", "  ")  # blank → default
+    r = client.get("/api/setup")
+    assert r.status_code == 200
+    assert r.json()["models"] == {"reasoning": "claude-opus-5-5", "copy": "claude-haiku-5-5"}
+    assert SECRET not in r.text
+
+
+def test_setup_reports_models_in_agent_sdk_mode(client, monkeypatch):
+    monkeypatch.setenv("AA_LLM_BACKEND", "agent_sdk")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    models = client.get("/api/setup").json()["models"]
+    assert set(models) == {"reasoning", "copy"}
+    assert all(isinstance(v, str) and v for v in models.values())
+
+
+def test_setup_reports_models_when_key_missing(client, monkeypatch):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    body = client.get("/api/setup").json()
+    assert body["llm_ready"] is False
+    assert set(body["models"]) == {"reasoning", "copy"}

@@ -42,7 +42,7 @@ export interface SourceDoc {
 export interface Foundation { overview: string; key_concepts: string[]; prerequisite_map: Record<string, string[]>; }
 export interface ResearchResult { foundation: Foundation; sources: SourceDoc[]; events: EventOut[]; }
 /** GET /api/setup — can the API make LLM calls? Never carries the key itself. */
-export interface SetupStatus { llm_backend: 'anthropic' | 'agent_sdk'; llm_ready: boolean; message: string; }
+export interface SetupStatus { llm_backend: 'anthropic' | 'agent_sdk'; llm_ready: boolean; message: string; models?: Record<string, string>; }
 export interface CreateTopicBody { title: string; goal: string; prior_knowledge?: string; time_budget?: string; }
 export interface Item { id: number; text: string; type: string; status: string; position: number; is_remediation?: boolean; }
 export interface Remediation { items: Item[]; events: EventOut[]; }
@@ -247,3 +247,37 @@ export type PaperProbe = {
   outcome?: { result: string; summary: string } | null;
   scorecard?: ScorecardRow[] | null;
 };
+
+/** GET /api/usage — recorded model-call usage and the daily spending limit. */
+export interface UsageTotals {
+  calls: number;
+  cost_usd: number; // all recorded cost, incl. the Agent SDK's own estimate
+  api_cost_usd: number; // API-key spend only
+  unpriced_calls: number; // calls whose model price is unknown (not in cost_usd)
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  web_search_requests: number;
+}
+export interface UsageBudget {
+  limit_usd: number | null;
+  spent_today_usd: number;
+  remaining_usd: number | null;
+  exceeded: boolean;
+}
+export interface UsageReport {
+  backend: 'anthropic' | 'agent_sdk';
+  totals: {
+    today: UsageTotals;
+    last_7_days: UsageTotals;
+    last_30_days: UsageTotals;
+    all_time: UsageTotals;
+  };
+  by_feature: (UsageTotals & { feature: string | null })[];
+  by_model: (UsageTotals & { model: string })[];
+  budget: UsageBudget;
+  priced_models: string[];
+  pricing_source: string;
+  pricing_as_of: string;
+}
