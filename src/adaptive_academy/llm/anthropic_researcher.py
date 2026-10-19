@@ -1,9 +1,9 @@
 import json
-import os
 
 from anthropic import Anthropic
 
 from adaptive_academy.jsonout import extract_json
+from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
 from adaptive_academy.prompts import RESEARCH_SEARCH
@@ -39,7 +39,7 @@ class AnthropicResearcherClient:
         # 8192, not 2048: a web_search turn spends output tokens on the search then the
         # source JSON; at 2048 it hit max_tokens and truncated mid-JSON, so every angle
         # silently parsed to 0 sources. Billing is per output token, so the headroom is free.
-        self._client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=2)
+        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=2)
         self._model = get_model(role)
         self._max_tokens = max_tokens
         self._max_searches = max_searches

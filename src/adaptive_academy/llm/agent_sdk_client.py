@@ -13,9 +13,11 @@ present the subprocess bills API credits. So agent_sdk mode is **fully subscript
 SDK-backed client (LLM, Researcher, Anchor) then uses the subscription. No per-call key
 juggling, no lock, no race.
 
-Scope: the no-tools structured-completion path (rubric/grade/curriculum/anchors). Tool calls
-(the Tutor's gated reveal_solution) are not ported — in agent_sdk mode (no key) they raise a
-legible AgentSDKError; with a key present they bridge to the API-key client.
+Scope: the no-tools structured-completion path (rubric/grade/curriculum/anchors). The Tutor's
+tool turns (log_attempt / gated reveal_solution) do not come through here: in agent_sdk mode
+the conversations route runs them via `engine/tutor_sdk.py` with in-process SDK tools. The
+tool branch in `complete()` is a fallback for any other tool-using caller — a legible
+AgentSDKError with no key, a bridge to the API-key client with one.
 """
 
 import asyncio
@@ -70,14 +72,13 @@ class AgentSDKLLMClient:
 
     def complete(self, system, messages, tools) -> LLMResponse:
         if tools:
-            # Tool-use turns (the Tutor's gated reveal_solution) aren't ported to the SDK
-            # yet; bridge them to the API-key client so agent_sdk mode stays fully usable.
-            # A pure-subscription user with no key set gets a legible error, not a 500.
+            # The Tutor runs its tools via engine/tutor_sdk.py, not here. Any other
+            # tool-using caller bridges to the API-key client; with no key set it gets a
+            # legible error, not a 500.
             if "ANTHROPIC_API_KEY" not in os.environ:
                 raise AgentSDKError(
-                    "agent_sdk mode: tool-use turns (the Tutor's reveal_solution) are not "
-                    "ported to the Agent SDK yet and still require ANTHROPIC_API_KEY. Set a "
-                    "key, or use assess/curriculum/anchors which run on your subscription.")
+                    "agent_sdk mode: this tool-use call is not ported to the Agent SDK and "
+                    "requires ANTHROPIC_API_KEY.")
             from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
             return AnthropicLLMClient(role=self._role).complete(system, messages, tools)
         # The key is already absent process-wide (create_app dropped it), so the subprocess

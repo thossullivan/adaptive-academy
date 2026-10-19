@@ -87,7 +87,7 @@
         <!-- waypoint card -->
         <div class="min-w-0 flex-1 pb-8">
           <div class="rounded-[var(--radius-md)] border p-4 transition-colors {p.status === 'current' ? 'border-[color-mix(in_oklab,var(--accent)_45%,transparent)] bg-accent-wash' : p.status === 'ahead' ? 'border-border bg-surface/60' : 'border-border bg-surface'}">
-            <div class="flex items-start justify-between gap-3">
+            <div class="flex flex-col gap-1 md:flex-row md:items-start md:justify-between md:gap-3">
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <span class="eyebrow !text-[0.55rem]">Phase {p.position + 1}</span>
@@ -96,7 +96,7 @@
                 </div>
                 <h3 class="mt-1 truncate text-base {p.status === 'ahead' ? 'text-fg-dim' : 'text-fg'}">{p.title}</h3>
               </div>
-              <div class="shrink-0 text-right">
+              <div class="flex items-baseline gap-2 md:block md:shrink-0 md:text-right">
                 <div class="nums text-sm text-muted">{p.done}/{p.total}</div>
                 {#if p.est_hours}<div class="eyebrow !text-[0.55rem]">{p.est_hours}</div>{/if}
               </div>

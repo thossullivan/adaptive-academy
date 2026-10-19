@@ -28,3 +28,6 @@ frontend/build/
 
 # Visual-companion brainstorming scratch
 .superpowers/
+
+# Default empty vault mount for docker compose
+/data/

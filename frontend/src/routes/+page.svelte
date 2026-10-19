@@ -1,11 +1,13 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { topics } from '$lib/topics.svelte';
+  import { setup } from '$lib/setup.svelte';
   import { api, scoutCardTitle } from '$lib/api';
   import type { Curriculum, Assessment, EventOut, Concept, TopicSuggestion } from '$lib/types';
   import { conceptSignals, conceptVerdict, VERDICT_RANK, type ConceptSignals, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
-  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing, ScoutCard } from '$lib/ui';
+  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing, ScoutCard, SetupNotice } from '$lib/ui';
   import ScoreTrend from '$lib/charts/ScoreTrend.svelte';
   import CalibrationPlot from '$lib/charts/CalibrationPlot.svelte';
 
@@ -136,6 +138,10 @@
     scoutBusy = false;
   }
 
+  onMount(() => {
+    setup.refresh();
+  });
+
   $effect(() => {
     const id = topics.current?.id;
     if (id != null) load(id);
@@ -143,6 +149,22 @@
   });
 
   const tid = $derived(topics.current?.id ?? null);
+
+  // First-run entry points: a Program is the long-horizon path, a Topic the single-subject one.
+  const entryPoints = [
+    {
+      href: '/programs/new',
+      eyebrow: 'Multi-month goal',
+      label: 'Start a program',
+      blurb: 'Describe a substantial goal; research drafts a milestone map you review before anything is built.'
+    },
+    {
+      href: '/topics/new',
+      eyebrow: 'Single subject',
+      label: 'Start a topic',
+      blurb: 'Name one subject; the Researcher assembles a foundation you curate, then a phased track.'
+    }
+  ];
   // Rank concepts: shakiest + load-bearing first — that's where attention belongs.
   const rankedRows = $derived(
     [...rows].sort((a, b) => VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict] || Number(b.is_load_bearing) - Number(a.is_load_bearing))
@@ -151,8 +173,8 @@
 
 {#if !topics.current}
   <!-- First-run welcome -->
-  <div class="grid min-h-screen place-items-center px-6">
-    <div class="max-w-md text-center rise">
+  <div class="grid min-h-[calc(100dvh-3.5rem)] grid-cols-[minmax(0,1fr)] place-items-center px-6 py-10 md:min-h-screen">
+    <div class="w-full max-w-2xl text-center rise">
       <div class="mx-auto mb-6 grid size-16 place-items-center rounded-full border border-border bg-surface">
         <svg viewBox="0 0 32 32" class="size-9">
           <circle cx="16" cy="16" r="13" fill="none" stroke="var(--border-strong)" stroke-width="1.5" />
@@ -161,11 +183,23 @@
       </div>
       <h1 class="text-3xl text-fg">Adaptive Academy</h1>
       <p class="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-muted">
-        A private, agent-orchestrated workshop for learning hard things by building. Start with a topic and the
-        Researcher will assemble your foundation.
+        A private, agent-orchestrated workshop for learning hard things by building. Pick a starting point and
+        the Researcher will assemble your foundation.
       </p>
-      <div class="mt-7">
-        <Button href="/topics/new" size="lg">Begin a topic →</Button>
+
+      <SetupNotice status={setup.status} class="mt-7" />
+
+      <div class="mt-7 grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+        {#each entryPoints as e (e.href)}
+          <a
+            href={e.href}
+            class="group flex flex-col gap-2 rounded-[var(--radius-lg)] border border-border bg-surface p-5 shadow-[var(--shadow)] transition-[border-color,background] duration-150 hover:border-[color-mix(in_oklab,var(--accent)_45%,var(--border))] hover:bg-surface-2"
+          >
+            <span class="eyebrow">{e.eyebrow}</span>
+            <span class="font-display text-lg text-fg [overflow-wrap:anywhere] group-hover:text-accent-bright">{e.label} →</span>
+            <span class="text-sm leading-relaxed text-muted">{e.blurb}</span>
+          </a>
+        {/each}
       </div>
     </div>
   </div>
@@ -175,6 +209,8 @@
       <Button variant="outline" href="/topics/{tid}/map">Constellation</Button>
       <Button href="/topics/{tid}/today">Start today's session →</Button>
     {/snippet}
+
+    <SetupNotice status={setup.status} class="mb-4" />
 
     {#if scoutTitle}
       <ScoutCard

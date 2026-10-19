@@ -127,7 +127,8 @@ def _topic_out(session: Session, topic: Topic) -> TopicOut:
 
 @router.get("", response_model=list[TopicOut])
 def list_topics(session: Session = Depends(get_session)):
-    return [_topic_out(session, topic) for topic in session.exec(select(Topic)).all()]
+    topics = session.exec(select(Topic).order_by(Topic.id)).all()
+    return [_topic_out(session, topic) for topic in topics]
 
 
 @router.post("", response_model=TopicOut)

@@ -41,6 +41,8 @@ export interface SourceDoc {
 }
 export interface Foundation { overview: string; key_concepts: string[]; prerequisite_map: Record<string, string[]>; }
 export interface ResearchResult { foundation: Foundation; sources: SourceDoc[]; events: EventOut[]; }
+/** GET /api/setup — can the API make LLM calls? Never carries the key itself. */
+export interface SetupStatus { llm_backend: 'anthropic' | 'agent_sdk'; llm_ready: boolean; message: string; }
 export interface CreateTopicBody { title: string; goal: string; prior_knowledge?: string; time_budget?: string; }
 export interface Item { id: number; text: string; type: string; status: string; position: number; is_remediation?: boolean; }
 export interface Remediation { items: Item[]; events: EventOut[]; }

@@ -11,9 +11,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     volumes:
       - aa-data:/data
-      # iCloud-synced vault: files evicted by iCloud may read as empty in the
-      # container until macOS re-materializes them.
-      - "${OBSIDIAN_VAULT_PATH}:/vault"
+      # Optional Obsidian vault. Unset OBSIDIAN_VAULT_PATH mounts an empty
+      # ./data/vault so the stack starts without one. iCloud-synced vault: files
+      # evicted by iCloud may read as empty until macOS re-materializes them.
+      - "${OBSIDIAN_VAULT_PATH:-./data/vault}:/vault"
 
 volumes:
   aa-data:

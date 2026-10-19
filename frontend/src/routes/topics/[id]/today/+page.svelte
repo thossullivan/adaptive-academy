@@ -106,9 +106,9 @@
     <div class="flex flex-col gap-3">
       <!-- 1. Warm up -->
       <Card class="rise" pad>
-        <div class="flex items-start gap-4">
+        <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
           <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">1</span>
-          <div class="min-w-0 flex-1">
+          <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <div class="flex items-center gap-2">
               <h2 class="text-lg text-fg">Warm up</h2>
               {#if decayCount}<Badge tone="accent" dot>{decayCount} decay check{decayCount > 1 ? 's' : ''}</Badge>{/if}
@@ -118,15 +118,15 @@
               {#if decayCount}Unassisted recall checks are due — prove it still holds without the tutor.{:else if dueCount}Retrieval practice on cards due today — fast, before you build.{:else}No reviews due. Nice and clear.{/if}
             </p>
           </div>
-          {#if dueCount || decayCount}<Button href="/topics/{topicId}/retention">Review →</Button>{/if}
+          {#if dueCount || decayCount}<Button href="/topics/{topicId}/retention" class="ml-12 md:ml-0">Review →</Button>{/if}
         </div>
       </Card>
 
       <!-- 2. Build -->
       <Card class="rise" pad>
-        <div class="flex items-start gap-4">
+        <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
           <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">2</span>
-          <div class="min-w-0 flex-1">
+          <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <div class="flex items-center gap-2">
               <h2 class="text-lg text-fg">Build</h2>
               {#if allDone}<Badge tone="success" dot>track complete</Badge>{/if}
@@ -150,15 +150,15 @@
               <p class="mt-1 text-sm text-muted">No track yet. Generate a curriculum to get build steps.</p>
             {/if}
           </div>
-          <Button variant="outline" href="/topics/{topicId}/track">Open track →</Button>
+          <Button variant="outline" href="/topics/{topicId}/track" class="ml-12 md:ml-0">Open track →</Button>
         </div>
       </Card>
 
       <!-- 3. Probe -->
       <Card class="rise" pad>
-        <div class="flex items-start gap-4">
+        <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
           <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">3</span>
-          <div class="min-w-0 flex-1">
+          <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <div class="flex items-center gap-2">
               <h2 class="text-lg text-fg">Probe</h2>
               {#if weakest}<Badge tone={weakestLevel === 'low' ? 'danger' : weakestLevel === 'unknown' ? 'neutral' : 'accent'} dot>{LEVEL_LABEL[weakestLevel]}</Badge>{/if}
@@ -172,21 +172,21 @@
               <p class="mt-1 text-sm text-muted">No concepts to probe yet.</p>
             {/if}
           </div>
-          {#if weakest}<Button href="/topics/{topicId}/assess">Assess →</Button>{/if}
+          {#if weakest}<Button href="/topics/{topicId}/assess" class="ml-12 md:ml-0">Assess →</Button>{/if}
         </div>
       </Card>
 
       <!-- 4. Teach back -->
       <Card class="rise" pad>
-        <div class="flex items-start gap-4">
+        <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
           <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">4</span>
-          <div class="min-w-0 flex-1">
+          <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <h2 class="text-lg text-fg">Teach back</h2>
             <p class="mt-1 text-sm text-muted">
               {weakest ? `Work through ${weakest.name} with the tutor — it won't hand you the answer.` : 'Open the tutor to work a concept Socratically.'}
             </p>
           </div>
-          <Button variant="outline" href={weakest ? `/topics/${topicId}/tutor?concept=${weakest.id}` : `/topics/${topicId}/tutor`}>Open tutor →</Button>
+          <Button variant="outline" href={weakest ? `/topics/${topicId}/tutor?concept=${weakest.id}` : `/topics/${topicId}/tutor`} class="ml-12 md:ml-0">Open tutor →</Button>
         </div>
       </Card>
     </div>

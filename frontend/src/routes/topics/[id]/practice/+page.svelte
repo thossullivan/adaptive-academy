@@ -133,7 +133,7 @@
     {#if tab === 'pf'}
       <div class="flex flex-col gap-4">
         <Card pad>
-          <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center justify-between gap-3 md:flex-nowrap">
             <div>
               <span class="eyebrow">grapple first</span>
               <p class="mt-1 text-sm text-muted">Generate a novel problem on <b class="text-fg-dim">{conceptName}</b> and attempt it <i>before</i> any method is shown. Failing productively is the point.</p>
