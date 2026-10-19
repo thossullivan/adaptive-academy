@@ -18,7 +18,9 @@ frontend:
 test:
 	uv run pytest -q
 
+# Create compose's default vault mount first: on Linux, Docker would create it as root.
 up:
+	mkdir -p data/vault
 	docker compose up -d --build
 
 down:

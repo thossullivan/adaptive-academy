@@ -112,7 +112,18 @@ def test_expired_stale_reembed_deadline_embeds_no_rows(vec_session):
 
 
 @pytest.mark.skipif(TextEmbedding is None, reason="fastembed optional extra is unavailable")
-def test_onnx_embedder_construction_does_not_load_the_model():
+def test_onnx_embedder_construction_does_not_load_the_model(monkeypatch):
+    from adaptive_academy.llm import onnx_embedder
+
+    # Allow downloads so construction never depends on a model already sitting in this
+    # machine's cache (a fresh CI runner has none); loading the model would fail loudly.
+    monkeypatch.setattr(onnx_embedder.settings, "embedding_allow_download", True)
+
+    class NoLoad:
+        def __init__(self, *a, **kw):
+            raise AssertionError("constructing OnnxEmbedder loaded the model")
+
+    monkeypatch.setattr(onnx_embedder, "TextEmbedding", NoLoad)
     embedder = OnnxEmbedder()
 
     assert embedder.name == "BAAI/bge-small-en-v1.5"

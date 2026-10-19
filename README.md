@@ -116,7 +116,21 @@ the daily loop (warm up → build → probe → teach back). The header surfaces
 ```bash
 just test                       # backend (pytest)
 cd frontend && npx vitest run   # frontend (vitest)
+cd frontend && npm run check    # frontend types (svelte-check)
 ```
+
+End-to-end tests (Playwright) drive the real UI at desktop and phone sizes:
+
+```bash
+cd frontend
+npx playwright install chromium   # once
+npm run test:e2e
+```
+
+The e2e run starts its own API (via `uv`) on a fresh, seeded SQLite db with no
+`ANTHROPIC_API_KEY`, plus a Vite server on its own ports (18765 and 14173; override with
+`E2E_API_PORT` / `E2E_WEB_PORT`). It never touches your db, your vault, or your dev
+servers, and no test spends tokens. CI (`.github/workflows/ci.yml`) runs all four suites.
 
 ## Run in a container (Docker / OrbStack)
 
@@ -124,7 +138,7 @@ Build and run the whole app (API + built frontend) as one service on
 http://localhost:8000, with the SQLite db in a named volume:
 
 ```bash
-cp .env.example .env       # set ANTHROPIC_API_KEY and OBSIDIAN_VAULT_PATH
+cp .env.example .env       # set ANTHROPIC_API_KEY (OBSIDIAN_VAULT_PATH is optional)
 just db-migrate-to-volume  # optional: copy an existing local db into the volume
 just up                    # build image + start (docker compose up -d --build)
 just logs                  # follow logs
@@ -138,7 +152,12 @@ Notes:
   `adaptive_academy.db` is untouched after migration. Avoid running host
   and container against the same db file.
 - The Obsidian vault is bind-mounted read-write at `/vault`
-  (`AA_OBSIDIAN_VAULT_PATH=/vault`).
+  (`AA_OBSIDIAN_VAULT_PATH=/vault`). With `OBSIDIAN_VAULT_PATH` unset, the
+  mount is the gitignored `./data/vault`, and vault exports land there. `just up`
+  creates that folder first; if you run `docker compose up` directly on Linux,
+  run `mkdir -p data/vault` before it, or Docker creates the folder as root.
+  The container itself runs as root, so on Linux the notes it exports into any
+  vault are root-owned on the host; `sudo chown -R "$USER" <vault>` takes them back.
 - Quote `OBSIDIAN_VAULT_PATH` in `.env` if the path contains spaces (e.g.
   `OBSIDIAN_VAULT_PATH="/Users/you/Library/Mobile Documents/..."`) —
   unquoted values with spaces break `just`'s dotenv parsing.
