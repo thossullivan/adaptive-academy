@@ -69,6 +69,8 @@
   const typeGlyph: Record<string, string> = { read: '▢', watch: '▷', build: '◈', write: '✎', do: '◆' };
 </script>
 
+<svelte:head><title>Today · Adaptive Academy</title></svelte:head>
+
 <Page eyebrow="Today's session" title="What to do right now" lead="A focused loop assembled from where you actually are — warm up, build, probe, teach back." width="normal">
   {#if programCtx}
     <Card class="mb-5">
@@ -101,13 +103,13 @@
     <div class="mb-5"><ComebackCard {wind} {comeback} /></div>
   {/if}
   {#if loading}
-    <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">composing your session…</span></div>
+    <div class="grid place-items-center py-24" role="status"><span class="eyebrow animate-pulse">composing your session…</span></div>
   {:else}
     <div class="flex flex-col gap-3">
       <!-- 1. Warm up -->
       <Card class="rise" pad>
         <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
-          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">1</span>
+          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent" aria-hidden="true">1</span>
           <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <div class="flex items-center gap-2">
               <h2 class="text-lg text-fg">Warm up</h2>
@@ -125,7 +127,7 @@
       <!-- 2. Build -->
       <Card class="rise" pad>
         <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
-          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">2</span>
+          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent" aria-hidden="true">2</span>
           <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <div class="flex items-center gap-2">
               <h2 class="text-lg text-fg">Build</h2>
@@ -137,7 +139,7 @@
                 {#each nextItems as { item, phase }}
                   <li class="rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3 py-2">
                     <div class="flex items-start gap-2">
-                      <span class="mt-0.5 shrink-0 font-mono text-xs text-faint">{typeGlyph[item.type] ?? '·'}</span>
+                      <span class="mt-0.5 shrink-0 font-mono text-xs text-faint" aria-hidden="true">{typeGlyph[item.type] ?? '·'}</span>
                       <Markdown text={item.text} class="min-w-0 flex-1 text-sm text-fg-dim" />
                     </div>
                     <div class="eyebrow mt-1 pl-5 !text-[0.55rem]">{phase}</div>
@@ -157,7 +159,7 @@
       <!-- 3. Probe -->
       <Card class="rise" pad>
         <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
-          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">3</span>
+          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent" aria-hidden="true">3</span>
           <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <div class="flex items-center gap-2">
               <h2 class="text-lg text-fg">Probe</h2>
@@ -179,7 +181,7 @@
       <!-- 4. Teach back -->
       <Card class="rise" pad>
         <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
-          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent">4</span>
+          <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent" aria-hidden="true">4</span>
           <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <h2 class="text-lg text-fg">Teach back</h2>
             <p class="mt-1 text-sm text-muted">

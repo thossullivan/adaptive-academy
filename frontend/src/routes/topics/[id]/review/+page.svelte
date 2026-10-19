@@ -83,6 +83,8 @@
   }
 </script>
 
+<svelte:head><title>Sources · Adaptive Academy</title></svelte:head>
+
 <Page eyebrow="Researcher" title="Review reading list" lead="Curate the foundation before the CurriculumDirector builds your track. Keep what earns its place." width="normal">
   {#snippet actions()}
     <Button variant="outline" onclick={generateAnchors} disabled={generatingAnchors}>
@@ -102,33 +104,38 @@
       </Card>
     {/if}
 
-    {#if anchorCount != null}
-      <p class="text-sm text-success">Generated {anchorCount} source-grounded quiz anchor(s).</p>
-    {/if}
+    <p class="text-sm text-success empty:hidden" role="status">
+      {#if anchorCount != null}Generated {anchorCount} source-grounded quiz anchor(s).{/if}
+    </p>
 
     <div class="flex items-center justify-between">
       <span class="eyebrow">{keptCount} of {sources.length} kept</span>
-      {#if saved}<Badge tone="success" dot>saved</Badge>{/if}
+      <span role="status">{#if saved}<Badge tone="success" dot>saved</Badge>{/if}</span>
     </div>
 
     <ul class="flex flex-col gap-2.5">
       {#each sources as s (s.id)}
         <li>
-          <Card pad class="rise transition-opacity {keep[s.id] ? '' : 'opacity-45'}">
+          <!-- A dropped source stays readable (a translucent card failed text contrast): a
+               dashed, unfilled card and a struck-through title mark it instead. -->
+          <Card pad class="rise transition-colors {keep[s.id] ? '' : 'border-dashed !bg-transparent !shadow-none'}">
             <div class="flex items-start gap-3">
               <button
+                type="button"
+                role="checkbox"
+                aria-checked={!!keep[s.id]}
                 onclick={() => (keep[s.id] = !keep[s.id])}
                 class="mt-0.5 grid size-5 shrink-0 place-items-center rounded-[var(--radius-xs)] border transition-colors"
-                style:border-color={keep[s.id] ? 'var(--accent)' : 'var(--border-strong)'}
+                style:border-color={keep[s.id] ? 'var(--accent)' : 'var(--control-border)'}
                 style:background={keep[s.id] ? 'var(--accent)' : 'transparent'}
-                aria-label={keep[s.id] ? 'drop source' : 'keep source'}
+                aria-label="Keep {s.title}"
               >
                 {#if keep[s.id]}
-                  <svg viewBox="0 0 16 16" class="size-3.5 text-accent-fg" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 8l3.5 3.5L13 5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                  <svg viewBox="0 0 16 16" class="size-3.5 text-accent-fg" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M3 8l3.5 3.5L13 5" stroke-linecap="round" stroke-linejoin="round" /></svg>
                 {/if}
               </button>
               <div class="min-w-0 flex-1">
-                <a href={s.url} target="_blank" rel="noreferrer" class="font-medium text-fg underline decoration-border underline-offset-2 transition-colors hover:decoration-accent">{s.title}</a>
+                <a href={s.url} target="_blank" rel="noreferrer" class="font-medium text-fg underline decoration-border underline-offset-2 transition-colors hover:decoration-accent {keep[s.id] ? '' : 'line-through'}">{s.title}<span class="sr-only"> (opens in a new tab)</span></a>
                 <div class="mt-1 flex flex-wrap items-center gap-1.5">
                   <Badge mono tone={s.tier === 1 ? 'accent' : 'neutral'}>tier {s.tier}</Badge>
                   <span class="eyebrow !text-[0.55rem]">{s.angle}</span>
@@ -147,13 +154,13 @@
       {#if saved}
         <Button onclick={generate} disabled={generating}>{generating ? 'Generating curriculum…' : 'Generate curriculum →'}</Button>
         {#if generating}
-          <span class="text-xs text-faint">The CurriculumDirector is designing your whole track — this can take a couple of minutes.</span>
+          <span class="text-xs text-faint" role="status">The CurriculumDirector is designing your whole track — this can take a couple of minutes.</span>
         {/if}
       {/if}
     </div>
 
     {#if error}
-      <p class="rounded-[var(--radius-sm)] border border-danger/40 bg-danger/10 px-3 py-2 text-sm" style:color="var(--danger)">{error}</p>
+      <p class="rounded-[var(--radius-sm)] border border-danger/40 bg-danger/10 px-3 py-2 text-sm" style:color="var(--danger)" role="alert">{error}</p>
     {/if}
 
     {#if events.length}

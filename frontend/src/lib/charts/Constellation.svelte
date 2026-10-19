@@ -51,6 +51,8 @@
   // Counts simulation runs; exposed so tests can prove a settled graph does not re-layout.
   let layoutRuns = $state(0);
   let hovered = $state<number | null>(null);
+  /** The star holding keyboard focus (drawn with its own ring: SVG has no reliable outline). */
+  let focused = $state<number | null>(null);
 
   let sim: Simulation<SimNode, undefined> | null = null;
   let live: SimNode[] = [];
@@ -252,6 +254,7 @@
   });
 
   function dimmed(id: number): boolean {
+    if (id === focused) return false; // the focused star (and its ring) always shows in full
     return selected != null ? id !== selected && !highlightedSet.has(id) : hovered != null && !isConnected(id);
   }
 
@@ -275,8 +278,14 @@
       {/each}
     </svg>
 
-    <svg class="absolute inset-0 size-full" viewBox="0 0 {vb.width} {vb.height}">
-      <!-- edges -->
+    <svg
+      class="absolute inset-0 size-full"
+      viewBox="0 0 {vb.width} {vb.height}"
+      role="group"
+      aria-label="Concept graph: {nodes.length} concepts, {links.length} links. Each star is a button."
+    >
+      <!-- edges (drawn only; the page lists each concept's prerequisites in words) -->
+      <g aria-hidden="true">
       {#each simLinks as l}
         {@const s = posById.get(l.source.id)}
         {@const t = posById.get(l.target.id)}
@@ -296,6 +305,7 @@
           />
         {/if}
       {/each}
+      </g>
 
       <!-- nodes -->
       {#each simNodes as n (n.id)}
@@ -303,15 +313,35 @@
         {@const c = VERDICT_COLOR[n.verdict]}
         <g
           transform="translate({n.x},{n.y})"
-          class="cursor-pointer transition-opacity"
+          class="cursor-pointer transition-opacity outline-none motion-reduce:transition-none"
           style:opacity={dimmed(n.id) ? 0.3 : 1}
           role="button"
           tabindex="0"
-          aria-label={n.name}
+          aria-label="{n.name}: {VERDICT_LABEL[n.verdict]}{n.loadBearing ? ', load-bearing' : ''}"
+          aria-pressed={n.id === selected}
+          data-node-id={n.id}
           onmouseenter={() => (hovered = n.id)}
           onmouseleave={() => (hovered = null)}
+          onfocus={(e) => {
+            // Keyboard focus shows what the pointer would: the label and the star's links.
+            if ((e.currentTarget as Element).matches(':focus-visible')) {
+              focused = n.id;
+              hovered = n.id;
+            }
+          }}
+          onblur={() => {
+            if (focused === n.id) {
+              focused = null;
+              if (hovered === n.id) hovered = null;
+            }
+          }}
           onclick={() => onselect(n.id)}
-          onkeydown={(e) => e.key === 'Enter' && onselect(n.id)}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onselect(n.id);
+            }
+          }}
         >
           <title>{n.name}</title>
           <!-- glow (decorative: never steals the pointer from a neighbouring star) -->
@@ -325,12 +355,24 @@
           {#if n.loadBearing}
             <circle r={r + 3.5} fill="none" stroke={c} stroke-width="1" opacity="0.6" pointer-events="none" />
           {/if}
+          {#if focused === n.id}
+            <circle
+              data-testid="constellation-focus-ring"
+              r={r + 9}
+              fill="none"
+              stroke="var(--fg)"
+              stroke-width="2"
+              stroke-dasharray="3 2.5"
+              pointer-events="none"
+            />
+          {/if}
         </g>
       {/each}
 
       <!-- labels: their own layer, above every star, placed to stay inside the box. They never
            take the pointer (a label can sit over a neighbouring star), so a truncated name's full
            text comes from its star's <title> and aria-label. -->
+      <g aria-hidden="true">
       {#each labels as l (l.id)}
         <text
           data-testid="constellation-label"
@@ -345,6 +387,7 @@
           style="font-family: var(--font-sans); paint-order: stroke; stroke: var(--bg); stroke-width: 3px;"
         >{l.text}</text>
       {/each}
+      </g>
     </svg>
 
     {#if !nodes.length}

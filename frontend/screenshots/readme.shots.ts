@@ -147,8 +147,10 @@ test('README screenshots', async ({ page }) => {
   await settle(page);
   const graph = page.locator('[data-settled]');
   await expect(graph).toHaveAttribute('data-settled', 'true', { timeout: 30_000 });
-  await page.getByRole('button', { name: 'Causal Self-Attention', exact: true }).click();
-  await expect(page.getByText(/prerequisite ancestors? highlighted/)).toBeVisible();
+  // A star's accessible name is "<concept>: <verdict>"; target the star, not the list entry.
+  await page.locator('g[role="button"][aria-label^="Causal Self-Attention:"]').click();
+  // Also announced in a screen-reader live region, so match the visible copy.
+  await expect(page.getByText(/prerequisite ancestors? highlighted/).first()).toBeVisible();
   await expect(graph).toHaveAttribute('data-settled', 'true');
   await shoot(page, 'constellation');
 

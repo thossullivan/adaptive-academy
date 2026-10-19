@@ -115,10 +115,12 @@ def seed() -> None:
             session.add(KnowledgeEstimate(concept_id=concept.id, level="medium"))
             concepts.append(concept)
 
-        for src, dst in EDGES:
+        # The app reads an edge as "src requires dst" (engine/graph.py), so the dependent is
+        # the source.
+        for prereq, dependent in EDGES:
             session.add(ConceptEdge(
-                src_concept_id=concepts[src].id,
-                dst_concept_id=concepts[dst].id,
+                src_concept_id=concepts[dependent].id,
+                dst_concept_id=concepts[prereq].id,
                 kind="prerequisite",
                 origin="researcher",
             ))

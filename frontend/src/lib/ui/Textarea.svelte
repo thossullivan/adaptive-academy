@@ -24,9 +24,9 @@
   {rows}
   bind:value
   class={cn(
-    'w-full resize-y rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3 py-2.5 text-sm leading-relaxed text-fg',
+    'w-full resize-y rounded-[var(--radius-sm)] border border-control-border bg-surface-2 px-3 py-2.5 text-sm leading-relaxed text-fg',
     'placeholder:text-faint transition-colors',
-    'hover:border-border-strong focus:border-accent focus:outline-none',
+    'hover:border-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]',
     'disabled:opacity-50',
     klass
   )}

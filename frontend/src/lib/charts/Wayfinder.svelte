@@ -37,9 +37,20 @@
 
   // Strip light inline markdown (**bold**, *em*, `code`) for clean single-line display.
   const plain = (t: string) => t.replace(/[*`_]/g, '').trim();
+
+  // The course drawing (stars, legs, progress bars) is visual; this says the same in words.
+  const summary = $derived.by(() => {
+    if (!phases.length) return reached ? 'Every waypoint is charted.' : 'No waypoints charted yet.';
+    const charted = phases.filter((p) => p.status === 'traversed').length;
+    const cur = phases.find((p) => p.status === 'current');
+    return (
+      `${phases.length} waypoints, ${charted} charted.` +
+      (cur ? ` You are at phase ${cur.position + 1}: ${cur.title}.` : reached ? ' Every waypoint is charted.' : '')
+    );
+  });
 </script>
 
-<div class="relative overflow-hidden rounded-[var(--radius-lg)] border border-border bg-[radial-gradient(120%_90%_at_50%_110%,color-mix(in_oklab,var(--accent)_9%,transparent),transparent_55%)] px-5 py-8 md:px-8">
+<div data-testid="wayfinder" class="relative overflow-hidden rounded-[var(--radius-lg)] border border-border bg-[radial-gradient(120%_90%_at_50%_110%,color-mix(in_oklab,var(--accent)_9%,transparent),transparent_55%)] px-5 py-8 md:px-8">
   <!-- starfield -->
   <svg class="pointer-events-none absolute inset-0 size-full opacity-40" aria-hidden="true">
     {#each Array(60) as _, i}
@@ -48,9 +59,10 @@
   </svg>
 
   <div class="relative mx-auto max-w-2xl">
+    <p class="sr-only" data-testid="wayfinder-summary">{summary}</p>
     <!-- Cast off (start of the voyage) -->
     <div class="flex gap-4 md:gap-5">
-      <div class="relative flex w-10 shrink-0 flex-col items-center">
+      <div class="relative flex w-10 shrink-0 flex-col items-center" aria-hidden="true">
         <div class="z-10 grid size-10 place-items-center"><span class="size-2.5 rounded-full bg-faint"></span></div>
         <div class="w-px grow" style={phases.length && phases[0].status === 'traversed' ? SOLID : DOTTED}></div>
       </div>
@@ -62,14 +74,15 @@
     {/if}
 
     <!-- Waypoints, ascending (Phase 1 → Phase N) -->
+    <ol aria-label="Waypoints" class:hidden={!phases.length}>
     {#each phases as p, i (p.id)}
       {@const pctDone = p.total ? Math.round((p.done / p.total) * 100) : 0}
-      <div class="relative flex gap-4 md:gap-5">
-        <!-- gutter: star + downward course leg -->
-        <div class="relative flex w-10 shrink-0 flex-col items-center">
+      <li class="relative flex gap-4 md:gap-5">
+        <!-- gutter: star + downward course leg (drawing only; the card says it in words) -->
+        <div class="relative flex w-10 shrink-0 flex-col items-center" aria-hidden="true">
           <div class="relative z-10 grid size-10 place-items-center">
             {#if p.status === 'current'}
-              <span class="absolute inline-flex size-9 animate-ping rounded-full opacity-60" style="background: color-mix(in oklab, var(--accent) 40%, transparent)"></span>
+              <span class="absolute inline-flex size-9 animate-ping rounded-full opacity-60 motion-reduce:animate-none" style="background: color-mix(in oklab, var(--accent) 40%, transparent)"></span>
             {/if}
             <svg viewBox="0 0 24 24" class={p.status === 'current' ? 'relative size-9' : 'relative size-6'}
                  fill={p.status === 'ahead' ? 'none' : starColor(p.status)}
@@ -93,17 +106,18 @@
                   <span class="eyebrow !text-[0.55rem]">Phase {p.position + 1}</span>
                   {#if p.status === 'current'}<Badge tone="accent" dot>you are here</Badge>{/if}
                   {#if p.status === 'traversed'}<Badge tone="success" mono>charted</Badge>{/if}
+                  {#if p.status === 'ahead'}<span class="sr-only">ahead</span>{/if}
                 </div>
                 <!-- The whole title, wrapped: a waypoint's name is the thing you steer by, so never clip it. -->
-                <h3 class="mt-1 text-base text-balance break-words {p.status === 'ahead' ? 'text-fg-dim' : 'text-fg'}" data-testid="waypoint-title">{p.title}</h3>
+                <h2 class="mt-1 text-base text-balance break-words {p.status === 'ahead' ? 'text-fg-dim' : 'text-fg'}" data-testid="waypoint-title">{p.title}</h2>
               </div>
               <div class="flex items-baseline gap-2 md:block md:shrink-0 md:text-right">
-                <div class="nums text-sm text-muted">{p.done}/{p.total}</div>
+                <div class="nums text-sm text-muted"><span class="sr-only">Steps done: </span>{p.done}/{p.total}</div>
                 {#if p.est_hours}<div class="eyebrow !text-[0.55rem]">{p.est_hours}</div>{/if}
               </div>
             </div>
 
-            <div class="mt-3 h-1 overflow-hidden rounded-full bg-surface-3">
+            <div class="mt-3 h-1 overflow-hidden rounded-full bg-surface-3" aria-hidden="true">
               <div class="h-full rounded-full transition-all" style:width="{pctDone}%" style:background={p.status === 'ahead' ? 'var(--faint)' : 'var(--accent)'}></div>
             </div>
 
@@ -116,7 +130,7 @@
 
             {#if p.deliverable}
               <div class="mt-3 flex items-start gap-2 text-xs">
-                <span class="shrink-0 text-accent-dim">⚓ landfall</span>
+                <span class="shrink-0 text-accent">⚓ landfall</span>
                 <Markdown text={p.deliverable.text} class="min-w-0 text-muted" />
               </div>
             {/if}
@@ -128,12 +142,13 @@
             {/if}
           </div>
         </div>
-      </div>
+      </li>
     {/each}
+    </ol>
 
     <!-- North Star — the destination at journey's end -->
     <div class="flex gap-4 md:gap-5">
-      <div class="flex w-10 shrink-0 justify-center">
+      <div class="flex w-10 shrink-0 justify-center" aria-hidden="true">
         <div class="relative grid size-12 place-items-center">
           <div class="absolute inset-0 rounded-full" style="background: radial-gradient(circle, color-mix(in oklab, var(--accent) {reached ? 55 : 38}%, transparent), transparent 70%)"></div>
           <svg viewBox="0 0 24 24" class="relative size-11" fill="var(--accent-bright)">

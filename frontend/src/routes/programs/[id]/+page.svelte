@@ -292,7 +292,7 @@
   {#if loading}
     <p class="text-sm text-muted">Loading…</p>
   {:else if !detail}
-    <p class="text-sm text-danger">Couldn’t load program: {error}</p>
+    <p class="text-sm text-danger" role="alert">Couldn’t load program: {error}</p>
   {:else if detail.milestones.length === 0}
     <Card>
       <p class="mb-4 text-sm text-muted">
@@ -301,7 +301,7 @@
       </p>
       <Button onclick={runResearch} disabled={busy}>{busy ? 'Researching…' : 'Run research'}</Button
       >
-      {#if error}<p class="mt-3 text-sm text-danger">{error}</p>{/if}
+      {#if error}<p class="mt-3 text-sm text-danger" role="alert">{error}</p>{/if}
     </Card>
   {:else}
     {#if inReview}
@@ -313,10 +313,10 @@
           </p>
           <Button onclick={accept} disabled={busy}>{busy ? 'Accepting…' : 'Accept program'}</Button>
         </div>
-        {#if error}<p class="mt-2 text-sm text-danger">{error}</p>{/if}
+        {#if error}<p class="mt-2 text-sm text-danger" role="alert">{error}</p>{/if}
       </Card>
     {/if}
-    {#if !inReview && error}<p class="mt-3 text-sm text-danger">{error}</p>{/if}
+    {#if !inReview && error}<p class="mt-3 text-sm text-danger" role="alert">{error}</p>{/if}
 
     {#if detail.revision_suggested && !detail.has_open_revision}
       <Card class="mt-4">
@@ -482,19 +482,19 @@
                 <input
                   bind:value={probeUrl}
                   placeholder="arXiv URL (e.g. https://arxiv.org/abs/1706.03762)"
-                  class="rounded-[var(--radius-sm)] border border-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none"
+                  class="rounded-[var(--radius-sm)] border border-control-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                 />
                 <div class="text-center text-xs text-muted">or</div>
                 <textarea
                   bind:value={probePaste}
                   rows="3"
                   placeholder="Paste the paper text…"
-                  class="resize-y rounded-[var(--radius-sm)] border border-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none"
+                  class="resize-y rounded-[var(--radius-sm)] border border-control-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                 ></textarea>
                 <input
                   bind:value={probeTitle}
                   placeholder="Title (optional)"
-                  class="rounded-[var(--radius-sm)] border border-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none"
+                  class="rounded-[var(--radius-sm)] border border-control-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
                 />
                 <div>
                   <Button size="sm" onclick={() => startProbe(m)} disabled={busy}>Start probe</Button>

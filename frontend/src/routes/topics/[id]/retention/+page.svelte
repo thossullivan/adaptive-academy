@@ -5,7 +5,7 @@
   import { api } from '$lib/api';
   import type { Retention, DecayItem, DecayGrade } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Textarea } from '$lib/ui';
+  import { Card, Button, Badge, Textarea, LiveStatus } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let data = $state<Retention | null>(null);
@@ -17,13 +17,16 @@
   let responses = $state<Record<number, string>>({});
   let decayResults = $state<Record<number, DecayGrade>>({});
   let gradingDecay = $state<number | null>(null);
+  let status = $state('');
 
   async function gradeDecayItem(promptId: number) {
     const resp = responses[promptId];
     if (!resp?.trim()) return;
     gradingDecay = promptId;
     try {
-      decayResults[promptId] = await api.gradeDecay(promptId, resp);
+      const r = await api.gradeDecay(promptId, resp);
+      decayResults[promptId] = r;
+      status = `Recall ${r.held ? 'held' : 'decayed'}: ${Math.round(r.recall_score * 100)}%. ${r.verdict}`;
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
@@ -55,29 +58,33 @@
   async function grade(id: number, result: string) {
     await api.gradeCard(id, result);
     await load();
+    status = `Card graded ${result}.`;
   }
 </script>
 
+<svelte:head><title>Retention · Adaptive Academy</title></svelte:head>
+
 <Page eyebrow="Retention" title="Spaced recall" lead="Retrieval practice woven into the build — revisit before you forget, not after." width="normal">
+  <LiveStatus message={status} />
   {#if loading}
-    <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">loading cards…</span></div>
+    <div class="grid place-items-center py-24" role="status"><span class="eyebrow animate-pulse">loading cards…</span></div>
   {:else}
     <div class="flex flex-col gap-4">
       {#if decay.length}
         <Card accent pad class="rise">
           <div class="mb-1 flex items-center gap-2">
-            <span class="text-accent">↺</span>
-            <span class="eyebrow !text-accent">Decay checks · {decay.length}</span>
+            <span class="text-accent" aria-hidden="true">↺</span>
+            <h2 class="eyebrow !text-accent">Decay checks · {decay.length}</h2>
           </div>
           <p class="mb-3 text-sm text-muted">Delayed, unassisted recall — does it still hold without the tutor? Answer from memory.</p>
           <div class="flex flex-col gap-3">
             {#each decay as d (d.prompt_id)}
-              <div class="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3.5">
+              <div class="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3.5" role="group" aria-labelledby="decay-prompt-{d.prompt_id}">
                 <div class="flex items-center gap-2">
                   <Badge tone="neutral" mono>{d.concept_name}</Badge>
                   {#if d.last_result}<span class="eyebrow !text-[0.55rem]">last: {d.last_result}</span>{/if}
                 </div>
-                <p class="mt-2 text-sm text-fg-dim">{d.prompt}</p>
+                <p class="mt-2 text-sm text-fg-dim" id="decay-prompt-{d.prompt_id}">{d.prompt}</p>
                 {#if decayResults[d.prompt_id]}
                   {@const r = decayResults[d.prompt_id]}
                   <div class="mt-3 rounded-[var(--radius-sm)] border border-border p-3 text-sm">
@@ -88,7 +95,7 @@
                     <p class="mt-2 text-fg-dim">{r.verdict}</p>
                   </div>
                 {:else}
-                  <Textarea class="mt-2" bind:value={responses[d.prompt_id]} rows={4} placeholder="From memory — no looking…" />
+                  <Textarea class="mt-2" bind:value={responses[d.prompt_id]} rows={4} aria-label="Your answer, from memory" placeholder="From memory — no looking…" />
                   <Button size="sm" class="mt-2" onclick={() => gradeDecayItem(d.prompt_id)} disabled={gradingDecay === d.prompt_id || !responses[d.prompt_id]?.trim()}>
                     {gradingDecay === d.prompt_id ? 'Checking…' : 'Check recall'}
                   </Button>
@@ -102,17 +109,18 @@
       {#if due && due.cards.length}
         <Card accent pad class="rise">
           <div class="mb-3 flex items-center gap-2">
-            <span class="text-accent">◴</span>
-            <span class="eyebrow !text-accent">Due now · {due.cards.length}</span>
+            <span class="text-accent" aria-hidden="true">◴</span>
+            <h2 class="eyebrow !text-accent">Due now · {due.cards.length}</h2>
           </div>
           <div class="flex flex-col gap-3">
             {#each due.cards as c (c.id)}
-              <div class="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3.5">
-                <p class="text-sm font-medium text-fg">{c.front}</p>
+              <div class="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3.5" role="group" aria-labelledby="due-front-{c.id}">
+                <p class="text-sm font-medium text-fg" id="due-front-{c.id}">{c.front}</p>
                 <p class="mt-1 text-sm text-muted">{c.back}</p>
                 <div class="mt-3 flex gap-1.5">
                   {#each ['again', 'hard', 'good', 'easy'] as r}
                     <button
+                      type="button"
                       onclick={() => grade(c.id, r)}
                       class="flex-1 rounded-[var(--radius-sm)] border border-border py-1.5 text-xs font-medium capitalize transition-colors hover:bg-surface-3"
                       style:color={gradeTone[r]}
@@ -131,8 +139,8 @@
           {#if data.cards.length}
             <div class="grid gap-2.5 md:grid-cols-2">
               {#each data.cards as c (c.id)}
-                <div class="flex flex-col gap-2 rounded-[var(--radius-md)] border border-border bg-surface-2 p-3">
-                  <p class="text-sm font-medium text-fg">{c.front}</p>
+                <div class="flex flex-col gap-2 rounded-[var(--radius-md)] border border-border bg-surface-2 p-3" role="group" aria-labelledby="deck-front-{c.id}">
+                  <p class="text-sm font-medium text-fg" id="deck-front-{c.id}">{c.front}</p>
                   <p class="text-sm text-muted">{c.back}</p>
                   <div class="flex items-center gap-1.5">
                     <Badge mono tone={c.status === 'active' ? 'success' : c.status === 'proposed' ? 'accent' : 'neutral'}>{c.status}</Badge>
@@ -144,7 +152,7 @@
                       <Button variant="ghost" size="sm" onclick={() => review(c.id, 'suspended')}>Suspend</Button>
                     {:else if c.status === 'active'}
                       {#each ['again', 'hard', 'good', 'easy'] as r}
-                        <button onclick={() => grade(c.id, r)} class="rounded-[var(--radius-sm)] border border-border px-2.5 py-1 text-xs capitalize transition-colors hover:bg-surface-3" style:color={gradeTone[r]}>{r}</button>
+                        <button type="button" onclick={() => grade(c.id, r)} class="rounded-[var(--radius-sm)] border border-border px-2.5 py-1 text-xs capitalize transition-colors hover:bg-surface-3" style:color={gradeTone[r]}>{r}</button>
                       {/each}
                     {/if}
                   </div>
@@ -161,7 +169,7 @@
             <ul class="flex flex-col gap-1.5">
               {#each data.prompts as p (p.id)}
                 <li class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3 py-2 text-sm text-fg-dim">
-                  <span class="text-accent-dim">?</span>{p.prompt}
+                  <span class="text-accent" aria-hidden="true">?</span>{p.prompt}
                   <Badge mono tone="neutral" class="ml-auto">{p.status}</Badge>
                 </li>
               {/each}

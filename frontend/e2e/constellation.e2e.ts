@@ -146,7 +146,8 @@ test('a truncated label\'s star carries the full concept name', async ({ page })
     expect(l.title!.endsWith('…')).toBe(false);
     expect(l.title!.length).toBeGreaterThan(prefix.length);
     expect(l.title!.startsWith(prefix)).toBe(true);
-    expect(l.ariaLabel).toBe(l.title);
+    // The accessible name is the full name, then the star's verdict (which colour alone shows).
+    expect(l.ariaLabel?.startsWith(`${l.title}: `), `aria-label "${l.ariaLabel}"`).toBe(true);
   }
 });
 

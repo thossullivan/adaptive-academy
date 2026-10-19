@@ -22,10 +22,15 @@
   --surface-3: #222732;
   --border: #2a2f3a;
   --border-strong: #3a404e;
+  /* The edge of a form control (input, select, textarea, toggle): WCAG 1.4.11 wants 3:1
+     against what surrounds it, which the decorative borders above deliberately are not. */
+  --control-border: #666c7a; /* 3.35:1 on surface, 3.14:1 on surface-2 */
   --fg: #e9e7e1;
   --fg-dim: #b7bac2;
-  --muted: #868c98;
-  --faint: #646a76; /* ≥3:1 on surface and surface-2 (#5b616d was 2.65:1) */
+  /* Text tiers: every text colour clears 4.5:1 (WCAG 1.4.3) on bg, surface and surface-2;
+     muted sits a step above faint so the hierarchy survives. */
+  --muted: #9298a4; /* 6.1:1 on surface */
+  --faint: #848a95; /* 5.1:1 on surface, 4.8:1 on surface-2 */
 
   --accent: #e0a83e;
   --accent-bright: #f2bf5d;
@@ -44,9 +49,10 @@
   color-scheme: dark;
 }
 
-/* Light: text tokens clear WCAG AA on bg, surface and surface-2 — fg, muted, accent and the
-   status colours ≥4.5:1, faint ≥3:1, accent-fg on accent ≥4.5:1. "Bright" is the hover /
-   emphasis step, so on light paper it goes darker, not lighter. */
+/* Light: text tokens clear WCAG AA on bg, surface and surface-2 — fg, muted, faint, accent
+   and the status colours ≥4.5:1 (the status colours also on their own badge tints),
+   accent-fg on accent ≥4.5:1, control-border ≥3:1. "Bright" is the hover / emphasis step, so
+   on light paper it goes darker, not lighter. */
 [data-theme='light'] {
   --bg: #f3efe6;
   --bg-glow: #f6e6c4;
@@ -55,21 +61,22 @@
   --surface-3: #ebe5d7;
   --border: #ddd5c5;
   --border-strong: #cabfa8;
+  --control-border: #8a826f; /* 3.3:1 on bg and surface-2, 3.6:1 on surface */
   --fg: #221f19;
   --fg-dim: #45413a;
-  --muted: #6d685c;
-  --faint: #908877;
+  --muted: #5f5a4f; /* 6.5:1 on surface */
+  --faint: #6f695c; /* 5.2:1 on surface, 4.8:1 on surface-2 */
 
-  --accent: #8c641e;
-  --accent-bright: #78581d;
-  --accent-dim: #a3833b;
+  --accent: #7d5818;
+  --accent-bright: #6a4a12;
+  --accent-dim: #a3833b; /* decoration only (fills, strokes), never text */
   --accent-fg: #fffaf0;
   --accent-wash: color-mix(in oklab, var(--accent) 12%, transparent);
 
-  --success: #227a53;
-  --warn: #9c5b1a;
-  --danger: #bb4237;
-  --info: #317197;
+  --success: #1d6b49;
+  --warn: #8a4f16;
+  --danger: #ab3a30;
+  --info: #2c6588;
 
   --ring: color-mix(in oklab, var(--accent) 45%, transparent);
   --shadow: 0 1px 2px rgb(120 100 60 / 0.12), 0 10px 30px -16px rgb(80 60 20 / 0.25);
@@ -84,6 +91,7 @@
   --color-surface-3: var(--surface-3);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
+  --color-control-border: var(--control-border);
   --color-fg: var(--fg);
   --color-fg-dim: var(--fg-dim);
   --color-muted: var(--muted);
@@ -227,5 +235,15 @@
 @media (prefers-reduced-motion: reduce) {
   .rise {
     animation: none;
+  }
+  /* Decorative loops (pulsing labels, the "here" ping, the typing dots) stand still; the
+     spinner keeps turning, slowly, since it is the only sign that work is under way. */
+  .animate-pulse,
+  .animate-ping,
+  .animate-bounce {
+    animation: none;
+  }
+  .animate-spin {
+    animation-duration: 3s !important;
   }
 }

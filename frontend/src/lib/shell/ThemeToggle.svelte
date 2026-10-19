@@ -18,10 +18,11 @@
   }
 </script>
 
+<!-- Touch-sized (40px options) in the phone drawer; compact at md+ so the desktop rail fits. -->
 <div
   role="radiogroup"
   aria-label="Theme"
-  class="flex h-9 items-center gap-0.5 rounded-[var(--radius-sm)] border border-border bg-surface-2 p-0.5"
+  class="flex h-12 items-center gap-0.5 rounded-[var(--radius-sm)] border border-border bg-surface-2 p-0.5 md:h-9"
 >
   {#each THEME_CHOICES as choice, i (choice)}
     {@const checked = theme.choice === choice}
@@ -35,7 +36,7 @@
       onclick={() => theme.set(choice)}
       onkeydown={(e) => onKeydown(e, i)}
       class="flex h-full flex-1 items-center justify-center gap-1.5 rounded-[var(--radius-xs)] px-1.5 text-xs transition-colors {checked
-        ? 'bg-surface text-fg ring-1 ring-border-strong'
+        ? 'bg-surface text-fg ring-1 ring-control-border'
         : 'text-muted hover:text-fg'}"
     >
       <svg viewBox="0 0 16 16" class="size-3.5 shrink-0" fill="none" aria-hidden="true">

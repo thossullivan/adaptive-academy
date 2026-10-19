@@ -4,6 +4,7 @@
   import { api } from '$lib/api';
   import type { RoleplaySession, RoleplayTurnRow } from '$lib/types';
   import { Badge, Button, Card } from '$lib/ui';
+  import { scrollBehavior } from '$lib/utils';
 
   const sid = Number($page.params.sid);
   let session = $state<RoleplaySession | null>(null);
@@ -40,7 +41,7 @@
     error = '';
     notice = '';
     await tick();
-    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: scrollBehavior() });
     // Not sent after all: drop the optimistic line and give the text back to rephrase.
     const withdraw = () => {
       turns = turns.slice(0, before);
@@ -56,7 +57,7 @@
       }
       session = { ...session, status: r.status };
       await tick();
-      scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+      scroller?.scrollTo({ top: scroller.scrollHeight, behavior: scrollBehavior() });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       // A server-side error rolls back both turns, but a transport failure (a proxy timeout,
@@ -121,7 +122,7 @@
       {#if loading}
         <p class="text-sm text-muted">Loading…</p>
       {:else if error && !session}
-        <p class="text-sm text-danger">Couldn’t load session: {error}</p>
+        <p class="text-sm text-danger" role="alert">Couldn’t load session: {error}</p>
       {:else if !turns.length}
         <div class="mt-12 text-center">
           <h2 class="text-2xl text-fg">The examiner is waiting</h2>
@@ -223,7 +224,7 @@
               send();
             }
           }}
-          class="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-[var(--radius-md)] border border-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint transition-colors hover:border-border-strong focus:border-accent focus:outline-none disabled:opacity-50"
+          class="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-[var(--radius-md)] border border-control-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint transition-colors hover:border-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:opacity-50"
         ></textarea>
         <Button
           type="submit"
@@ -236,7 +237,7 @@
           >
         {/if}
       </form>
-      {#if error}<p class="mx-auto mt-2 max-w-3xl text-sm text-danger">{error}</p>{/if}
+      {#if error}<p class="mx-auto mt-2 max-w-3xl text-sm text-danger" role="alert">{error}</p>{/if}
     </div>
   {/if}
 </div>

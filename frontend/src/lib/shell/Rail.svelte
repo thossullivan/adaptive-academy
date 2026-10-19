@@ -37,6 +37,8 @@
   // compact at `md` and up so the whole rail fits a laptop screen, and touch-sized (40px)
   // below it, where only the drawer renders.
   let { class: className = '' }: { class?: string } = $props();
+  // The desktop rail and the drawer's copy are both mounted: keep their ids apart.
+  const uid = $props.id();
 
   const tid = $derived(topics.current?.id ?? null);
 
@@ -138,11 +140,11 @@
   )}
 >
   <!-- Brand -->
-  <a href="/" class="flex items-center gap-2.5 px-1.5">
+  <a href="/" class="flex items-center gap-2.5 px-1.5" aria-label="Adaptive Academy, home (local and private)">
     <span class="relative grid size-7 shrink-0 place-items-center">
       <BrandMark />
     </span>
-    <span class="flex min-w-0 flex-col">
+    <span class="flex min-w-0 flex-col" aria-hidden="true">
       <span class="font-display text-[1.02rem] leading-tight text-fg">Adaptive <span class="text-accent">Academy</span></span>
       <span class="flex items-center gap-1.5">
         <span class="size-1.5 rounded-full bg-success"></span>
@@ -154,7 +156,7 @@
   <TopicSwitcher />
 
   <!-- Nav -->
-  <nav class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:gap-2">
+  <nav aria-label="Main" class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:gap-2">
     {#if primary.length}
       <div class="flex flex-col gap-px">
         {#each primary as item (item.label)}
@@ -182,8 +184,9 @@
       </div>
     {/if}
     {#each sections as section (section.label)}
-      <div class="flex flex-col gap-px">
-        <div class="eyebrow mb-1 px-2.5 !text-[0.6rem] !leading-none max-md:mt-1">{section.label}</div>
+      {@const headId = `${uid}-${section.label.replace(/\W+/g, '-').toLowerCase()}`}
+      <div class="flex flex-col gap-px" role="group" aria-labelledby={headId}>
+        <div id={headId} class="eyebrow mb-1 px-2.5 !text-[0.6rem] !leading-none max-md:mt-1">{section.label}</div>
         {#if section.pair}
           <div class="grid grid-cols-2 gap-px">
             {#each section.items as item (item.label)}
@@ -199,18 +202,18 @@
     {/each}
     {#if tid == null}
       <a href="/topics/new" class="flex h-10 items-center gap-3 rounded-[var(--radius-sm)] px-2.5 text-sm text-accent hover:bg-accent-wash md:h-9">
-        <span class="text-base">＋</span> Create your first topic
+        <span class="text-base" aria-hidden="true">＋</span> Create your first topic
       </a>
     {/if}
   </nav>
 
   <!-- Footer -->
   <div class="flex flex-col gap-px border-t border-border pt-2">
-    <div class="grid grid-cols-2 gap-px">
+    <nav aria-label="Usage and data" class="grid grid-cols-2 gap-px">
       {#each footer as item (item.label)}
         {@render link(item, 'pair')}
       {/each}
-    </div>
+    </nav>
     <ThemeToggle />
   </div>
 </aside>

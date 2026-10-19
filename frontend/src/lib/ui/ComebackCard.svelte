@@ -21,13 +21,13 @@
   {@const eyebrow = tone === 'launch' ? '⛵ Ready to sail' : tone === 'warm' ? '⚑ Becalmed' : '⛵ Catching a breeze'}
   <Card class="rise" {eyebrow}>
     {#if tone === 'launch'}
-      <h3 class="font-display text-lg text-fg">Your voyage is charted.</h3>
+      <h2 class="font-display text-lg text-fg">Your voyage is charted.</h2>
       <p class="mt-1 text-sm text-muted">Take the first step and you're under way — one good move sets the sails.</p>
     {:else if tone === 'warm'}
-      <h3 class="font-display text-lg text-fg">Your voyage is waiting.</h3>
+      <h2 class="font-display text-lg text-fg">Your voyage is waiting.</h2>
       <p class="mt-1 text-sm text-muted">It's been {days} days — no matter. One good move catches the wind again.</p>
     {:else}
-      <h3 class="font-display text-lg text-fg">A breeze on the horizon.</h3>
+      <h2 class="font-display text-lg text-fg">A breeze on the horizon.</h2>
       <p class="mt-1 text-sm text-muted">The sails are stirring after {days} days. Take the helm and you're moving.</p>
     {/if}
     <div class="my-3 rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3 py-2">

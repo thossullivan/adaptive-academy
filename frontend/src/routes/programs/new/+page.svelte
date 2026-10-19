@@ -50,7 +50,7 @@
 <svelte:head><title>New program · Adaptive Academy</title></svelte:head>
 
 <Page
-  eyebrow="Voyages"
+  eyebrow="Programs"
   title="New program"
   width="narrow"
   lead="Describe the substantial goal. Research drafts a milestone map you review before anything is built."
@@ -87,7 +87,7 @@
           <Input bind:value={prior_knowledge} placeholder="undergrad maths, 3 years of Python" disabled={busy} />
         </Field>
       </div>
-      {#if error}<p class="text-sm text-danger">{error}</p>{/if}
+      {#if error}<p class="text-sm text-danger" role="alert">{error}</p>{/if}
       <div class="flex flex-col gap-2">
         <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Button onclick={submit} disabled={busy || setup.blocked} size="lg">

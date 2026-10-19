@@ -89,5 +89,5 @@
       {/each}
     </div>
   {/if}
-  {#if error}<p class="mt-3 text-sm text-danger">{error}</p>{/if}
+  {#if error}<p class="mt-3 text-sm text-danger" role="alert">{error}</p>{/if}
 </Card>

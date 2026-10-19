@@ -1,7 +1,5 @@
-import { mkdirSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { withDemoLock } from './demo-lock';
 
 // One click from an empty home to a realistic demo topic, with no API key (the e2e API runs
 // keyless), and one click to remove it again. The demo is created through the real API in the
@@ -10,33 +8,8 @@ import { expect, test, type Page } from '@playwright/test';
 const DEMO_TITLE = 'Build LLMs from scratch (demo)';
 const isPhone = () => test.info().project.name === 'phone';
 
-// The desktop and phone projects run in parallel against one db, and there is only ever one
-// demo topic: a cross-process lock keeps one project from removing the demo under the other.
-const LOCK = join(tmpdir(), `aa-e2e-demo-${process.env.E2E_API_PORT ?? 18765}.lock`);
-
-async function withDemoLock(fn: () => Promise<void>) {
-  const deadline = Date.now() + 90_000;
-  for (;;) {
-    try {
-      mkdirSync(LOCK);
-      break;
-    } catch {
-      // A lock older than two minutes belongs to a run that died mid-test.
-      try {
-        if (Date.now() - statSync(LOCK).mtimeMs > 120_000) rmSync(LOCK, { recursive: true });
-      } catch {
-        /* released meanwhile */
-      }
-      if (Date.now() > deadline) throw new Error('timed out waiting for the demo lock');
-      await new Promise((r) => setTimeout(r, 250));
-    }
-  }
-  try {
-    await fn();
-  } finally {
-    rmSync(LOCK, { recursive: true, force: true });
-  }
-}
+// The desktop and phone projects (and the a11y spec) share one db and one demo topic: the
+// cross-process demo lock keeps one spec from removing the demo under another.
 
 async function settle(page: Page) {
   await page.waitForLoadState('networkidle');
