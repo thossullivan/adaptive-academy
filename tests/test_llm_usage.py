@@ -17,6 +17,7 @@ from adaptive_academy.llm.researcher_types import SearchBrief
 from adaptive_academy.models import LLMUsage
 
 MODEL = "claude-sonnet-4-6"
+_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}
 
 
 def _usage(**kw):
@@ -103,7 +104,7 @@ def test_complete_json_records_usage_row(session, api_key, no_budget, monkeypatc
     client = AnthropicLLMClient(role="copy")
     client._model = MODEL
     out = client.complete_json("sys", [{"role": "user", "content": "x"}],
-                               schema={"type": "object"}, tool_name="emit")
+                               schema=_SCHEMA, tool_name="emit")
     assert out == {"ok": True}
 
     [row] = _rows(session)
@@ -113,15 +114,16 @@ def test_complete_json_records_usage_row(session, api_key, no_budget, monkeypatc
 
 
 def test_complete_json_records_even_when_parse_fails(session, api_key, no_budget, monkeypatch):
-    # The call was billed even though no tool_use came back — it must still be counted.
+    # Billed even though no tool_use came back — each call must still be counted. A text-only
+    # reply gets one corrective retry, so two billed calls → two rows.
     from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
 
     _fake_anthropic(monkeypatch, "anthropic_client", _text_response())
     client = AnthropicLLMClient()
     with pytest.raises(ValueError):
         client.complete_json("sys", [{"role": "user", "content": "x"}],
-                             schema={"type": "object"}, tool_name="emit")
-    assert len(_rows(session)) == 1
+                             schema=_SCHEMA, tool_name="emit")
+    assert len(_rows(session)) == 2
 
 
 def test_researcher_records_web_search_requests(session, api_key, no_budget, monkeypatch):
@@ -409,7 +411,7 @@ def test_at_or_over_the_limit_raises_before_any_call(session, api_key, monkeypat
     assert exc.value.limit_usd == pytest.approx(1.0)
     with pytest.raises(usage.BudgetExceededError):
         client.complete_json("s", [{"role": "user", "content": "x"}],
-                             schema={"type": "object"}, tool_name="emit")
+                             schema=_SCHEMA, tool_name="emit")
     with pytest.raises(usage.BudgetExceededError):
         AnthropicResearcherClient().search(SearchBrief(angle="a", query="q"))
     assert calls == []  # nothing reached the (fake) network

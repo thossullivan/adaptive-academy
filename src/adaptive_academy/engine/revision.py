@@ -113,7 +113,28 @@ REVISION_SCHEMA: dict = {
                     "kind": {"type": "string", "enum": [
                         "add_topic", "add_milestone", "revise_milestone",
                         "prune_topic", "prune_milestone"]},
-                    "payload": {"type": "object"},
+                    # Every field any change kind uses (see PROGRAM_REVISION and
+                    # validate_change); each kind fills only its own. Declared rather than an
+                    # open object: strict tool use would force an open object to be `{}`.
+                    "payload": {
+                        "type": "object",
+                        "properties": {
+                            "milestone_id": {"type": "integer"},
+                            "link_id": {"type": "integer"},
+                            "after_milestone_id": {
+                                "anyOf": [{"type": "integer"}, {"type": "null"}]},
+                            "title": {"type": "string"},
+                            "success_criteria": {"type": "string"},
+                            "topics": {"type": "array", "items": {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string"},
+                                    "why": {"type": "string"},
+                                },
+                                "required": ["title"],
+                            }},
+                        },
+                    },
                     "why": {"type": "string"},
                     "source_urls": {"type": "array", "items": {"type": "string"}},
                 },

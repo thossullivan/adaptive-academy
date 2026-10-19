@@ -1,21 +1,48 @@
 from typing import Any
 
+import pydantic
 from anthropic import Anthropic
 
 from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
+from adaptive_academy.llm.strict_schema import to_strict_schema
 from adaptive_academy.llm.types import LLMResponse, ToolCall
 from adaptive_academy.llm.usage import BACKEND_ANTHROPIC, check_budget, record_usage
+from adaptive_academy.prompts import STRUCTURED_TOOL_INSTRUCTION, STRUCTURED_TOOL_RETRY
+
+# Stop reasons a corrective retry can't fix: the same request would truncate or be declined
+# again, so fail fast instead of paying for a second call.
+_NO_RETRY_STOP_REASONS = ("max_tokens", "refusal", "model_context_window_exceeded")
+
+
+def content_block_to_param(block: Any) -> dict[str, Any]:
+    """One response content block as a request param, unchanged.
+
+    Mirrors how the SDK serialises a response block passed back in `messages` (only the fields
+    the API actually sent, JSON mode, API names), so thinking blocks keep their signature and
+    their (possibly empty) text exactly as received.
+    """
+    if isinstance(block, pydantic.BaseModel):
+        return block.model_dump(exclude_unset=True, mode="json", by_alias=True)
+    if isinstance(block, dict):
+        return dict(block)
+    return dict(vars(block))
 
 
 class AnthropicLLMClient:
-    """Sync, non-streaming Anthropic client implementing the LLMClient protocol."""
+    """Sync, non-streaming Anthropic client implementing the LLMClient protocol.
 
-    def __init__(self, role: str = "reasoning", max_tokens: int = 16384):
-        # 16384, not 8192/1024: structured outputs (esp. a full curriculum track) overflowed
-        # the old ceilings and truncated mid-JSON → "malformed JSON" 502s. The curriculum prompt
-        # also bounds scope (6-12 phases), but billing is per output token generated, not per
-        # max_tokens, so a high ceiling is free insurance against truncation.
+    Works unchanged on claude-sonnet-5-5 / claude-haiku-5-5 (the defaults) and on the older
+    claude-sonnet-4-6 / claude-haiku-4-5: no sampling params, no prefill, no `thinking` field
+    (each model runs its default — adaptive on the 5.5 models), no forced tool_choice, and
+    responses are read by block type so `thinking` blocks are skipped.
+    """
+
+    def __init__(self, role: str = "reasoning", max_tokens: int = 20_000):
+        # max_tokens covers thinking + text on models that think by default (Sonnet/Haiku 5.5),
+        # and thinking tokens bill as output only when generated — the ceiling itself is free
+        # insurance against a structured answer (e.g. a full curriculum track) being cut off
+        # mid-JSON. 20k stays under the SDK's non-streaming limit (~21.3k, the 10-minute rule).
         self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3)
         self._role = role
         self._model = get_model(role)
@@ -44,11 +71,18 @@ class AnthropicLLMClient:
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for block in resp.content:
+            # By type, never by position: thinking blocks (and, on Sonnet 5.5, progress
+            # updates between tool calls) arrive as `thinking` and are not reply text.
             if block.type == "text":
                 text_parts.append(block.text)
             elif block.type == "tool_use":
                 tool_calls.append(ToolCall(id=block.id, name=block.name, input=block.input))
-        return LLMResponse(text="".join(text_parts), tool_calls=tool_calls)
+        return LLMResponse(
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            raw_content=[content_block_to_param(b) for b in resp.content],
+            stop_reason=getattr(resp, "stop_reason", None),
+        )
 
     def complete_json(
         self,
@@ -58,23 +92,43 @@ class AnthropicLLMClient:
         schema: dict[str, Any],
         tool_name: str,
     ) -> dict[str, Any]:
-        """Forced tool use → guaranteed schema-shaped JSON (no fences, preamble, or shape drift)."""
+        """Strict tool use → schema-valid JSON (no fences, preamble, or shape drift).
+
+        Forced tool_choice is a 400 on Claude Sonnet 5.5, so this uses tool_choice=auto with
+        a `strict: true` tool (supported on every model this app configures) and tells the
+        model to answer through the tool. `auto` lets the model reply in text instead; that
+        gets one corrective retry (a second, separately recorded call), then a ValueError.
+        """
         tool = {
             "name": tool_name,
             "description": "Emit the result as structured data matching the schema.",
-            "input_schema": schema,
+            "input_schema": to_strict_schema(schema),
+            "strict": True,
         }
-        check_budget()
-        resp = self._client.messages.create(
-            model=self._model,
-            max_tokens=self._max_tokens,
-            system=system,
-            messages=messages,
-            tools=[tool],
-            tool_choice={"type": "tool", "name": tool_name},
-        )
-        self._record(resp, "complete_json")
-        for block in resp.content:
-            if block.type == "tool_use" and block.name == tool_name:
-                return block.input
+        request = {
+            "model": self._model,
+            "max_tokens": self._max_tokens,
+            "system": f"{system}\n\n{STRUCTURED_TOOL_INSTRUCTION.format(tool_name=tool_name)}",
+            "tools": [tool],
+            "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
+        }
+        attempts = [
+            list(messages),
+            # Append-only correction: a new user turn, never an edit of earlier history.
+            [*messages, {"role": "user",
+                         "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}],
+        ]
+        for attempt in attempts:
+            check_budget()
+            resp = self._client.messages.create(messages=attempt, **request)
+            self._record(resp, "complete_json")
+            stop_reason = getattr(resp, "stop_reason", None)
+            if stop_reason in _NO_RETRY_STOP_REASONS:
+                raise ValueError(
+                    f"structured completion stopped with stop_reason={stop_reason} "
+                    "before a complete tool call"
+                )
+            for block in resp.content:
+                if block.type == "tool_use" and block.name == tool_name:
+                    return block.input
         raise ValueError("structured completion returned no tool use")

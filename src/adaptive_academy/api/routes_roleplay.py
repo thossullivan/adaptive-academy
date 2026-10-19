@@ -91,7 +91,7 @@ def post_turn(sid: int, body: RoleplayTurnIn, session: Session = Depends(get_ses
         llm=llm,
         retriever=retriever,
     )
-    return RoleplayTurnOut(reply=res.reply, status=res.status)
+    return RoleplayTurnOut(reply=res.reply, status=res.status, recorded=res.recorded)
 
 
 @router.post("/api/roleplay/{sid}/end", response_model=RoleplaySessionOut)
