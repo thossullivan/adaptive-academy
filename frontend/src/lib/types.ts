@@ -14,7 +14,12 @@ export interface GraphLink {
 }
 export interface ConceptGraph { nodes: Concept[]; edges: GraphEdge[]; }
 export type GraphAncestor = [conceptId: number, depth: number];
-export interface Topic { id: number; title: string; concepts: Concept[]; intent?: Intent | null; }
+export interface Topic {
+  id: number; title: string; concepts: Concept[]; intent?: Intent | null;
+  /** The one-click example topic (POST /api/demo); removable as a unit. */
+  is_demo?: boolean;
+}
+export interface DemoCreated { topic_id: number; created: boolean; }
 export interface EventOut { kind: string; detail: string; }
 export interface MemoryHit {
   chunk_id: number;

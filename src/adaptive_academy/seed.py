@@ -1,32 +1,20 @@
-from sqlmodel import Session, select
+"""`aa seed` / `just seed`: add the demo topic (see adaptive_academy/demo.py). Idempotent."""
+
+from sqlalchemy import Engine
+from sqlmodel import Session
 
 from adaptive_academy.db import create_db_and_tables, engine
-from adaptive_academy.models import Concept, KnowledgeEstimate, Topic, Track
-
-_CONCEPTS = [
-    ("self-attention", True),
-    ("backpropagation", True),
-    ("tokenization (BPE)", True),
-    ("LoRA / low-rank adaptation", False),
-]
+from adaptive_academy.demo import ensure_demo
 
 
-def seed() -> None:
-    create_db_and_tables()
-    with Session(engine) as session:
-        if session.exec(select(Topic)).first():
-            print("Already seeded.")
-            return
-        topic = Topic(title="Build LLMs from scratch")
-        session.add(topic)
-        session.commit()
-        track = Track(topic_id=topic.id, title="Core track")
-        session.add(track)
-        session.commit()
-        for name, load_bearing in _CONCEPTS:
-            concept = Concept(track_id=track.id, name=name, is_load_bearing=load_bearing)
-            session.add(concept)
-            session.commit()
-            session.add(KnowledgeEstimate(concept_id=concept.id, level="high", confidence=0.6))
-        session.commit()
-        print(f"Seeded topic {topic.id} with {len(_CONCEPTS)} concepts.")
+def seed(db_engine: Engine | None = None) -> None:
+    if db_engine is None:
+        create_db_and_tables()
+        db_engine = engine
+    with Session(db_engine) as session:
+        topic, created = ensure_demo(session)
+        if created:
+            print(f"Added the demo topic {topic.id}: {topic.title!r}. "
+                  "Remove it from its dashboard, or with DELETE /api/demo.")
+        else:
+            print(f"Demo topic already present ({topic.id}).")

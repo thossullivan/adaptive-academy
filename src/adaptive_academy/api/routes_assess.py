@@ -11,12 +11,17 @@ from adaptive_academy.models import (
     AgentEvent,
     Assessment,
     Concept,
+    KnowledgeEstimate,
     Milestone,
     ProgramTopicLink,
     Track,
 )
 
 router = APIRouter(prefix="/api/concepts", tags=["assess"])
+
+# Assessment kinds whose engines (teach.py, productive_failure.py) never write the concept's
+# KnowledgeEstimate.
+_NON_GRADING_KINDS = {"teach", "productive_failure"}
 
 
 def _assessment_out(a: Assessment, level: str | None = None) -> AssessmentOut:
@@ -99,7 +104,17 @@ def list_assessments(concept_id: int, session: Session = Depends(get_session)) -
     rows = session.exec(
         select(Assessment).where(Assessment.concept_id == concept_id)
         .order_by(Assessment.id.desc())).all()
-    return [_assessment_out(a) for a in rows]
+    # The competence grade is the concept's STORED estimate (written by the Assessor), carried
+    # on the newest row only; it is never recomputed from a row's own score. Teaching and
+    # productive-failure attempts never write the estimate, so a concept with only those rows
+    # still holds just the curriculum's prior, which is not a grade.
+    level = None
+    if any(a.kind not in _NON_GRADING_KINDS for a in rows):
+        estimate = session.exec(
+            select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept_id)
+        ).first()
+        level = estimate.level if estimate else None
+    return [_assessment_out(a, level if i == 0 else None) for i, a in enumerate(rows)]
 
 
 @router.get("/{concept_id}/rubric", response_model=RubricOut)

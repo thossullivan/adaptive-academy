@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { toasts } from '$lib/toast.svelte';
   import { api } from '$lib/api';
   import type { Retention, DecayItem, DecayGrade } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
@@ -23,6 +24,8 @@
     gradingDecay = promptId;
     try {
       decayResults[promptId] = await api.gradeDecay(promptId, resp);
+    } catch (e) {
+      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
       gradingDecay = null;
     }
@@ -39,6 +42,8 @@
     data = await api.listRetention(topicId);
     due = await api.listRetention(topicId, { due: true });
     decay = (await api.listDecay(topicId).catch(() => ({ items: [] }))).items;
+    // bind:value needs a defined string for every textarea (its fallback can't take undefined).
+    for (const d of decay) responses[d.prompt_id] ??= '';
     loading = false;
   }
   onMount(load);

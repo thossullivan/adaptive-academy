@@ -164,7 +164,7 @@ cd frontend && npm ci && cd ..
 Optional extras:
 
 ```bash
-just seed               # drop in a starter "Build LLMs from scratch" topic
+just seed               # add the demo topic (a few weeks of example use; removable)
 just setup --memory     # or `uv sync --extra memory`: sqlite-vec + fastembed for hybrid (BM25 + vector) retrieval
 ```
 
@@ -180,9 +180,10 @@ follows. Prefer two terminals? `just api` (FastAPI on http://localhost:8000) and
 > Set `AA_EMBEDDING_ALLOW_DOWNLOAD=false` on strict offline hosts to require a cached model.
 > A plain `just setup` (or `uv sync`) removes the extra again; re-run with `--memory`.
 
-> **`just seed` is optional** — it seeds one starter topic so there's something to explore
-> immediately. Otherwise you start from an empty state and create your own **Program** (a
-> researched milestone map) or topic from the app — that's the real entry point.
+> **`just seed` is optional** — it adds the demo topic (the same one as "Explore a demo
+> topic" on the empty home page), so there's something to explore without an API key. Remove
+> it from its dashboard when you're done. The real entry point is creating your own
+> **Program** (a researched milestone map) or topic from the app.
 
 > **Tip:** start the API via `just dev` or `just api` (both load `.env`). Running
 > `uv run uvicorn …` directly skips `.env`, so `ANTHROPIC_API_KEY` is missing and any

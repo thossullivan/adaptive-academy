@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { toasts } from '$lib/toast.svelte';
   import { api } from '$lib/api';
   import type { Concept, Assessment, TeachResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
@@ -47,6 +48,8 @@
     try {
       result = await api.gradeTeaching(conceptId, explanation);
       taught = new Set([...taught, conceptId]);
+    } catch (e) {
+      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
       busy = false;
     }

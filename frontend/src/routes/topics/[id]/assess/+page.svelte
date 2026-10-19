@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { toasts } from '$lib/toast.svelte';
   import { api } from '$lib/api';
   import type { Curriculum, Assessment } from '$lib/types';
   import { pct } from '$lib/utils';
@@ -61,6 +62,8 @@
     try {
       const r = await api.remediate(conceptId);
       remediatedCount = r.items.length;
+    } catch (e) {
+      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
       remediating = false;
     }
@@ -76,6 +79,8 @@
         response,
         confidence_predicted: kind === 'calibration' ? confidence / 100 : null
       });
+    } catch (e) {
+      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
       busy = false;
     }
