@@ -168,7 +168,7 @@ def comeback_move(
             for it in items:
                 if it.status != "done":
                     return ComebackMove(
-                        kind=it.type, label=it.text[:120],
+                        kind=it.type, label=it.text,
                         href=f"/topics/{topic_id}/track", minutes=25)
     return ComebackMove(
         kind="self_explain",

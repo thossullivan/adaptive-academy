@@ -162,7 +162,7 @@
       type="button"
       aria-label="Close navigation"
       onclick={() => hide()}
-      class="absolute right-2.5 top-4 grid size-9 place-items-center rounded-[var(--radius-sm)] text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+      class="absolute right-2 top-3.5 grid size-10 place-items-center rounded-[var(--radius-sm)] text-muted transition-colors hover:bg-surface-2 hover:text-fg"
     >
       <svg viewBox="0 0 20 20" class="size-4" fill="none" aria-hidden="true">
         <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />

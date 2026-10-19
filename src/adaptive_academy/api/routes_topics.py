@@ -232,7 +232,7 @@ def list_events(
         .where(AgentEvent.topic_id == topic_id)
         .order_by(AgentEvent.id)
     ).all()
-    return [EventOut(kind=e.kind, detail=e.detail) for e in rows]
+    return [EventOut(kind=e.kind, detail=e.detail, created_at=e.created_at) for e in rows]
 
 
 @router.get("/{topic_id}/sources", response_model=list[SourceDocOut])
@@ -461,17 +461,21 @@ def import_curriculum(
     return _curriculum_out(session, track)
 
 
-@router.get("/{topic_id}/program-context", response_model=ProgramContextOut)
+@router.get("/{topic_id}/program-context", response_model=Optional[ProgramContextOut])
 def get_program_context(topic_id: int, session: Session = Depends(get_session)):
+    # A standalone topic is the normal case, not an error: answer 200 with a null body so
+    # every topic page can ask without logging a 404. Only an unknown topic id is a 404.
+    if session.get(Topic, topic_id) is None:
+        raise HTTPException(404, "topic not found")
     link = session.exec(
         select(ProgramTopicLink).where(ProgramTopicLink.topic_id == topic_id)
     ).first()
     if link is None:
-        raise HTTPException(404, "topic is not part of a program")
+        return None
     milestone = session.get(Milestone, link.milestone_id)
     program = session.get(Program, milestone.program_id) if milestone else None
     if milestone is None or program is None:
-        raise HTTPException(404, "topic is not part of a program")
+        return None
     # Archived milestones are excluded from gates (spec §4.3): milestone_gate WRITES
     # gate_status and can emit program:gate_passed on a transition, so an archived
     # milestone must never reach it — use the read-only evidence view instead, which

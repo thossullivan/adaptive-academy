@@ -47,7 +47,7 @@
   {#if loading}
     <p class="text-sm text-muted">Loading…</p>
   {:else if error && !probe}
-    <p class="text-sm text-danger">Couldn’t load probe: {error}</p>
+    <p class="text-sm text-danger" role="alert">Couldn’t load probe: {error}</p>
   {:else if probe}
     <header class="mb-6 flex flex-wrap items-start gap-3">
       <div class="min-w-0 flex-1">
@@ -71,7 +71,7 @@
               bind:value={answers[q.index]}
               rows="4"
               placeholder="Your answer — generate your own critique before submitting…"
-              class="w-full resize-y rounded-[var(--radius-md)] border border-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint focus:border-accent focus:outline-none"
+              class="w-full resize-y rounded-[var(--radius-md)] border border-control-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
             ></textarea>
           </Card>
         {/each}
@@ -83,7 +83,7 @@
             <span class="text-xs text-muted">{unanswered(probe.questions, answers)} unanswered</span>
           {/if}
         </div>
-        {#if error}<p class="text-sm text-danger">{error}</p>{/if}
+        {#if error}<p class="text-sm text-danger" role="alert">{error}</p>{/if}
       </div>
     {:else}
       <Card>

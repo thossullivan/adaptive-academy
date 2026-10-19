@@ -36,6 +36,13 @@ export function levelColor(level: string | null | undefined): string {
   }
 }
 
+/** 'smooth' scrolling, or an instant jump when the user asks for reduced motion. */
+export function scrollBehavior(): ScrollBehavior {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    ? 'auto'
+    : 'smooth';
+}
+
 /** Clamp a number into [min, max]. */
 export function clamp(n: number, min = 0, max = 1): number {
   return Math.min(max, Math.max(min, n));

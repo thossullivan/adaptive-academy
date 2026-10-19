@@ -36,6 +36,15 @@ class TopicStore {
     }
   }
 
+  /** Build (or reuse) the demo topic and make it current. Returns its id. */
+  async openDemo(): Promise<number> {
+    const { topic_id } = await api.createDemo();
+    // Select first: the list then arrives with the demo already current (one dashboard load).
+    this.select(topic_id);
+    await this.refresh();
+    return topic_id;
+  }
+
   /** Re-fetch the list (e.g. after creating a topic) without losing selection. */
   async refresh() {
     this.list = await api.listTopics();

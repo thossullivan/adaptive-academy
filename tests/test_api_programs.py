@@ -156,9 +156,14 @@ def test_gate_endpoint_and_program_context(session):
     assert ctx.json()["gate_status"] == "passed"
     assert ctx.json()["unverified"] == []
 
-    # a topic outside any program has no context
+    # a topic outside any program is normal, not an error: 200 with a null body
     lone = client.post("/api/topics", json={"title": "lone", "goal": "g"}).json()["id"]
-    assert client.get(f"/api/topics/{lone}/program-context").status_code == 404
+    r = client.get(f"/api/topics/{lone}/program-context")
+    assert r.status_code == 200
+    assert r.json() is None
+
+    # only a nonexistent topic id is a 404
+    assert client.get("/api/topics/999999/program-context").status_code == 404
 
 
 def test_curriculum_import_survives_program_aliases(session):
@@ -237,8 +242,8 @@ def test_curriculum_import_survives_program_aliases(session):
     ) == len(old_concept_ids)
 
 
-def test_program_context_orphaned_link_is_404(session):
-    """A link whose milestone row is missing must 404, not 500. This state can't arise
+def test_program_context_orphaned_link_is_null(session):
+    """A link whose milestone row is missing reads as "no program" (200 + null), not a 500. This state can't arise
     through normal ORM writes under foreign_keys=ON (milestone_id is FK-protected), but
     the defensive check still earns its keep against out-of-band data — toggle the
     pragma off just long enough to construct the orphaned fixture row."""
@@ -253,4 +258,6 @@ def test_program_context_orphaned_link_is_404(session):
                                  proposed_title="orphan"))
     session.commit()
     session.execute(text("PRAGMA foreign_keys=ON"))
-    assert client.get(f"/api/topics/{tid}/program-context").status_code == 404
+    r = client.get(f"/api/topics/{tid}/program-context")
+    assert r.status_code == 200
+    assert r.json() is None

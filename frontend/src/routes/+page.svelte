@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { topics } from '$lib/topics.svelte';
   import { setup } from '$lib/setup.svelte';
@@ -173,16 +173,27 @@
     demoBusy = true;
     demoError = '';
     try {
-      const { topic_id } = await api.createDemo();
-      // Select first: the list then arrives with the demo already current (one dashboard load).
-      topics.select(topic_id);
-      await topics.refresh();
+      await topics.openDemo();
       await goto('/');
     } catch (e) {
       demoError = `Couldn't load the demo: ${e instanceof Error ? e.message : String(e)}`;
     } finally {
       demoBusy = false;
     }
+  }
+
+  // The confirm step swaps buttons under the keyboard user's focus: move focus to the safe
+  // choice (Cancel) when it appears, and back to "Remove demo" when it goes away.
+  let demoActions: HTMLDivElement | null = $state(null);
+  async function askRemove() {
+    confirmRemove = true;
+    await tick();
+    demoActions?.querySelector<HTMLElement>('[data-demo-cancel]')?.focus();
+  }
+  async function cancelRemove() {
+    confirmRemove = false;
+    await tick();
+    demoActions?.querySelector<HTMLElement>('[data-demo-remove]')?.focus();
   }
 
   async function removeDemo() {
@@ -197,6 +208,13 @@
       await topics.refresh();
       confirmRemove = false;
       await goto('/');
+      // The demo's panel is gone; land on the page heading of what replaced it.
+      await tick();
+      const h1 = document.querySelector<HTMLElement>('main h1');
+      if (h1) {
+        h1.tabIndex = -1;
+        h1.focus();
+      }
     } catch (e) {
       demoError = `Couldn't remove the demo: ${e instanceof Error ? e.message : String(e)}`;
     } finally {
@@ -225,6 +243,8 @@
   );
 </script>
 
+<svelte:head><title>Dashboard · Adaptive Academy</title></svelte:head>
+
 {#snippet demoBadge()}
   <span data-testid="page-demo-badge"><Badge tone="info" dot>Demo</Badge></span>
 {/snippet}
@@ -234,7 +254,7 @@
   <div class="grid min-h-[calc(100dvh-3.5rem)] grid-cols-[minmax(0,1fr)] place-items-center px-6 py-10 md:min-h-screen">
     <div class="w-full max-w-2xl text-center rise">
       <div class="mx-auto mb-6 grid size-16 place-items-center rounded-full border border-border bg-surface">
-        <svg viewBox="0 0 32 32" class="size-9">
+        <svg viewBox="0 0 32 32" class="size-9" aria-hidden="true">
           <circle cx="16" cy="16" r="13" fill="none" stroke="var(--border-strong)" stroke-width="1.5" />
           <circle cx="16" cy="16" r="4.5" fill="var(--accent)" />
         </svg>
@@ -291,17 +311,30 @@
             <span class="font-medium text-fg">This is a demo topic</span> — example data from a few weeks of use, so you
             can see what each page does. Browsing it needs no API key; running the agents does.
           </p>
-          {#if confirmRemove}
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-sm text-fg">Remove the demo topic and everything in it?</span>
-              <Button size="sm" variant="danger" onclick={removeDemo} disabled={removing}>
-                {removing ? 'Removing…' : 'Yes, remove it'}
-              </Button>
-              <Button size="sm" variant="ghost" onclick={() => (confirmRemove = false)} disabled={removing}>Cancel</Button>
-            </div>
-          {:else}
-            <Button size="sm" variant="outline" onclick={() => (confirmRemove = true)}>Remove demo</Button>
-          {/if}
+          <div class="contents" bind:this={demoActions}>
+            {#if confirmRemove}
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+              <div
+                class="flex flex-wrap items-center gap-2"
+                role="group"
+                aria-labelledby="demo-remove-question"
+                onkeydown={(e) => {
+                  if (e.key === 'Escape' && !removing) {
+                    e.preventDefault();
+                    cancelRemove();
+                  }
+                }}
+              >
+                <span id="demo-remove-question" class="text-sm text-fg">Remove the demo topic and everything in it?</span>
+                <Button size="sm" variant="danger" onclick={removeDemo} disabled={removing}>
+                  {removing ? 'Removing…' : 'Yes, remove it'}
+                </Button>
+                <Button size="sm" variant="ghost" onclick={cancelRemove} disabled={removing} data-demo-cancel>Cancel</Button>
+              </div>
+            {:else}
+              <Button size="sm" variant="outline" onclick={askRemove} data-demo-remove>Remove demo</Button>
+            {/if}
+          </div>
         </div>
         {#if demoError}<p class="mt-2 text-xs text-danger" role="alert">{demoError}</p>{/if}
       </Card>
@@ -323,7 +356,7 @@
     {/if}
 
     {#if loading}
-      <div class="grid place-items-center py-24 text-muted">
+      <div class="grid place-items-center py-24 text-muted" role="status">
         <span class="eyebrow animate-pulse">gathering signals…</span>
       </div>
     {:else if !hasCurriculum}
@@ -384,9 +417,9 @@
             <ProgressRing value={itemsTotal ? itemsDone / itemsTotal : 0} size={92} stroke={8} label="{overallPct}%" sublabel="complete" />
             <ul class="w-full flex-col gap-1.5">
               {#each phaseProg as p, i}
-                <li class="flex items-center gap-2 py-0.5 text-xs">
-                  <span class="nums w-4 text-faint">{i + 1}</span>
-                  <span class="flex-1 truncate text-fg-dim">{p.title}</span>
+                <li class="flex items-baseline gap-2 py-0.5 text-xs">
+                  <span class="nums w-4 shrink-0 text-faint">{i + 1}</span>
+                  <span class="line-clamp-2 min-w-0 flex-1 break-words text-fg-dim" title={p.title}>{p.title}</span>
                   <span class="nums text-muted">{p.done}/{p.total}</span>
                 </li>
               {/each}

@@ -20,7 +20,7 @@ export interface Topic {
   is_demo?: boolean;
 }
 export interface DemoCreated { topic_id: number; created: boolean; }
-export interface EventOut { kind: string; detail: string; }
+export interface EventOut { kind: string; detail: string; created_at?: string | null; }
 export interface MemoryHit {
   chunk_id: number;
   kind: string;
@@ -34,6 +34,8 @@ export interface Conversation {
   id: number; concept_id: number; attempt_logged: boolean;
   assistance_level: string; challenge_level: string; messages: MessageOut[];
 }
+/** The header a new tutor session would open with (GET /api/conversations/preview); nothing is saved. */
+export type ConversationPreview = Omit<Conversation, 'id' | 'messages'>;
 export interface SendMessageOut {
   reply: string; attempt_logged: boolean;
   assistance_level: string; challenge_level: string; events: EventOut[]; memory: MemoryHit[];

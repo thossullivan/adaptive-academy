@@ -5,7 +5,7 @@
   import { canShip } from '$lib/ship';
   import type { Curriculum, ShipResult, ProgramContext } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Markdown, Input, Textarea } from '$lib/ui';
+  import { Card, Button, Badge, Markdown, Input, Textarea, LiveStatus } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let cur = $state<Curriculum | null>(null);
@@ -28,6 +28,7 @@
     try {
       const r = await api.shipDeliverable(d.id, url, content);
       shipResult[d.id] = r;
+      liveStatus = `Artifact review: ${Math.round(r.score * 100)}%. ${r.verdict}`;
       // Persist the shipped state on the curriculum so the badge sticks.
       if (cur) {
         for (const p of cur.phases) {
@@ -64,7 +65,11 @@
     const updated = await api.updateItem(itemId, { status: next });
     if (!cur) return;
     for (const p of cur.phases) for (const it of p.items) if (it.id === itemId) it.status = updated.status;
+    liveStatus = `Step marked ${STATUS_WORD[updated.status] ?? updated.status}.`;
   }
+
+  const STATUS_WORD: Record<string, string> = { todo: 'to do', doing: 'in progress', done: 'done' };
+  let liveStatus = $state('');
 
   async function exportMd() {
     const md = await api.exportCurriculumMd(topicId);
@@ -83,12 +88,15 @@
   }
 </script>
 
+<svelte:head><title>Track · Adaptive Academy</title></svelte:head>
+
 <Page eyebrow="Phased track" title={cur?.track.title ?? 'Track'} lead={cur?.track.overview ?? ''} width="normal">
   {#snippet actions()}
     <Button variant="outline" href="/topics/{topicId}/assess">Assess</Button>
     <Button variant="ghost" onclick={exportMd}>Export .md</Button>
   {/snippet}
 
+  <LiveStatus message={liveStatus} />
   {#if programCtx}
     <p class="mb-4 text-xs text-muted">
       Part of <a class="text-accent hover:underline" href={`/programs/${programCtx.program_id}`}>{programCtx.program_title}</a>
@@ -97,7 +105,7 @@
   {/if}
 
   {#if loading}
-    <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">loading track…</span></div>
+    <div class="grid place-items-center py-24" role="status"><span class="eyebrow animate-pulse">loading track…</span></div>
   {:else if !cur}
     <Card accent class="text-center" pad>
       <div class="py-10">
@@ -112,9 +120,10 @@
         <Card class="rise" pad>
           <div class="mb-4 flex items-start justify-between gap-4">
             <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <span class="grid size-7 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-xs text-accent">{idx + 1}</span>
-                <h2 class="truncate text-lg text-fg">{p.title}</h2>
+              <div class="flex items-start gap-2">
+                <span class="grid size-7 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-xs text-accent" aria-hidden="true">{idx + 1}</span>
+                <!-- The whole title, wrapped (never clipped): it names what this phase is for. -->
+                <h2 class="min-w-0 pt-0.5 text-lg leading-snug text-fg text-balance break-words" data-testid="phase-title">{p.title}</h2>
               </div>
               <div class="mt-1.5 flex flex-wrap items-center gap-1.5 pl-9">
                 {#if p.est_hours}<span class="eyebrow">{p.est_hours}</span>{/if}
@@ -133,21 +142,25 @@
                 class="group flex items-center gap-3 rounded-[var(--radius-sm)] px-2 py-2 transition-colors hover:bg-surface-2 {it.is_remediation ? 'border-l-2 border-warn pl-3' : ''}"
               >
                 <button
+                  type="button"
                   onclick={() => toggle(it.id, it.status)}
                   class="grid size-5 shrink-0 place-items-center rounded-[var(--radius-xs)] border transition-colors"
-                  style:border-color={it.status === 'done' ? 'var(--success)' : 'var(--border-strong)'}
+                  style:border-color={it.status === 'done' ? 'var(--success)' : 'var(--control-border)'}
                   style:background={it.status === 'done' ? 'var(--success)' : it.status === 'doing' ? 'var(--accent-wash)' : 'transparent'}
                   title="status: {it.status} (click to advance)"
-                  aria-label="toggle status"
+                  aria-label="Step status: {STATUS_WORD[it.status] ?? it.status}. Mark {STATUS_WORD[cycle[it.status] ?? 'todo']}"
+                  aria-describedby="track-item-{it.id}"
                 >
                   {#if it.status === 'done'}
-                    <svg viewBox="0 0 16 16" class="size-3.5 text-bg" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 8l3.5 3.5L13 5" stroke-linecap="round" stroke-linejoin="round" /></svg>
+                    <svg viewBox="0 0 16 16" class="size-3.5 text-bg" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M3 8l3.5 3.5L13 5" stroke-linecap="round" stroke-linejoin="round" /></svg>
                   {:else if it.status === 'doing'}
-                    <span class="size-2 rounded-full bg-accent"></span>
+                    <span class="size-2 rounded-full bg-accent" aria-hidden="true"></span>
                   {/if}
                 </button>
-                <span class="shrink-0 font-mono text-xs text-faint" title={it.type}>{typeGlyph[it.type] ?? '·'}</span>
-                <Markdown text={it.text} class="min-w-0 flex-1 text-sm {it.status === 'done' ? 'text-faint line-through' : 'text-fg-dim'}" />
+                <span class="shrink-0 font-mono text-xs text-faint" title={it.type}><span aria-hidden="true">{typeGlyph[it.type] ?? '·'}</span><span class="sr-only">{it.type}:</span></span>
+                <span id="track-item-{it.id}" class="min-w-0 flex-1">
+                  <Markdown text={it.text} class="text-sm {it.status === 'done' ? 'text-faint line-through' : 'text-fg-dim'}" />
+                </span>
                 {#if it.is_remediation}<Badge tone="warn" mono>remediation</Badge>{/if}
               </li>
             {/each}
@@ -157,14 +170,14 @@
             {@const d = p.deliverable}
             <div class="mt-3 rounded-[var(--radius-md)] border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-accent-wash p-3.5">
               <div class="flex items-center gap-2">
-                <span class="text-accent">🎯</span>
+                <span class="text-accent" aria-hidden="true">🎯</span>
                 <span class="eyebrow !text-accent">Ship · {p.deliverable.kind}</span>
               </div>
               <p class="mt-1.5 text-sm text-fg"><Markdown text={p.deliverable.text} /></p>
               {#if p.deliverable.acceptance_criteria.length}
                 <ul class="mt-2 flex flex-col gap-1">
                   {#each p.deliverable.acceptance_criteria as c}
-                    <li class="flex items-start gap-2 text-xs text-muted"><span class="shrink-0 text-accent-dim">▸</span><Markdown text={c} /></li>
+                    <li class="flex items-start gap-2 text-xs text-muted"><span class="shrink-0 text-accent" aria-hidden="true">▸</span><Markdown text={c} /></li>
                   {/each}
                 </ul>
               {/if}
@@ -176,18 +189,18 @@
                     <Badge tone="success" dot>⚒ shipped</Badge>
                     {#if d.artifact_url}<a href={d.artifact_url} target="_blank" rel="noreferrer" class="text-accent underline">artifact ↗</a>{/if}
                     <span class="text-muted">{d.review_verdict}</span>
-                    <button class="eyebrow ml-auto transition-colors hover:text-fg-dim" onclick={() => (shipOpen[d.id] = true)}>re-ship</button>
+                    <button type="button" class="eyebrow ml-auto transition-colors hover:text-fg-dim" onclick={() => (shipOpen[d.id] = true)}>re-ship</button>
                   </div>
                 {:else if !shipOpen[d.id]}
                   <Button variant="outline" size="sm" onclick={() => (shipOpen[d.id] = true)}>⚒ Ship it for review</Button>
                 {:else}
                   <div class="flex flex-col gap-2">
-                    <Input bind:value={shipUrl[d.id]} placeholder="Artifact URL (repo / blog / notebook)" />
+                    <Input bind:value={shipUrl[d.id]} aria-label="Artifact URL" placeholder="Artifact URL (repo / blog / notebook)" />
                     <p class="text-xs text-fg-dim">
                       Supported hosts (GitHub, GitLab, arXiv, HuggingFace, Kaggle, Medium, Substack…) are
                       fetched automatically — paste below only to add context or if the URL isn't public.
                     </p>
-                    <Textarea bind:value={shipContent[d.id]} rows={6} placeholder="Optionally paste the artifact — key code, the writeup, the ablation table. Graded against the acceptance criteria above." />
+                    <Textarea bind:value={shipContent[d.id]} rows={6} aria-label="Artifact content (optional)" placeholder="Optionally paste the artifact — key code, the writeup, the ablation table. Graded against the acceptance criteria above." />
                     <p class="text-xs text-faint">
                       Strongest evidence: paste your <span class="text-fg-dim">run output</span> — test results,
                       the training curve, the benchmark numbers. Proof it actually works beats a description of it.
@@ -196,7 +209,7 @@
                       <Button size="sm" onclick={() => ship(d)} disabled={shipping === d.id || !canShip(shipUrl[d.id] ?? '', shipContent[d.id] ?? '')}>
                         {shipping === d.id ? 'Reviewing…' : 'Ship & review'}
                       </Button>
-                      <button class="eyebrow transition-colors hover:text-fg-dim" onclick={() => (shipOpen[d.id] = false)}>cancel</button>
+                      <button type="button" class="eyebrow transition-colors hover:text-fg-dim" onclick={() => (shipOpen[d.id] = false)}>cancel</button>
                     </div>
                   </div>
                 {/if}
@@ -210,7 +223,7 @@
                     </div>
                     {#if r.gaps.length}
                       <ul class="mt-2 flex flex-col gap-1">
-                        {#each r.gaps as g}<li class="flex items-start gap-2 text-xs text-muted"><span class="text-warn">▸</span>{g}</li>{/each}
+                        {#each r.gaps as g}<li class="flex items-start gap-2 text-xs text-muted"><span class="text-warn" aria-hidden="true">▸</span>{g}</li>{/each}
                       </ul>
                     {/if}
                     {#if r.concepts.length}<p class="mt-2 text-xs text-faint">Counts toward: {r.concepts.join(' · ')}</p>{/if}
@@ -229,7 +242,7 @@
               <div class="flex items-center gap-2">
                 <span class="eyebrow !text-info">{s.kind}</span>
               </div>
-              <h3 class="mt-1 text-base text-fg">{s.title}</h3>
+              <h2 class="mt-1 text-base text-fg">{s.title}</h2>
               <p class="mt-1.5 text-sm leading-relaxed text-muted"><Markdown text={s.body} block /></p>
             </Card>
           {/each}

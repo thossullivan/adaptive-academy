@@ -36,8 +36,8 @@
       {/key}
     {:else}
       <div class="grid h-[calc(100dvh-3.5rem)] place-items-center md:h-screen">
-        <div class="flex flex-col items-center gap-3 text-muted">
-          <svg viewBox="0 0 32 32" class="size-8 animate-spin" style="animation-duration:1.6s">
+        <div class="flex flex-col items-center gap-3 text-muted" role="status">
+          <svg viewBox="0 0 32 32" class="size-8 animate-spin" style="animation-duration:1.6s" aria-hidden="true">
             <circle cx="16" cy="16" r="12" fill="none" stroke="var(--border)" stroke-width="2" />
             <path d="M16 4a12 12 0 0 1 12 12" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" />
           </svg>

@@ -44,6 +44,8 @@
   }
 </script>
 
+<svelte:head><title>New topic · Adaptive Academy</title></svelte:head>
+
 <Page eyebrow="New topic" title="What do you want to learn?" lead="A quick brief. The Researcher will assemble a foundation you can curate before any curriculum is built." width="narrow">
   <SetupNotice status={setup.status} class="mb-4" />
 
@@ -79,10 +81,11 @@
   </Card>
 
   {#if busy || stepIdx >= 0}
-    <div class="mt-4 flex flex-col gap-2 rise">
+    <ol class="mt-4 flex flex-col gap-2 rise" aria-label="Progress">
       {#each steps as s, i}
-        <div class="flex items-center gap-3 text-sm">
+        <li class="flex items-center gap-3 text-sm" aria-current={i === stepIdx ? 'step' : undefined}>
           <span
+            aria-hidden="true"
             class="grid size-5 place-items-center rounded-full border text-[0.6rem]"
             style:border-color={i <= stepIdx ? 'var(--accent)' : 'var(--border)'}
             style:background={i < stepIdx ? 'var(--accent)' : 'transparent'}
@@ -90,10 +93,11 @@
           >
             {#if i < stepIdx}✓{:else if i === stepIdx}<span class="size-1.5 animate-pulse rounded-full bg-accent"></span>{:else}{i + 1}{/if}
           </span>
-          <span class={i <= stepIdx ? 'text-fg-dim' : 'text-faint'}>{s}</span>
-        </div>
+          <span class={i <= stepIdx ? 'text-fg-dim' : 'text-faint'}>{s}<span class="sr-only">{i < stepIdx ? ' (done)' : i === stepIdx ? ' (in progress)' : ''}</span></span>
+        </li>
       {/each}
-      {#if status}<p class="mt-1 text-xs text-muted">{status}</p>{/if}
-    </div>
+    </ol>
   {/if}
+  <!-- Always mounted so each status change is announced. -->
+  <p class="mt-1 text-xs text-muted empty:hidden" role="status">{status}</p>
 </Page>

@@ -5,8 +5,9 @@
   import { api } from '$lib/api';
   import type { Curriculum, Assessment } from '$lib/types';
   import { pct } from '$lib/utils';
+  import { artifactOutcome, HELD, MILESTONE_ARTIFACT } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Field, Select, Textarea, Markdown } from '$lib/ui';
+  import { Card, Button, Badge, Field, Select, Textarea, Markdown, LiveStatus } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let cur = $state<Curriculum | null>(null);
@@ -17,6 +18,8 @@
   let result = $state<Assessment | null>(null);
   let busy = $state(false);
   let anchorQuestion = $state<string | null>(null);
+  let status = $state('');
+  let runs = 0;
 
   const PROBES: { value: string; label: string; blurb: string }[] = [
     { value: 'self_explanation', label: 'Self-explanation', blurb: 'Explain the concept in your own words.' },
@@ -79,6 +82,9 @@
         response,
         confidence_predicted: kind === 'calibration' ? confidence / 100 : null
       });
+      const outcome = result.kind === 'artifact_review' ? artifactOutcome(result.score).label : (result.estimate_level ?? '');
+      // A counter keeps a repeat of the same result distinct, so it is announced again.
+      status = `Assessment ${++runs}: ${Math.round(result.score * 100)} out of 100${outcome ? `, ${outcome}` : ''}.`;
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
@@ -86,12 +92,22 @@
     }
   }
 
+  // An artifact review lights the "shipped" signal and never sets the grade (engine/assess.py
+  // GRADING_KINDS), so its verdict is shipped ✓/✗ against the same threshold the dashboard uses.
+  const artifact = $derived(result?.kind === 'artifact_review' ? artifactOutcome(result.score) : null);
   const scoreTone = $derived(
-    result == null ? 'neutral' : result.score >= 0.7 ? 'success' : result.score >= 0.4 ? 'warn' : 'danger'
+    result == null
+      ? 'neutral'
+      : artifact
+        ? artifact.meetsGate ? 'success' : artifact.shipped ? 'warn' : 'danger'
+        : result.score >= 0.7 ? 'success' : result.score >= 0.4 ? 'warn' : 'danger'
   );
 </script>
 
+<svelte:head><title>Assess · Adaptive Academy</title></svelte:head>
+
 <Page eyebrow="Assessor" title="Assess understanding" lead="Probes that demand you generate, not recognize — the kind that actually moves the needle." width="normal">
+  <LiveStatus message={status} />
   {#if !cur}
     <Card accent pad class="text-center">
       <div class="py-10">
@@ -127,7 +143,7 @@
 
           {#if kind === 'calibration'}
             <Field label="Predicted confidence — {confidence}%">
-              <input type="range" min="0" max="100" bind:value={confidence} class="w-full accent-[var(--accent)]" />
+              <input type="range" min="0" max="100" bind:value={confidence} aria-valuetext="{confidence}%" class="w-full accent-[var(--accent)]" />
             </Field>
           {/if}
 
@@ -154,17 +170,29 @@
           <Card accent pad class="rise sticky top-6">
             <div class="flex items-center justify-between">
               <span class="eyebrow">verdict</span>
-              <Badge tone={scoreTone} dot>{result.estimate_level ?? '—'}</Badge>
+              {#if artifact}
+                <span data-testid="artifact-outcome"><Badge tone={scoreTone} dot>{artifact.label}</Badge></span>
+              {:else}
+                <Badge tone={scoreTone} dot>{result.estimate_level ?? '—'}</Badge>
+              {/if}
             </div>
             <div class="mt-3 flex items-baseline gap-3">
               <span class="nums font-display text-5xl" style:color={scoreTone === 'success' ? 'var(--success)' : scoreTone === 'warn' ? 'var(--warn)' : 'var(--danger)'}>{Math.round(result.score * 100)}</span>
               <span class="text-sm text-muted">/ 100</span>
               {#if result.delta != null}
                 <span class="nums ml-auto text-sm" style:color={result.delta >= 0 ? 'var(--success)' : 'var(--danger)'}>
-                  {result.delta > 0 ? '↑' : '↓'} {Math.abs(result.delta).toFixed(2)}
+                  <span aria-hidden="true">{result.delta > 0 ? '↑' : '↓'}</span><span class="sr-only">{result.delta > 0 ? 'up' : 'down'}</span> {Math.abs(result.delta).toFixed(2)}
                 </span>
               {/if}
             </div>
+
+            {#if artifact}
+              <p class="mt-2 text-xs leading-relaxed text-muted">
+                Artifact reviews corroborate rather than grade: a score of {Math.round(HELD * 100)}+ lights the
+                <span class="text-fg-dim">shipped</span> signal, and a program milestone counts it as artifact
+                evidence at {Math.round(MILESTONE_ARTIFACT * 100)}+. The concept's grade is unchanged.
+              </p>
+            {/if}
 
             {#if result.confidence_predicted != null}
               <div class="mt-3 flex items-center gap-2 rounded-[var(--radius-sm)] bg-surface-2 px-3 py-2 text-xs">
@@ -181,13 +209,13 @@
               <div class="mt-4">
                 <span class="eyebrow">gaps</span>
                 <ul class="mt-1.5 flex flex-col gap-1">
-                  {#each result.gaps as g}<li class="flex items-start gap-2 text-sm text-muted"><span class="shrink-0 text-danger">▸</span><Markdown text={g} class="min-w-0" /></li>{/each}
+                  {#each result.gaps as g}<li class="flex items-start gap-2 text-sm text-muted"><span class="shrink-0 text-danger" aria-hidden="true">▸</span><Markdown text={g} class="min-w-0" /></li>{/each}
                 </ul>
                 <Button variant="outline" size="sm" class="mt-3" onclick={remediate} disabled={remediating}>
                   {remediating ? 'Remediating…' : 'Remediate these gaps'}
                 </Button>
                 {#if remediatedCount != null}
-                  <p class="mt-2 text-xs text-muted">
+                  <p class="mt-2 text-xs text-muted" role="status">
                     {remediatedCount > 0 ? `Injected ${remediatedCount} step(s).` : 'Already covered by an open remediation step.'}
                     <a class="text-accent underline" href="/topics/{topicId}/track">Open track →</a>
                   </p>

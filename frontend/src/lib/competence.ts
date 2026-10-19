@@ -18,8 +18,19 @@ export interface ConceptSignals {
 
 export type Verdict = 'solid' | 'verified' | 'unverified' | 'shaky' | 'untested';
 
-const HELD = 0.45; // medium+ counts as a passing signal
+export const HELD = 0.45; // medium+ counts as a passing signal
 const CALIBRATED_GAP = 0.15;
+
+/** What an artifact review did: it lights (or fails) the "shipped" signal rather than setting
+ * the grade, so it reads against the same HELD threshold as conceptSignals' `shipped`. */
+/** The score a program milestone's gate needs as artifact evidence (engine/gates.py
+ *  ARTIFACT_THRESHOLD). Higher than HELD: shipping lights the signal, the gate asks for more. */
+export const MILESTONE_ARTIFACT = 0.7;
+
+export function artifactOutcome(score: number): { shipped: boolean; meetsGate: boolean; label: string } {
+  const shipped = score >= HELD;
+  return { shipped, meetsGate: score >= MILESTONE_ARTIFACT, label: shipped ? 'shipped ✓' : 'shipped ✗' };
+}
 
 /** Derive the four signals from a concept's assessment history (newest-first). */
 export function conceptSignals(list: Assessment[]): ConceptSignals {
@@ -61,6 +72,14 @@ export const VERDICT_COLOR: Record<Verdict, string> = {
   verified: 'var(--accent)',
   unverified: 'var(--muted)',
   shaky: 'var(--danger)',
+  untested: 'var(--verdict-untested)'
+};
+
+/** Verdict colours for TEXT (the verdict word itself): every one at least 4.5:1. The word
+ *  carries the meaning, so "untested" can use the faint text tone; VERDICT_COLOR's
+ *  --verdict-untested is a fill, tuned to stand apart from "unverified" in the graph. */
+export const VERDICT_TEXT_COLOR: Record<Verdict, string> = {
+  ...VERDICT_COLOR,
   untested: 'var(--faint)'
 };
 

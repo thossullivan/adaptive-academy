@@ -148,3 +148,75 @@ def test_start_conversation_rejects_concept_from_another_topic(session):
     assert wrong.status_code == 400
     assert right.status_code == 200
     assert missing.status_code == 404
+
+
+def _conversation_count(engine) -> int:
+    from adaptive_academy.models import Conversation
+
+    with Session(engine) as s:
+        return len(s.exec(select(Conversation)).all())
+
+
+def test_preview_returns_levels_without_creating_a_conversation(client):
+    resp = client.get(
+        "/api/conversations/preview",
+        params={"topic_id": client.topic_id, "concept_id": client.concept_id},
+    )
+    assert resp.status_code == 200
+    # Same levels a started conversation would report (estimate "high"); a new session
+    # never starts with an attempt logged.
+    assert resp.json() == {
+        "concept_id": client.concept_id,
+        "assistance_level": "low",
+        "challenge_level": "high",
+        "attempt_logged": False,
+    }
+    assert _conversation_count(client.engine) == 0
+
+
+def test_preview_matches_started_conversation_levels(client):
+    preview = client.get(
+        "/api/conversations/preview",
+        params={"topic_id": client.topic_id, "concept_id": client.concept_id},
+    ).json()
+    started = client.post(
+        "/api/conversations",
+        json={"topic_id": client.topic_id, "concept_id": client.concept_id},
+    ).json()
+    for key in ("concept_id", "assistance_level", "challenge_level", "attempt_logged"):
+        assert preview[key] == started[key]
+    assert _conversation_count(client.engine) == 1
+
+
+def test_preview_validates_concept_and_topic(session):
+    from fastapi.testclient import TestClient
+
+    from adaptive_academy.api.app import create_app
+    from adaptive_academy.api.deps import get_session
+
+    topic_a = Topic(title="A")
+    topic_b = Topic(title="B")
+    session.add(topic_a)
+    session.add(topic_b)
+    session.commit()
+    track = Track(topic_id=topic_a.id, title="A")
+    session.add(track)
+    session.commit()
+    concept = Concept(track_id=track.id, name="Owned by A")
+    session.add(concept)
+    session.commit()
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    client = TestClient(app)
+    url = "/api/conversations/preview"
+    wrong = client.get(url, params={"topic_id": topic_b.id, "concept_id": concept.id})
+    right = client.get(url, params={"topic_id": topic_a.id, "concept_id": concept.id})
+    missing = client.get(url, params={"topic_id": topic_a.id, "concept_id": 99999})
+    app.dependency_overrides.clear()
+    assert wrong.status_code == 400
+    assert missing.status_code == 404
+    assert right.status_code == 200
+    # No estimate yet: the default levels compute_levels picks.
+    assert right.json()["assistance_level"] == "low"
+    assert right.json()["challenge_level"] == "high"

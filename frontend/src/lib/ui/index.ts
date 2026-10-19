@@ -13,3 +13,4 @@ export { default as SignalStrip } from './SignalStrip.svelte';
 export { default as ComebackCard } from './ComebackCard.svelte';
 export { default as ScoutCard } from './ScoutCard.svelte';
 export { default as SetupNotice } from './SetupNotice.svelte';
+export { default as LiveStatus } from './LiveStatus.svelte';

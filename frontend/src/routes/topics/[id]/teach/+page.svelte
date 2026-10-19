@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { announce } from '$lib/text';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { toasts } from '$lib/toast.svelte';
   import { api } from '$lib/api';
   import type { Concept, Assessment, TeachResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Field, Select, Textarea } from '$lib/ui';
+  import { Card, Button, Badge, Select, Textarea, LiveStatus } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let concepts = $state<Concept[]>([]);
@@ -14,6 +15,7 @@
   let explanation = $state('');
   let result = $state<TeachResult | null>(null);
   let busy = $state(false);
+  let status = $state('');
 
   onMount(async () => {
     try {
@@ -48,6 +50,7 @@
     try {
       result = await api.gradeTeaching(conceptId, explanation);
       taught = new Set([...taught, conceptId]);
+      status = announce(status, `Teaching review ready: ${Math.round(result.score * 100)}%.`);
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
@@ -56,9 +59,13 @@
   }
 </script>
 
+<svelte:head><title>Teach · Adaptive Academy</title></svelte:head>
+
+<LiveStatus message={status} />
+
 <Page eyebrow="Learning by teaching" title="Teach it" lead="The highest-leverage move in the evidence base: explain a concept to an audience. If you can't teach it cleanly, you don't own it yet." width="normal">
   {#snippet actions()}
-    <Select bind:value={conceptId} class="w-56">
+    <Select bind:value={conceptId} class="w-56" aria-label="Concept to teach">
       {#each concepts as c (c.id)}<option value={c.id}>{c.name}{taught.has(c.id) ? ' ✓' : ''}</option>{/each}
     </Select>
   {/snippet}
@@ -75,9 +82,13 @@
         <p class="mt-2 text-sm text-fg">
           Explain <b>{conceptName}</b> as if teaching a sharp peer who's never seen it — they will ask questions, so be precise about the <i>mechanism</i>, not just the vocabulary.
         </p>
-        <Field label="" >
-          <Textarea class="mt-3" bind:value={explanation} rows={12} placeholder="Imagine you're writing the explanation you wish you'd had…" />
-        </Field>
+        <Textarea
+          class="mt-3"
+          bind:value={explanation}
+          rows={12}
+          aria-label="Your explanation of {conceptName}"
+          placeholder="Imagine you're writing the explanation you wish you'd had…"
+        />
         <Button class="mt-3" onclick={submit} disabled={busy || !explanation.trim() || conceptId == null}>
           {busy ? 'Grading the lesson…' : 'Submit for review'}
         </Button>
@@ -95,7 +106,7 @@
               <div class="mt-4">
                 <span class="eyebrow text-success">landed</span>
                 <ul class="mt-1.5 flex flex-col gap-1">
-                  {#each result.strengths as s}<li class="flex items-start gap-2 text-sm text-muted"><span class="text-success">✓</span>{s}</li>{/each}
+                  {#each result.strengths as s}<li class="flex items-start gap-2 text-sm text-muted"><span class="text-success" aria-hidden="true">✓</span>{s}</li>{/each}
                 </ul>
               </div>
             {/if}
@@ -103,7 +114,7 @@
               <div class="mt-4">
                 <span class="eyebrow text-warn">a learner would still ask</span>
                 <ul class="mt-1.5 flex flex-col gap-1">
-                  {#each result.gaps as g}<li class="flex items-start gap-2 text-sm text-muted"><span class="text-warn">?</span>{g}</li>{/each}
+                  {#each result.gaps as g}<li class="flex items-start gap-2 text-sm text-muted"><span class="text-warn" aria-hidden="true">?</span>{g}</li>{/each}
                 </ul>
               </div>
             {/if}

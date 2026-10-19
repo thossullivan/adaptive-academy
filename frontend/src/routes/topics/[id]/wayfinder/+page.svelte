@@ -79,6 +79,8 @@
   });
 </script>
 
+<svelte:head><title>Wayfinder · Adaptive Academy</title></svelte:head>
+
 <Page eyebrow="Wayfinder" title="Chart your voyage" lead="Your goal is the North Star. Each phase is a waypoint you steer toward — here's where you stand and what to aim for next." width="normal">
   {#snippet actions()}
     <Button variant="outline" href="/topics/{topicId}/map">Constellation</Button>
@@ -86,7 +88,7 @@
   {/snippet}
 
   {#if loading}
-    <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">plotting the course…</span></div>
+    <div class="grid place-items-center py-24" role="status"><span class="eyebrow animate-pulse">plotting the course…</span></div>
   {:else if !hasCurriculum}
     <Card accent pad class="text-center">
       <div class="py-10">

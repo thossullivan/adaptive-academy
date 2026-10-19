@@ -7,7 +7,7 @@
   import type { Concept, GraphLink } from '$lib/types';
   import { conceptSignalsMap, VERDICT_COLOR, VERDICT_LABEL, VERDICT_RANK, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge } from '$lib/ui';
+  import { Card, Button, Badge, LiveStatus } from '$lib/ui';
   import Constellation from '$lib/charts/Constellation.svelte';
 
   const topicId = Number($page.params.id);
@@ -46,12 +46,35 @@
   const selectedConcept = $derived(concepts.find((c) => c.id === selected) ?? null);
   const selectedVerdict = $derived<Verdict>(selected != null ? (verdicts[selected] ?? 'untested') : 'untested');
 
+  let status = $state('');
+
   async function selectConcept(id: number) {
     selected = id;
     ancestorIds = [];
+    const name = concepts.find((c) => c.id === id)?.name ?? '';
+    status = `Selected ${name}: ${VERDICT_LABEL[verdicts[id] ?? 'untested']}.`;
     const ancestors = await api.getAncestors(id, 6).catch(() => []);
-    if (selected === id) ancestorIds = ancestors.map(([conceptId]) => conceptId);
+    if (selected === id) {
+      ancestorIds = ancestors.map(([conceptId]) => conceptId);
+      if (ancestorIds.length)
+        status = `Selected ${name}: ${VERDICT_LABEL[verdicts[id] ?? 'untested']}. ${ancestorIds.length} prerequisite ancestor${ancestorIds.length === 1 ? '' : 's'} highlighted.`;
+    }
   }
+
+  // The graph in words: each concept with its verdict and direct prerequisites, for anyone
+  // who cannot see (or would rather not tab through) the drawing.
+  const nameById = $derived(new Map(concepts.map((c) => [c.id, c.name])));
+  const conceptList = $derived(
+    [...nodes]
+      .sort((a, b) => VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict] || a.name.localeCompare(b.name))
+      .map((n) => ({
+        ...n,
+        prereqs: links
+          .filter((l) => l.kind === 'prerequisite' && l.target === n.id)
+          .map((l) => nameById.get(l.source))
+          .filter((x): x is string => !!x)
+      }))
+  );
 
   function openTutor(id: number) {
     goto(`/topics/${topicId}/tutor?concept=${id}`);
@@ -62,9 +85,12 @@
   );
 </script>
 
+<svelte:head><title>Constellation · Adaptive Academy</title></svelte:head>
+
 <Page eyebrow="Concept constellation" title="The shape of what you're learning" lead="Each star is a concept — sized by how load-bearing it is, lit by its triangulated verdict (grade + decay + calibration + teaching agreeing). Lines are prerequisites." width="wide">
+  <LiveStatus message={status} />
   {#if loading}
-    <div class="grid place-items-center py-24"><span class="eyebrow animate-pulse">mapping the sky…</span></div>
+    <div class="grid place-items-center py-24" role="status"><span class="eyebrow animate-pulse">mapping the sky…</span></div>
   {:else if !nodes.length}
     <Card accent pad class="text-center">
       <div class="py-10">
@@ -112,7 +138,7 @@
         {#if selectedConcept}
           <Card accent pad class="rise">
             <span class="eyebrow">selected</span>
-            <h3 class="mt-1 text-lg text-fg">{selectedConcept.name}</h3>
+            <h2 class="mt-1 text-lg text-fg">{selectedConcept.name}</h2>
             <div class="mt-2 flex flex-wrap gap-1.5">
               <Badge tone={selectedVerdict === 'solid' ? 'success' : selectedVerdict === 'shaky' ? 'danger' : selectedVerdict === 'verified' ? 'accent' : 'neutral'} dot>
                 {VERDICT_LABEL[selectedVerdict]}
@@ -129,8 +155,37 @@
             </div>
           </Card>
         {:else}
-          <Card pad class="text-center"><p class="py-6 text-sm text-faint">Click a star to focus a concept.</p></Card>
+          <Card pad class="text-center"><p class="py-6 text-sm text-faint">Select a star, or a concept in the list below, to focus it.</p></Card>
         {/if}
+
+        <Card pad data-testid="concept-list">
+          <details>
+            <summary class="cursor-pointer text-sm font-medium text-fg-dim hover:text-fg">
+              Concepts as a list <span class="nums text-faint">({nodes.length})</span>
+            </summary>
+            <ul class="mt-3 flex flex-col gap-1">
+              {#each conceptList as c (c.id)}
+                <li>
+                  <button
+                    type="button"
+                    aria-pressed={selected === c.id}
+                    onclick={() => selectConcept(c.id)}
+                    class="flex w-full flex-col items-start gap-0.5 rounded-[var(--radius-sm)] px-2 py-1.5 text-left transition-colors hover:bg-surface-2 {selected === c.id ? 'bg-surface-2' : ''}"
+                  >
+                    <span class="flex w-full items-center gap-2 text-sm text-fg-dim">
+                      <span class="size-2 shrink-0 rounded-full" style:background={VERDICT_COLOR[c.verdict]} aria-hidden="true"></span>
+                      <span class="min-w-0 flex-1 break-words">{c.name}</span>
+                      <span class="shrink-0 text-xs text-muted">{VERDICT_LABEL[c.verdict]}{c.loadBearing ? ' · load-bearing' : ''}</span>
+                    </span>
+                    {#if c.prereqs.length}
+                      <span class="pl-4 text-xs text-faint">needs {c.prereqs.join(', ')}</span>
+                    {/if}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          </details>
+        </Card>
       </div>
     </div>
   {/if}

@@ -8,6 +8,7 @@
   import { Badge, Select, Button } from '$lib/ui';
   import MemoryDisclosure from '$lib/ui/MemoryDisclosure.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
+  import { scrollBehavior } from '$lib/utils';
 
   const topicId = Number($page.params.id);
   let topic = $state<Topic | null>(null);
@@ -18,7 +19,6 @@
   let levels = $state({ assistance: '—', challenge: '—', attempt: false });
   let input = $state('');
   let busy = $state(false);
-  let starting = $state(false);
   let showEvents = $state(false);
   let scroller: HTMLDivElement | null = null;
 
@@ -33,21 +33,24 @@
     }
   });
 
+  // Each visit or concept switch is a fresh session, but its conversation row is created only
+  // on the first Send, so browsing the Tutor saves nothing. Until then the header shows the
+  // levels that session would use (a read-only preview) and, as for any new session, no attempt.
+  let previewSeq = 0;
   async function start() {
     if (conceptId == null) return;
-    starting = true;
+    const seq = ++previewSeq;
+    conversation = null;
     messages = [];
     events = [];
+    levels = { assistance: '—', challenge: '—', attempt: false };
     try {
-      conversation = await api.startConversation(topicId, conceptId);
-      levels = {
-        assistance: conversation.assistance_level,
-        challenge: conversation.challenge_level,
-        attempt: conversation.attempt_logged
-      };
-      messages = conversation.messages ?? [];
-    } finally {
-      starting = false;
+      const p = await api.previewConversation(topicId, conceptId);
+      // A later concept switch, or a send (whose reply carries the real levels), supersedes this.
+      if (seq !== previewSeq || conversation) return;
+      levels = { assistance: p.assistance_level, challenge: p.challenge_level, attempt: p.attempt_logged };
+    } catch {
+      // The header keeps its placeholders; sending still works.
     }
   }
 
@@ -55,21 +58,31 @@
     await start();
   }
 
+  /** This session's conversation: created on the first Send, reused by later sends and retries. */
+  async function ensureConversation(forConcept: number): Promise<Conversation> {
+    if (conversation && conversation.concept_id === forConcept) return conversation;
+    conversation = await api.startConversation(topicId, forConcept);
+    return conversation;
+  }
+
   async function send() {
-    if (!conversation || !input.trim() || busy) return;
+    previewSeq++; // a preview still in flight must not overwrite the reply's levels
+    if (conceptId == null || !input.trim() || busy) return;
+    const forConcept = conceptId;
     const content = input;
     input = '';
     messages = [...messages, { role: 'user', content }];
     busy = true;
     await tick();
-    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: scrollBehavior() });
     try {
-      const r = await api.sendMessage(conversation.id, content);
+      const convo = await ensureConversation(forConcept);
+      const r = await api.sendMessage(convo.id, content);
       messages = [...messages, { role: 'tutor', content: r.reply, memory: r.memory ?? [] }];
       events = r.events;
       levels = { assistance: r.assistance_level, challenge: r.challenge_level, attempt: r.attempt_logged };
       await tick();
-      scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+      scroller?.scrollTo({ top: scroller.scrollHeight, behavior: scrollBehavior() });
     } catch (e) {
       // Nothing was sent (e.g. no API key): take the bubble back, keep the draft, say why.
       messages = messages.slice(0, -1);
@@ -83,14 +96,17 @@
   const conceptName = $derived(topic?.concepts.find((c) => c.id === conceptId)?.name ?? '');
 </script>
 
+<svelte:head><title>Tutor · Adaptive Academy</title></svelte:head>
+
 <div class="flex h-[calc(100dvh-3.5rem)] flex-col md:h-screen">
   <!-- Header -->
   <header class="flex flex-wrap items-center gap-3 border-b border-border px-6 py-4 md:px-10">
     <div class="min-w-0 flex-1">
-      <div class="eyebrow mb-1">Tutor console</div>
+      <h1 class="eyebrow mb-1">Tutor console</h1>
       <div class="flex items-center gap-2">
         {#if topic?.concepts.length}
-          <Select bind:value={conceptId} onchange={onConceptChange} class="w-auto min-w-56">
+          <!-- Locked while a send is in flight, so a reply can't land on another concept's session. -->
+          <Select bind:value={conceptId} onchange={onConceptChange} disabled={busy} class="w-auto min-w-56" aria-label="Concept">
             {#each topic.concepts as c (c.id)}
               <option value={c.id}>{c.name}</option>
             {/each}
@@ -108,9 +124,18 @@
   </header>
 
   <!-- Messages -->
-  <div bind:this={scroller} class="flex-1 overflow-y-auto px-6 py-6 md:px-10">
+  <!-- Focusable so the transcript scrolls from the keyboard; a log, so a new reply is read out. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div
+    bind:this={scroller}
+    role="log"
+    aria-label="Conversation with the tutor"
+    aria-busy={busy}
+    tabindex="0"
+    class="flex-1 overflow-y-auto px-6 py-6 md:px-10"
+  >
     <div class="mx-auto flex max-w-3xl flex-col gap-4">
-      {#if !messages.length && !starting}
+      {#if !messages.length}
         <div class="mt-12 text-center">
           <h2 class="text-2xl text-fg">{conceptName || 'Pick a concept to begin'}</h2>
           <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
@@ -128,7 +153,7 @@
                 ? 'rounded-br-sm bg-surface-3 text-fg'
                 : 'rounded-bl-sm border border-border bg-surface text-fg-dim'}"
             >
-              {#if m.role === 'tutor'}<div class="eyebrow mb-1.5 !text-[0.55rem] text-accent">tutor</div>{/if}{m.content}
+              {#if m.role === 'tutor'}<div class="eyebrow mb-1.5 !text-[0.55rem] text-accent">tutor</div>{:else}<span class="sr-only">You: </span>{/if}{m.content}
             </div>
             {#if m.role === 'tutor'}
               <MemoryDisclosure hits={m.memory ?? []} />
@@ -139,8 +164,9 @@
       {#if busy}
         <div class="flex justify-start">
           <div class="flex items-center gap-1.5 rounded-[var(--radius-lg)] rounded-bl-sm border border-border bg-surface px-4 py-3">
+            <span class="sr-only">The tutor is thinking…</span>
             {#each [0, 1, 2] as d}
-              <span class="size-1.5 animate-bounce rounded-full bg-accent" style:animation-delay="{d * 0.15}s"></span>
+              <span class="size-1.5 animate-bounce rounded-full bg-accent motion-reduce:animate-none" style:animation-delay="{d * 0.15}s" aria-hidden="true"></span>
             {/each}
           </div>
         </div>
@@ -160,22 +186,23 @@
       <textarea
         bind:value={input}
         rows="1"
+        aria-label="Message the tutor"
         placeholder="Ask the tutor… (it won't just hand you the answer)"
-        disabled={busy || !conversation}
+        disabled={busy || conceptId == null}
         onkeydown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             send();
           }
         }}
-        class="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-[var(--radius-md)] border border-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint transition-colors hover:border-border-strong focus:border-accent focus:outline-none disabled:opacity-50"
+        class="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-[var(--radius-md)] border border-control-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint transition-colors hover:border-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:opacity-50"
       ></textarea>
-      <Button type="submit" size="lg" disabled={busy || !conversation || !input.trim()}>Send</Button>
+      <Button type="submit" size="lg" disabled={busy || conceptId == null || !input.trim()}>Send</Button>
     </form>
     {#if events.length}
       <div class="mx-auto mt-2 max-w-3xl">
-        <button class="eyebrow transition-colors hover:text-fg-dim" onclick={() => (showEvents = !showEvents)}>
-          {showEvents ? '▾' : '▸'} what the agent did ({events.length})
+        <button type="button" class="eyebrow transition-colors hover:text-fg-dim" aria-expanded={showEvents} onclick={() => (showEvents = !showEvents)}>
+          <span aria-hidden="true">{showEvents ? '▾' : '▸'}</span> what the agent did ({events.length})
         </button>
         {#if showEvents}
           <div class="mt-1.5 rounded-[var(--radius-md)] border border-border bg-surface p-2">

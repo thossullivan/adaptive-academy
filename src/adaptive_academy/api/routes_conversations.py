@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
 from adaptive_academy.api.deps import get_llm, get_retriever, get_session, use_agent_sdk
 from adaptive_academy.api.routes_memory import memory_hit_out
 from adaptive_academy.api.schemas import (
     ConversationOut,
+    ConversationPreviewOut,
     EventOut,
     MessageOut,
     SendMessageIn,
@@ -25,14 +26,19 @@ def _levels_for(session: Session, convo: Conversation):
     return compute_levels(concept.estimate if concept else None)
 
 
-@router.post("", response_model=ConversationOut)
-def start_conversation(body: StartConversationIn, session: Session = Depends(get_session)):
-    concept = session.get(Concept, body.concept_id)
+def _concept_in_topic(session: Session, topic_id: int, concept_id: int) -> Concept:
+    concept = session.get(Concept, concept_id)
     if concept is None:
         raise HTTPException(404, "concept not found")
     track = session.get(Track, concept.track_id)
-    if track is None or track.topic_id != body.topic_id:
+    if track is None or track.topic_id != topic_id:
         raise HTTPException(400, "concept does not belong to this topic")
+    return concept
+
+
+@router.post("", response_model=ConversationOut)
+def start_conversation(body: StartConversationIn, session: Session = Depends(get_session)):
+    _concept_in_topic(session, body.topic_id, body.concept_id)
     convo = Conversation(topic_id=body.topic_id, concept_id=body.concept_id)
     session.add(convo)
     session.commit()
@@ -45,6 +51,28 @@ def start_conversation(body: StartConversationIn, session: Session = Depends(get
         assistance_level=levels.assistance,
         challenge_level=levels.challenge,
         messages=[],
+    )
+
+
+# Declared before "/{conversation_id}" so "preview" is not parsed as an id.
+@router.get("/preview", response_model=ConversationPreviewOut)
+def preview_conversation(
+    topic_id: int = Query(...),
+    concept_id: int = Query(...),
+    session: Session = Depends(get_session),
+):
+    """What a new session on this concept would start with, without saving one.
+
+    The Tutor shows this before the first message; the conversation row is created
+    only when the learner sends something. A new session never has an attempt logged.
+    """
+    concept = _concept_in_topic(session, topic_id, concept_id)
+    levels = compute_levels(concept.estimate)
+    return ConversationPreviewOut(
+        concept_id=concept.id,
+        attempt_logged=False,
+        assistance_level=levels.assistance,
+        challenge_level=levels.challenge,
     )
 
 

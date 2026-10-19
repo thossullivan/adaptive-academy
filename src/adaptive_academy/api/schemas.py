@@ -106,6 +106,7 @@ class MemoryStatsOut(BaseModel):
 class EventOut(BaseModel):
     kind: str
     detail: str
+    created_at: Optional[datetime] = None  # set by the trace-list endpoints
 
 
 class SendMessageIn(BaseModel):
@@ -119,6 +120,15 @@ class ConversationOut(BaseModel):
     assistance_level: str
     challenge_level: str
     messages: list[MessageOut]
+
+
+class ConversationPreviewOut(BaseModel):
+    """The header a new tutor session would open with, read without creating one."""
+
+    concept_id: int
+    attempt_logged: bool
+    assistance_level: str
+    challenge_level: str
 
 
 class SendMessageOut(BaseModel):

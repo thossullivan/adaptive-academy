@@ -38,7 +38,7 @@
     {#if unit}<span class="text-sm text-muted">{unit}</span>{/if}
     {#if delta != null}
       <span class="nums ml-auto text-xs font-medium" style:color={deltaTone}>
-        {delta > 0 ? '↑' : delta < 0 ? '↓' : '·'}{Math.abs(delta).toFixed(2)}
+<span aria-hidden="true">{delta > 0 ? '↑' : delta < 0 ? '↓' : '·'}</span><span class="sr-only">{delta > 0 ? 'up ' : delta < 0 ? 'down ' : 'unchanged '}</span>{Math.abs(delta).toFixed(2)}
       </span>
     {/if}
   </div>

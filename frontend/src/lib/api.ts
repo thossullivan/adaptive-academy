@@ -8,6 +8,7 @@ import type {
   ConceptGraph,
   Consolidation,
   Conversation,
+  ConversationPreview,
   CreateProgramBody,
   CreateTopicBody,
   Curriculum,
@@ -115,6 +116,11 @@ export const api = {
       if (!r.ok && r.status !== 404) await j<unknown>(r);
     }),
   getTopic: (id: number) => fetch(`/api/topics/${id}`).then(j<Topic>),
+  /** Levels a new session on this concept would use, read without creating a conversation. */
+  previewConversation: (topic_id: number, concept_id: number) =>
+    fetch(`/api/conversations/preview?${new URLSearchParams({ topic_id: String(topic_id), concept_id: String(concept_id) })}`).then(
+      j<ConversationPreview>
+    ),
   startConversation: (topic_id: number, concept_id: number) =>
     fetch('/api/conversations', {
       method: 'POST',
@@ -303,10 +309,9 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
     }).then(j<MilestoneInfo>),
+  // A standalone topic is the normal case: the API answers 200 with a null body (not a 404).
   programContext: (topicId: number) =>
-    fetch(`/api/topics/${topicId}/program-context`).then((r) =>
-      r.status === 404 ? null : j<ProgramContext>(r)
-    ),
+    fetch(`/api/topics/${topicId}/program-context`).then(j<ProgramContext | null>),
   reviseMap: (id: number) =>
     fetch(`/api/programs/${id}/revise`, { method: 'POST' }).then(j<MapRevisionInfo>),
   getOpenRevision: (id: number) =>

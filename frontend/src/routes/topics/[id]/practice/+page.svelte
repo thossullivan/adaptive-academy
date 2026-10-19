@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { announce } from '$lib/text';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { toasts } from '$lib/toast.svelte';
@@ -6,12 +7,13 @@
   import type { Concept, Assessment, Consolidation } from '$lib/types';
   import { pct } from '$lib/utils';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Field, Select, Textarea, Markdown } from '$lib/ui';
+  import { Card, Button, Badge, Field, Select, Textarea, Markdown, LiveStatus } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let concepts = $state<Concept[]>([]);
   let conceptId = $state<number | null>(null);
   let tab = $state<'pf' | 'cal'>('pf');
+  let status = $state('');
 
   onMount(async () => {
     try {
@@ -40,6 +42,7 @@
     consolidation = null;
     try {
       problem = (await api.generateChallenge(conceptId)).problem;
+      status = announce(status, 'Challenge ready.');
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
@@ -52,6 +55,7 @@
     consolidating = true;
     try {
       consolidation = await api.consolidate(conceptId, problem, attempt);
+      status = announce(status, `Consolidation ready: effort ${Math.round(consolidation.score * 100)}%. The canonical approach is shown.`);
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
@@ -98,6 +102,7 @@
         confidence_predicted: confidence / 100
       });
       calPhase = 'result';
+      status = announce(status, `You predicted ${pct(calResult.confidence_predicted)} and scored ${pct(calResult.confidence_actual)}.`);
       await loadCalAccuracy();
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
@@ -113,28 +118,34 @@
   );
 </script>
 
+<svelte:head><title>Practice · Adaptive Academy</title></svelte:head>
+
+<LiveStatus message={status} />
+
 <Page eyebrow="Generative practice" title="Practice" lead="The work that actually solidifies understanding — struggle before you're shown, and confront what you only thought you knew." width="normal">
   {#snippet actions()}
-    <Field label="">
-      <Select bind:value={conceptId} class="w-56">
-        {#each concepts as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
-      </Select>
-    </Field>
+    <Select bind:value={conceptId} class="w-56" aria-label="Concept to practice">
+      {#each concepts as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
+    </Select>
   {/snippet}
 
   {#if !concepts.length}
     <Card pad class="text-center"><p class="py-8 text-sm text-muted">No concepts to practice yet — generate a curriculum first.</p></Card>
   {:else}
     <!-- Tabs -->
-    <div class="mb-4 flex gap-1 rounded-[var(--radius-md)] border border-border bg-surface-2 p-1">
+    <div role="group" aria-label="Practice mode" class="mb-4 flex gap-1 rounded-[var(--radius-md)] border border-border bg-surface-2 p-1">
       <button
-        class="flex-1 rounded-[var(--radius-sm)] px-3 py-2 text-sm font-medium transition-colors {tab === 'pf' ? 'bg-surface text-fg shadow-[var(--shadow)]' : 'text-muted hover:text-fg'}"
+        type="button"
+        aria-pressed={tab === 'pf'}
+        class="flex-1 rounded-[var(--radius-sm)] px-3 py-2 text-sm font-medium transition-colors {tab === 'pf' ? 'bg-surface text-fg shadow-[var(--shadow)] ring-1 ring-control-border' : 'text-muted hover:text-fg'}"
         onclick={() => (tab = 'pf')}
-      >◈ Productive Failure</button>
+      ><span aria-hidden="true">◈</span> Productive Failure</button>
       <button
-        class="flex-1 rounded-[var(--radius-sm)] px-3 py-2 text-sm font-medium transition-colors {tab === 'cal' ? 'bg-surface text-fg shadow-[var(--shadow)]' : 'text-muted hover:text-fg'}"
+        type="button"
+        aria-pressed={tab === 'cal'}
+        class="flex-1 rounded-[var(--radius-sm)] px-3 py-2 text-sm font-medium transition-colors {tab === 'cal' ? 'bg-surface text-fg shadow-[var(--shadow)] ring-1 ring-control-border' : 'text-muted hover:text-fg'}"
         onclick={() => (tab = 'cal')}
-      >◷ Calibration</button>
+      ><span aria-hidden="true">◷</span> Calibration</button>
     </div>
 
     {#if tab === 'pf'}
@@ -206,7 +217,15 @@
             <p class="mt-2 text-sm text-muted">Before you explain anything: how well do you think you understand {conceptName}?</p>
             <div class="mt-4">
               <div class="mb-1 flex justify-between text-sm"><span class="text-muted">not at all</span><span class="nums font-display text-2xl text-fg">{confidence}%</span><span class="text-muted">cold</span></div>
-              <input type="range" min="0" max="100" bind:value={confidence} class="w-full accent-[var(--accent)]" />
+              <input
+                type="range"
+                min="0"
+                max="100"
+                bind:value={confidence}
+                aria-label="How well you think you understand {conceptName}"
+                aria-valuetext="{confidence}%"
+                class="w-full accent-[var(--accent)]"
+              />
             </div>
             <Button class="mt-4" onclick={() => (calPhase = 'explain')}>Lock prediction →</Button>
           </Card>
@@ -217,7 +236,7 @@
               <Badge tone="neutral" mono>predicted {confidence}%</Badge>
             </div>
             <p class="mt-2 text-sm font-medium text-fg">Explain why {conceptName} works — the mechanism, in your own words.</p>
-            <Textarea class="mt-3" bind:value={explanation} rows={7} placeholder="It works because…" />
+            <Textarea class="mt-3" bind:value={explanation} rows={7} aria-label="Your explanation of {conceptName}" placeholder="It works because…" />
             <Button class="mt-3" onclick={submitCal} disabled={submitting}>{submitting ? 'Grading…' : 'Submit & confront the gap →'}</Button>
           </Card>
         {:else if calResult}

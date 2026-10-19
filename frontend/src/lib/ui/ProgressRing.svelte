@@ -25,7 +25,7 @@
 </script>
 
 <div class="relative inline-grid place-items-center" style:width="{size}px" style:height="{size}px">
-  <svg width={size} height={size} class="-rotate-90">
+  <svg width={size} height={size} class="-rotate-90" aria-hidden="true">
     <circle cx={size / 2} cy={size / 2} {r} fill="none" stroke={track} stroke-width={stroke} />
     <circle
       cx={size / 2}

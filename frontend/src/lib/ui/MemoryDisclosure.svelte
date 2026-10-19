@@ -25,7 +25,7 @@
       aria-expanded={expanded}
       onclick={() => (expanded = !expanded)}
     >
-      {expanded ? '▾' : '▸'} What it remembered ({hits.length})
+      <span aria-hidden="true">{expanded ? "▾" : "▸"}</span> What it remembered ({hits.length})
     </button>
     {#if expanded}
       <Card pad={false} class="mt-1 overflow-hidden">

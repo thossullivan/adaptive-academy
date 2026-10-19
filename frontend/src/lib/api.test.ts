@@ -207,12 +207,20 @@ describe('program api client', () => {
     expect(out.gate_status).toBe('overridden');
   });
 
-  it('programContext returns null on 404 without throwing', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+  it('programContext returns null for a standalone topic (200 + null body)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => null });
     vi.stubGlobal('fetch', fetchMock);
     const out = await api.programContext(5);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/topics/5/program-context');
     expect(out).toBeNull();
+  });
+
+  it('programContext throws on a 404 (unknown topic id)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status: 404, statusText: 'Not Found', json: async () => ({ detail: 'topic not found' })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.programContext(5)).rejects.toThrow('topic not found');
   });
 
   it('programContext returns the context when present', async () => {

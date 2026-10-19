@@ -23,8 +23,8 @@
     {disabled}
     {...rest}
     class={cn(
-      'h-10 w-full appearance-none rounded-[var(--radius-sm)] border border-border bg-surface-2 pl-3 pr-9 text-sm text-fg',
-      'transition-colors hover:border-border-strong focus:border-accent focus:outline-none',
+      'h-10 w-full appearance-none rounded-[var(--radius-sm)] border border-control-border bg-surface-2 pl-3 pr-9 text-sm text-fg',
+      'transition-colors hover:border-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]',
       'disabled:opacity-50'
     )}
   >

@@ -58,15 +58,17 @@
   }
 </script>
 
+<svelte:head><title>Usage · Adaptive Academy</title></svelte:head>
+
 <Page
   eyebrow="Ledger"
   title="Usage & cost"
   lead="Every model call the agents make, counted on this machine: tokens, web searches, and what they cost at Anthropic's list prices."
 >
   {#if loading}
-    <p class="py-10 text-center text-sm text-faint">Tallying the ledger…</p>
+    <p class="py-10 text-center text-sm text-faint" role="status">Tallying the ledger…</p>
   {:else if error || !report}
-    <p class="py-10 text-center text-sm text-danger">Couldn't load usage: {error ?? 'no data'}</p>
+    <p class="py-10 text-center text-sm text-danger" role="alert">Couldn't load usage: {error ?? 'no data'}</p>
   {:else}
     <div class="flex flex-col gap-5" data-testid="usage-report">
       {#if subscription}
@@ -117,7 +119,7 @@
               <span class="eyebrow text-faint">{formatUsd(report.budget.remaining_usd ?? 0)} left</span>
             {/if}
           </div>
-          <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-border">
+          <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
             <div
               class="h-full rounded-full"
               style:width={`${Math.round((fraction ?? 0) * 100)}%`}
@@ -147,12 +149,12 @@
               {#each report.by_feature as row (row.feature ?? '—')}
                 <li class="min-w-0">
                   <div class="flex items-baseline gap-3 text-sm">
-                    <span class="min-w-0 flex-1 truncate text-fg-dim">{featureLabel(row.feature)}</span>
+                    <span class="min-w-0 flex-1 truncate text-fg-dim" title={featureLabel(row.feature)}>{featureLabel(row.feature)}</span>
                     <span class="eyebrow hidden text-faint sm:inline">{formatTokens(totalTokens(row))} tok</span>
                     <span class="eyebrow text-faint">{row.calls}×</span>
                     <span class="nums w-24 text-right text-fg">{costLabel(row)}</span>
                   </div>
-                  <div class="mt-1 h-1 overflow-hidden rounded-full bg-border">
+                  <div class="mt-1 h-1 overflow-hidden rounded-full bg-border" aria-hidden="true">
                     <div class="h-full rounded-full bg-accent" style:width={`${Math.round(share(report.by_feature, row) * 100)}%`}></div>
                   </div>
                 </li>
@@ -169,12 +171,12 @@
               {#each report.by_model as row (row.model)}
                 <li class="min-w-0">
                   <div class="flex items-baseline gap-3 text-sm">
-                    <span class="min-w-0 flex-1 truncate font-mono text-xs text-fg-dim">{row.model}</span>
+                    <span class="min-w-0 flex-1 truncate font-mono text-xs text-fg-dim" title={row.model}>{row.model}</span>
                     <span class="eyebrow hidden text-faint sm:inline">{formatTokens(totalTokens(row))} tok</span>
                     <span class="eyebrow text-faint">{row.calls}×</span>
                     <span class="nums w-24 text-right text-fg">{costLabel(row)}</span>
                   </div>
-                  <div class="mt-1 h-1 overflow-hidden rounded-full bg-border">
+                  <div class="mt-1 h-1 overflow-hidden rounded-full bg-border" aria-hidden="true">
                     <div class="h-full rounded-full bg-accent" style:width={`${Math.round(share(report.by_model, row) * 100)}%`}></div>
                   </div>
                 </li>
@@ -186,7 +188,7 @@
 
       <p class="text-xs leading-relaxed text-faint">
         Prices from
-        <a class="underline decoration-border hover:text-fg" href={report.pricing_source} target="_blank" rel="noreferrer">Anthropic's pricing page</a>,
+        <a class="underline decoration-border hover:text-fg" href={report.pricing_source} target="_blank" rel="noreferrer">Anthropic's pricing page<span class="sr-only"> (opens in a new tab)</span></a>,
         read {report.pricing_as_of}, for {report.priced_models.join(', ')}. Other models record
         tokens with "price unknown". These records stay in your local database; each model call
         itself is still sent to Anthropic.

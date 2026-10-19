@@ -22,7 +22,7 @@
 <svelte:head><title>Programs · Adaptive Academy</title></svelte:head>
 
 <Page
-  eyebrow="Voyages"
+  eyebrow="All topics"
   title="Programs"
   lead="Long-horizon goals: researched milestone maps with verified-depth gates."
 >
@@ -30,9 +30,9 @@
     <Button href="/programs/new">New program</Button>
   {/snippet}
   {#if loading}
-    <p class="text-sm text-muted">Loading…</p>
+    <p class="text-sm text-muted" role="status">Loading…</p>
   {:else if error}
-    <p class="text-sm text-danger">Couldn’t load programs: {error}</p>
+    <p class="text-sm text-danger" role="alert">Couldn’t load programs: {error}</p>
   {:else if programs.length === 0}
     <Card>
       <p class="text-sm text-muted">

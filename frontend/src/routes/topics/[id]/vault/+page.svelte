@@ -5,7 +5,7 @@
   import { toasts } from '$lib/toast.svelte';
   import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Input, Badge } from '$lib/ui';
+  import { Card, Button, Input, Badge, LiveStatus } from '$lib/ui';
   import MemorySearchResults from './MemorySearchResults.svelte';
   import { MAX_MEMORY_RESULTS, runMemoryReindex, runMemorySearch } from './memory-actions';
 
@@ -29,6 +29,24 @@
   let reindexing = $state(false);
   let stats = $state<MemoryStats | null>(null);
   let error = $state('');
+
+  // Results that arrive asynchronously are announced through one polite live region.
+  let announce = $state('');
+  $effect(() => {
+    if (status) announce = status.is_dir ? `Connected: ${status.note_count} markdown notes.` : 'Not a readable folder.';
+  });
+  $effect(() => {
+    if (exportRes) announce = `Wrote ${exportRes.written.length} notes for this topic.`;
+  });
+  $effect(() => {
+    if (exportAllRes) announce = `Mirrored ${exportAllRes.topics} topics into your vault.`;
+  });
+  $effect(() => {
+    if (ingestRes) announce = `Added ${ingestRes.count} new sources.`;
+  });
+  $effect(() => {
+    if (searched && !searching) announce = `${searchHits.length} result${searchHits.length === 1 ? '' : 's'}.`;
+  });
 
   onMount(() => {
     path = localStorage.getItem(STORE_KEY) ?? '';
@@ -135,17 +153,20 @@
   }
 </script>
 
+<svelte:head><title>Vault · Adaptive Academy</title></svelte:head>
+
 <Page
-  eyebrow="Connections"
+  eyebrow="Library"
   title="Obsidian vault"
   lead="Hook your learning into the notes you already keep. Everything here is local file I/O — no cloud, no API, nothing leaves your machine."
 >
+  <LiveStatus message={announce} />
   <div class="flex flex-col gap-5">
     <Card eyebrow="Vault folder" title="Where your notes live">
       <div class="flex flex-col gap-3">
         <div class="flex items-end gap-2">
           <div class="flex-1">
-            <Input bind:value={path} placeholder="/Users/you/Obsidian/MyVault" />
+            <Input bind:value={path} aria-label="Vault folder path" placeholder="/Users/you/Obsidian/MyVault" />
           </div>
           <Button variant="outline" size="sm" onclick={check} disabled={checking || !path.trim()}>
             {checking ? 'Checking…' : 'Check'}
@@ -235,6 +256,7 @@
             searched = false;
             searchHits = [];
           }}
+          aria-label="Search memory"
           placeholder="Search vault notes, sources, and prior learning…"
         />
         <label class="flex items-center gap-2 text-xs text-faint">
@@ -274,7 +296,7 @@
     </Card>
 
     {#if error}
-      <p class="text-sm" style:color="var(--danger)">{error}</p>
+      <p class="text-sm" style:color="var(--danger)" role="alert">{error}</p>
     {/if}
   </div>
 </Page>

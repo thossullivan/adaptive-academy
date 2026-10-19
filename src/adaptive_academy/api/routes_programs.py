@@ -282,7 +282,7 @@ def list_program_events(program_id: int, session: Session = Depends(get_session)
         select(AgentEvent).where(AgentEvent.program_id == program_id)
         .order_by(AgentEvent.id)
     ).all()
-    return [EventOut(kind=e.kind, detail=e.detail) for e in rows]
+    return [EventOut(kind=e.kind, detail=e.detail, created_at=e.created_at) for e in rows]
 
 
 def _revision_out(session: Session, rev: MapRevision) -> MapRevisionOut:

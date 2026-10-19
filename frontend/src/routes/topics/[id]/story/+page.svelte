@@ -4,18 +4,20 @@
   import { api } from '$lib/api';
   import type { Story, StoryFacts } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Markdown } from '$lib/ui';
+  import { Card, Button, Badge, Markdown, LiveStatus } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let story = $state<Story | null>(null);
   let busy = $state(false);
   let error = $state('');
+  let status = $state('');
 
   async function compose() {
     busy = true;
     error = '';
     try {
       story = await api.makeStory(topicId);
+      status = `Story composed: ${story.headline}`;
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -31,6 +33,8 @@
 
   const facts = $derived(story?.facts ?? recorded);
 </script>
+
+<svelte:head><title>Story · Adaptive Academy</title></svelte:head>
 
 {#snippet factsCard(facts: StoryFacts)}
   <div data-testid="story-facts">
@@ -63,14 +67,15 @@
     <Button onclick={compose} disabled={busy}>{busy ? 'Composing…' : story ? 'Recompose' : 'Compose my story'}</Button>
   {/snippet}
 
+  <LiveStatus message={status} />
   {#if error}
-    <Card pad class="border-l-2 border-danger"><p class="text-sm text-danger">Couldn't compose the story: {error}</p></Card>
+    <Card pad class="border-l-2 border-danger"><p class="text-sm text-danger" role="alert">Couldn't compose the story: {error}</p></Card>
   {/if}
 
   {#if busy && !story}
     <div class="grid place-items-center py-24">
-      <div class="flex flex-col items-center gap-3 text-muted">
-        <svg viewBox="0 0 32 32" class="size-7 animate-spin" style="animation-duration:1.4s">
+      <div class="flex flex-col items-center gap-3 text-muted" role="status">
+        <svg viewBox="0 0 32 32" class="size-7 animate-spin" style="animation-duration:1.4s" aria-hidden="true">
           <circle cx="16" cy="16" r="12" fill="none" stroke="var(--border)" stroke-width="2" />
           <path d="M16 4a12 12 0 0 1 12 12" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" />
         </svg>
@@ -93,7 +98,7 @@
         <div class="grid gap-2.5 sm:grid-cols-2">
           {#each story.highlights as h}
             <div class="flex items-start gap-2.5 rounded-[var(--radius-md)] border border-border bg-surface-2 p-3">
-              <span class="mt-0.5 text-accent">→</span>
+              <span class="mt-0.5 text-accent" aria-hidden="true">→</span>
               <Markdown text={h} class="text-sm text-fg-dim" />
             </div>
           {/each}
@@ -105,7 +110,7 @@
   {:else}
     <Card accent pad class="text-center">
       <div class="py-12">
-        <div class="mx-auto mb-4 grid size-14 place-items-center rounded-full border border-border bg-surface text-2xl text-accent">✶</div>
+        <div class="mx-auto mb-4 grid size-14 place-items-center rounded-full border border-border bg-surface text-2xl text-accent" aria-hidden="true">✶</div>
         <h2 class="text-xl text-fg">Compose your progress story</h2>
         <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
           An agent reads your assessments, deltas, shipped artifacts, and calibration, then writes the build-in-public

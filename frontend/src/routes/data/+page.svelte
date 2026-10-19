@@ -28,6 +28,8 @@
   }
 </script>
 
+<svelte:head><title>Your data · Adaptive Academy</title></svelte:head>
+
 <Page
   eyebrow="Account"
   title="Your data"
@@ -96,7 +98,9 @@
         <li>Download a backup of what you have now, then stop the app.</li>
         <li>
           On your machine:
-          <pre class="pre">uv run aa restore backups/adaptive_academy-….db --force
+          <!-- Focusable: it scrolls sideways on a phone, and keyboard users must reach that. -->
+          <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+          <pre class="pre" tabindex="0" aria-label="Restore commands">uv run aa restore backups/adaptive_academy-….db --force
 uv run alembic upgrade head</pre>
           <span class="text-xs text-faint">
             <code class="code">aa restore</code> saves the current database to
