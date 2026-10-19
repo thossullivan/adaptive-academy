@@ -18,7 +18,6 @@
   let levels = $state({ assistance: '—', challenge: '—', attempt: false });
   let input = $state('');
   let busy = $state(false);
-  let starting = $state(false);
   let showEvents = $state(false);
   let scroller: HTMLDivElement | null = null;
 
@@ -33,21 +32,23 @@
     }
   });
 
+  // Each visit or concept switch is a fresh session, but its conversation row is created only
+  // on the first Send, so browsing the Tutor saves nothing. Until then the header shows the
+  // levels that session would use (a read-only preview) and, as for any new session, no attempt.
+  let previewSeq = 0;
   async function start() {
     if (conceptId == null) return;
-    starting = true;
+    const seq = ++previewSeq;
+    conversation = null;
     messages = [];
     events = [];
+    levels = { assistance: '—', challenge: '—', attempt: false };
     try {
-      conversation = await api.startConversation(topicId, conceptId);
-      levels = {
-        assistance: conversation.assistance_level,
-        challenge: conversation.challenge_level,
-        attempt: conversation.attempt_logged
-      };
-      messages = conversation.messages ?? [];
-    } finally {
-      starting = false;
+      const p = await api.previewConversation(topicId, conceptId);
+      if (seq !== previewSeq) return; // a later concept switch superseded this one
+      levels = { assistance: p.assistance_level, challenge: p.challenge_level, attempt: p.attempt_logged };
+    } catch {
+      // The header keeps its placeholders; sending still works.
     }
   }
 
@@ -55,8 +56,16 @@
     await start();
   }
 
+  /** This session's conversation: created on the first Send, reused by later sends and retries. */
+  async function ensureConversation(forConcept: number): Promise<Conversation> {
+    if (conversation && conversation.concept_id === forConcept) return conversation;
+    conversation = await api.startConversation(topicId, forConcept);
+    return conversation;
+  }
+
   async function send() {
-    if (!conversation || !input.trim() || busy) return;
+    if (conceptId == null || !input.trim() || busy) return;
+    const forConcept = conceptId;
     const content = input;
     input = '';
     messages = [...messages, { role: 'user', content }];
@@ -64,7 +73,8 @@
     await tick();
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
     try {
-      const r = await api.sendMessage(conversation.id, content);
+      const convo = await ensureConversation(forConcept);
+      const r = await api.sendMessage(convo.id, content);
       messages = [...messages, { role: 'tutor', content: r.reply, memory: r.memory ?? [] }];
       events = r.events;
       levels = { assistance: r.assistance_level, challenge: r.challenge_level, attempt: r.attempt_logged };
@@ -90,7 +100,8 @@
       <div class="eyebrow mb-1">Tutor console</div>
       <div class="flex items-center gap-2">
         {#if topic?.concepts.length}
-          <Select bind:value={conceptId} onchange={onConceptChange} class="w-auto min-w-56">
+          <!-- Locked while a send is in flight, so a reply can't land on another concept's session. -->
+          <Select bind:value={conceptId} onchange={onConceptChange} disabled={busy} class="w-auto min-w-56">
             {#each topic.concepts as c (c.id)}
               <option value={c.id}>{c.name}</option>
             {/each}
@@ -110,7 +121,7 @@
   <!-- Messages -->
   <div bind:this={scroller} class="flex-1 overflow-y-auto px-6 py-6 md:px-10">
     <div class="mx-auto flex max-w-3xl flex-col gap-4">
-      {#if !messages.length && !starting}
+      {#if !messages.length}
         <div class="mt-12 text-center">
           <h2 class="text-2xl text-fg">{conceptName || 'Pick a concept to begin'}</h2>
           <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
@@ -161,7 +172,7 @@
         bind:value={input}
         rows="1"
         placeholder="Ask the tutor… (it won't just hand you the answer)"
-        disabled={busy || !conversation}
+        disabled={busy || conceptId == null}
         onkeydown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -170,7 +181,7 @@
         }}
         class="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-[var(--radius-md)] border border-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint transition-colors hover:border-border-strong focus:border-accent focus:outline-none disabled:opacity-50"
       ></textarea>
-      <Button type="submit" size="lg" disabled={busy || !conversation || !input.trim()}>Send</Button>
+      <Button type="submit" size="lg" disabled={busy || conceptId == null || !input.trim()}>Send</Button>
     </form>
     {#if events.length}
       <div class="mx-auto mt-2 max-w-3xl">

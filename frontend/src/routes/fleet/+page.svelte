@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { api } from '$lib/api';
+  import { topics } from '$lib/topics.svelte';
   import type { WindState } from '$lib/types';
   import { STATE_LABEL, STATE_COLOR, seaIntensity } from '$lib/wind';
   import Page from '$lib/shell/Page.svelte';
-  import { Card } from '$lib/ui';
+  import { Card, Button } from '$lib/ui';
 
   let fleet = $state<WindState[]>([]);
   let loading = $state(true);
@@ -12,6 +14,22 @@
 
   // Never-sailed voyages sort last (API attention order); mark where that bucket begins.
   const firstUnsailed = $derived(fleet.findIndex((w) => w.state === 'unsailed'));
+
+  // Empty fleet: the same one-click demo the home screen offers.
+  let demoBusy = $state(false);
+  let demoError = $state('');
+  async function exploreDemo() {
+    demoBusy = true;
+    demoError = '';
+    try {
+      await topics.openDemo();
+      await goto('/');
+    } catch (e) {
+      demoError = `Couldn't load the demo: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      demoBusy = false;
+    }
+  }
 
   onMount(async () => {
     try {
@@ -28,15 +46,31 @@
   lead="Your whole learning life at a glance. Becalmed voyages need wind; cruising ones just hum along."
 >
   {#snippet actions()}
-    <button class="eyebrow transition-colors hover:text-fg" onclick={() => (panorama = !panorama)}>
-      {panorama ? 'Collapse to tiles' : 'Show harbor'}
-    </button>
+    <!-- Nothing to collapse until there is a fleet. -->
+    {#if !loading && fleet.length}
+      <button class="eyebrow transition-colors hover:text-fg" onclick={() => (panorama = !panorama)}>
+        {panorama ? 'Collapse to tiles' : 'Show harbor'}
+      </button>
+    {/if}
   {/snippet}
 
   {#if loading}
     <p class="py-10 text-center text-sm text-faint">Charting the seas…</p>
   {:else if !fleet.length}
-    <p class="py-10 text-center text-sm text-faint">No voyages yet. Create a topic to set sail.</p>
+    <Card pad class="text-center" data-testid="fleet-empty">
+      <div class="py-8">
+        <h2 class="text-xl text-fg">No voyages yet</h2>
+        <p class="mx-auto mt-2 max-w-sm text-sm text-muted">Every topic you start sets a ship on this sea. Start one, or look around a worked example first.</p>
+        <div class="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+          <Button href="/topics/new">Start a topic →</Button>
+          <Button variant="outline" onclick={exploreDemo} disabled={demoBusy}>
+            {demoBusy ? 'Loading the demo…' : 'Explore a demo topic'}
+          </Button>
+        </div>
+        <p class="mt-3 text-xs text-faint">The demo needs no API key, and you can remove it later.</p>
+        {#if demoError}<p class="mt-2 text-xs text-danger" role="alert">{demoError}</p>{/if}
+      </div>
+    </Card>
   {:else if panorama}
     <!-- Hero: one shared ocean; ship height = momentum -->
     <div

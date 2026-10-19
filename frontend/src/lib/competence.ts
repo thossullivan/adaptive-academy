@@ -18,8 +18,15 @@ export interface ConceptSignals {
 
 export type Verdict = 'solid' | 'verified' | 'unverified' | 'shaky' | 'untested';
 
-const HELD = 0.45; // medium+ counts as a passing signal
+export const HELD = 0.45; // medium+ counts as a passing signal
 const CALIBRATED_GAP = 0.15;
+
+/** What an artifact review did: it lights (or fails) the "shipped" signal rather than setting
+ * the grade, so it reads against the same HELD threshold as conceptSignals' `shipped`. */
+export function artifactOutcome(score: number): { shipped: boolean; label: string } {
+  const shipped = score >= HELD;
+  return { shipped, label: shipped ? 'shipped ✓' : 'shipped ✗' };
+}
 
 /** Derive the four signals from a concept's assessment history (newest-first). */
 export function conceptSignals(list: Assessment[]): ConceptSignals {

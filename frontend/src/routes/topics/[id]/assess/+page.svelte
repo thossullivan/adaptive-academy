@@ -5,6 +5,7 @@
   import { api } from '$lib/api';
   import type { Curriculum, Assessment } from '$lib/types';
   import { pct } from '$lib/utils';
+  import { artifactOutcome, HELD } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Field, Select, Textarea, Markdown } from '$lib/ui';
 
@@ -86,8 +87,15 @@
     }
   }
 
+  // An artifact review lights the "shipped" signal and never sets the grade (engine/assess.py
+  // GRADING_KINDS), so its verdict is shipped ✓/✗ against the same threshold the dashboard uses.
+  const artifact = $derived(result?.kind === 'artifact_review' ? artifactOutcome(result.score) : null);
   const scoreTone = $derived(
-    result == null ? 'neutral' : result.score >= 0.7 ? 'success' : result.score >= 0.4 ? 'warn' : 'danger'
+    result == null
+      ? 'neutral'
+      : artifact
+        ? artifact.shipped ? 'success' : 'danger'
+        : result.score >= 0.7 ? 'success' : result.score >= 0.4 ? 'warn' : 'danger'
   );
 </script>
 
@@ -154,7 +162,11 @@
           <Card accent pad class="rise sticky top-6">
             <div class="flex items-center justify-between">
               <span class="eyebrow">verdict</span>
-              <Badge tone={scoreTone} dot>{result.estimate_level ?? '—'}</Badge>
+              {#if artifact}
+                <span data-testid="artifact-outcome"><Badge tone={scoreTone} dot>{artifact.label}</Badge></span>
+              {:else}
+                <Badge tone={scoreTone} dot>{result.estimate_level ?? '—'}</Badge>
+              {/if}
             </div>
             <div class="mt-3 flex items-baseline gap-3">
               <span class="nums font-display text-5xl" style:color={scoreTone === 'success' ? 'var(--success)' : scoreTone === 'warn' ? 'var(--warn)' : 'var(--danger)'}>{Math.round(result.score * 100)}</span>
@@ -165,6 +177,13 @@
                 </span>
               {/if}
             </div>
+
+            {#if artifact}
+              <p class="mt-2 text-xs leading-relaxed text-muted">
+                Artifact reviews corroborate rather than grade: a score of {Math.round(HELD * 100)}+ lights the
+                <span class="text-fg-dim">shipped</span> signal; the concept's grade is unchanged.
+              </p>
+            {/if}
 
             {#if result.confidence_predicted != null}
               <div class="mt-3 flex items-center gap-2 rounded-[var(--radius-sm)] bg-surface-2 px-3 py-2 text-xs">

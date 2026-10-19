@@ -165,3 +165,21 @@ def test_comeback_move_fires_first_launch_for_unsailed_with_track(session):
     assert move is not None
     assert move.label == "read the attention paper"
     assert move.href == f"/topics/{t.id}/track"
+
+
+def test_comeback_move_label_is_the_full_item_text(session):
+    # The UI clips the move on a word boundary and offers the rest; the API must not cut
+    # the label mid-word (it used to slice at 120 chars with no ellipsis).
+    t, c = _topic_with_concept(session, "Long move")
+    phase = Phase(track_id=c.track_id, title="P1", position=0)
+    session.add(phase)
+    session.commit()
+    session.refresh(phase)
+    text = ("Derive the evidence lower bound by hand from Jensen's inequality, then implement "
+            "a reparameterised Gaussian VAE on MNIST and verify the gradient estimator.")
+    assert len(text) > 120
+    session.add(Item(phase_id=phase.id, text=text, type="build", position=0, status="todo"))
+    session.commit()
+    move = comeback_move(session, t.id, now=NOW)
+    assert move is not None
+    assert move.label == text

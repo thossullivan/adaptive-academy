@@ -173,10 +173,7 @@
     demoBusy = true;
     demoError = '';
     try {
-      const { topic_id } = await api.createDemo();
-      // Select first: the list then arrives with the demo already current (one dashboard load).
-      topics.select(topic_id);
-      await topics.refresh();
+      await topics.openDemo();
       await goto('/');
     } catch (e) {
       demoError = `Couldn't load the demo: ${e instanceof Error ? e.message : String(e)}`;
@@ -384,9 +381,9 @@
             <ProgressRing value={itemsTotal ? itemsDone / itemsTotal : 0} size={92} stroke={8} label="{overallPct}%" sublabel="complete" />
             <ul class="w-full flex-col gap-1.5">
               {#each phaseProg as p, i}
-                <li class="flex items-center gap-2 py-0.5 text-xs">
-                  <span class="nums w-4 text-faint">{i + 1}</span>
-                  <span class="flex-1 truncate text-fg-dim">{p.title}</span>
+                <li class="flex items-baseline gap-2 py-0.5 text-xs">
+                  <span class="nums w-4 shrink-0 text-faint">{i + 1}</span>
+                  <span class="line-clamp-2 min-w-0 flex-1 break-words text-fg-dim" title={p.title}>{p.title}</span>
                   <span class="nums text-muted">{p.done}/{p.total}</span>
                 </li>
               {/each}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { conceptSignals, conceptVerdict, verdictRationale } from './competence';
+import { artifactOutcome, conceptSignals, conceptVerdict, verdictRationale } from './competence';
 import type { Assessment } from './types';
 
 // Minimal assessment factory (the signal logic only reads these fields).
@@ -147,5 +147,16 @@ describe('verdictRationale (why this verdict)', () => {
     expect(role(r, 'decay')).toBe('fault');
     expect(role(r, 'calibration')).toBe('gap'); // unlit
     expect(role(r, 'grade')).toBe('support'); // high
+  });
+});
+
+describe('artifactOutcome', () => {
+  it('reads an artifact review against the same HELD threshold as the shipped signal', () => {
+    expect(artifactOutcome(0.72)).toEqual({ shipped: true, label: 'shipped ✓' });
+    expect(artifactOutcome(0.45)).toEqual({ shipped: true, label: 'shipped ✓' });
+    expect(artifactOutcome(0.44)).toEqual({ shipped: false, label: 'shipped ✗' });
+    // stays in lockstep with conceptSignals
+    expect(conceptSignals([a({ kind: 'artifact_review', score: 0.45 })]).shipped).toBe('lit');
+    expect(conceptSignals([a({ kind: 'artifact_review', score: 0.44 })]).shipped).toBe('bad');
   });
 });

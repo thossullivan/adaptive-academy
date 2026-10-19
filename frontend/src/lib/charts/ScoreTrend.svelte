@@ -1,7 +1,11 @@
 <script lang="ts">
   import { Chart, Svg, Axis, Area, Spline, Points, Grid } from 'layerchart';
 
+  import { indexTicks } from './ticks';
+
   let { data = [] }: { data: { i: number; score: number; label: string }[] } = $props();
+  // One tick per probe, whole numbers only, thinned so many probes never crowd the axis.
+  const xTicks = $derived(indexTicks(data.length, 8));
 </script>
 
 {#if data.length >= 2}
@@ -22,8 +26,8 @@
           format={(v: number) => `${Math.round(v * 100)}`}
           class="text-faint [&_text]:fill-faint [&_text]:text-[10px]"
         />
-        <Axis placement="bottom" ticks={data.length} format={(v: number) => `${v + 1}`} class="[&_text]:fill-faint [&_text]:text-[10px]" />
-        <Area line={{ class: 'stroke-accent stroke-2' }} class="fill-accent/12" />
+        <Axis placement="bottom" ticks={xTicks} format={(v: number) => `${v + 1}`} class="[&_text]:fill-faint [&_text]:text-[10px]" />
+        <Area line={{ class: 'fill-none stroke-accent stroke-2' }} class="fill-accent/12" />
         <Points class="fill-accent stroke-bg" r={3} />
       </Svg>
     </Chart>

@@ -25,7 +25,7 @@
   --fg: #e9e7e1;
   --fg-dim: #b7bac2;
   --muted: #868c98;
-  --faint: #5b616d;
+  --faint: #646a76; /* ≥3:1 on surface and surface-2 (#5b616d was 2.65:1) */
 
   --accent: #e0a83e;
   --accent-bright: #f2bf5d;
@@ -44,6 +44,9 @@
   color-scheme: dark;
 }
 
+/* Light: text tokens clear WCAG AA on bg, surface and surface-2 — fg, muted, accent and the
+   status colours ≥4.5:1, faint ≥3:1, accent-fg on accent ≥4.5:1. "Bright" is the hover /
+   emphasis step, so on light paper it goes darker, not lighter. */
 [data-theme='light'] {
   --bg: #f3efe6;
   --bg-glow: #f6e6c4;
@@ -55,18 +58,18 @@
   --fg: #221f19;
   --fg-dim: #45413a;
   --muted: #6d685c;
-  --faint: #978f7e;
+  --faint: #908877;
 
-  --accent: #b07a1e;
-  --accent-bright: #c98e2a;
-  --accent-dim: #c9a866;
+  --accent: #8c641e;
+  --accent-bright: #78581d;
+  --accent-dim: #a3833b;
   --accent-fg: #fffaf0;
   --accent-wash: color-mix(in oklab, var(--accent) 12%, transparent);
 
-  --success: #2f9460;
-  --warn: #b07a1e;
-  --danger: #c64b40;
-  --info: #3d7daf;
+  --success: #227a53;
+  --warn: #9c5b1a;
+  --danger: #bb4237;
+  --info: #317197;
 
   --ring: color-mix(in oklab, var(--accent) 45%, transparent);
   --shadow: 0 1px 2px rgb(120 100 60 / 0.12), 0 10px 30px -16px rgb(80 60 20 / 0.25);

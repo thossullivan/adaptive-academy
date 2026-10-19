@@ -45,6 +45,8 @@ def test_research_review_roundtrip(session: Session):
     kinds = {e["kind"] for e in events}
     assert "research:subagent" in kinds
     assert "research:done" in kinds
+    # each trace row carries its time, so the feed can show when a collapsed run last fired
+    assert all(e["created_at"] for e in events)
 
     proposed = client.get(f"/api/topics/{tid}/sources?status=proposed").json()
     assert len(proposed) == 2

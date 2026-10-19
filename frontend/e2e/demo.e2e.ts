@@ -81,6 +81,14 @@ test('a keyless user explores the demo topic in one click and removes it', async
     await expectNoSideScroll(page);
     await page.unroute('**/api/topics');
 
+    // Browsing the demo (not a program topic) must not log a single failed request; the
+    // keyless tutor send at the end is the one expected error, so stop collecting before it.
+    const failed: string[] = [];
+    let collecting = true;
+    page.on('response', (r) => {
+      if (collecting && r.status() >= 400) failed.push(`${r.status()} ${r.url()}`);
+    });
+
     await explore.click();
     await expect(page.getByRole('heading', { name: DEMO_TITLE })).toBeVisible();
     await expect(page).toHaveURL(/\/$/);
@@ -134,6 +142,9 @@ test('a keyless user explores the demo topic in one click and removes it', async
     // stored estimate is a prior, not a grade).
     await expect(page.getByTestId('story-facts')).toContainText('6 untested');
     await expectNoSideScroll(page);
+
+    collecting = false;
+    expect(failed, 'failed requests while browsing the demo').toEqual([]);
 
     // A new tutor session starts with the reveal gate closed; sending without a key says how to
     // fix it and keeps the draft.

@@ -37,10 +37,10 @@
 <div class="relative" use:clickOutside>
   <button
     onclick={() => (open = !open)}
-    class="group flex w-full items-center gap-2.5 rounded-[var(--radius-md)] border border-border bg-surface-2 p-2.5 text-left transition-colors hover:border-border-strong"
+    class="group flex w-full items-center gap-2.5 rounded-[var(--radius-md)] border border-border bg-surface-2 p-2 text-left transition-colors hover:border-border-strong"
   >
     <span
-      class="grid size-9 shrink-0 place-items-center rounded-[var(--radius-sm)] bg-accent-wash font-display text-lg text-accent"
+      class="grid size-8 shrink-0 place-items-center rounded-[var(--radius-sm)] bg-accent-wash font-display text-lg text-accent"
     >
       {topics.current?.title?.[0]?.toUpperCase() ?? '·'}
     </span>

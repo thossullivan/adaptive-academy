@@ -25,9 +25,11 @@ add one. Everything already recorded stays browsable.
 
 ## 2. Tour the demo
 
-Each of these is in the left sidebar. On a phone the sidebar is behind the menu button. On a
-short screen the sidebar scrolls: **Constellation**, **Teach**, **Story** and **Vault** sit
-below **Sources**.
+Each of these is in the left sidebar. On a phone the sidebar is behind the menu button. Under
+the topic switcher it starts with **Today** and **Dashboard**, then three groups: *Learn*
+(Tutor, Practice, Assess, Teach), *Map & progress* (Track, Wayfinder, Constellation,
+Retention) and *Library* (Sources, Vault, Story), then *All topics* (Fleet, Programs).
+**Usage** and **Your data** sit at the bottom.
 
 Browsing, ticking track items and rating flashcards work without a key. Anything that asks an
 agent to grade, tutor or generate (submitting an assessment, a decay check or a teach-back,
@@ -63,7 +65,8 @@ link or text for an artifact review. Remediation steps the Assessor added are ma
 header shows the levels it is using (**assistance**, **challenge**, set from your knowledge
 estimate for that concept) and whether you've logged an attempt (**no attempt yet** /
 **attempt logged**). The page always opens a fresh session, so in the demo you see the empty
-state; sending a message needs a key. (The demo's two past tutor conversations are in its data,
+state; sending a message needs a key. Nothing is saved until you send the first message, so
+opening the Tutor or switching concepts leaves no empty conversations behind. (The demo's two past tutor conversations are in its data,
 but the app has no view of past conversations yet.)
 
 **Assess.** Probes that make you produce an answer: **Self-explanation**, **Calibration**
@@ -97,7 +100,7 @@ an agent write a progress narrative from them. A concept nothing has graded coun
 untested here, never as solid. (Story's "solid" means graded high; the dashboard's "concepts
 solid" is the stricter triangulated verdict from [section 5](#5-how-a-concept-earns-solid).)
 
-**Fleet** and **Programs** (under *Voyages*) cover all your topics and long-horizon programs.
+**Fleet** and **Programs** (under *All topics*) cover all your topics and long-horizon programs.
 The demo has no program, so those pages stay mostly empty for now.
 
 ## 3. Add your key and start your own
@@ -199,7 +202,7 @@ Both count as artifact evidence toward the milestone gate.
 ## 7. Cost and control
 
 Every model call is recorded locally with its tokens, web searches and list-price cost. The
-**Usage** page (under *Voyages*) shows today, the last 7 and 30 days and all time, broken down
+**Usage** page (at the bottom of the sidebar) shows today, the last 7 and 30 days and all time, broken down
 by feature and by model.
 
 From one measured run on `claude-sonnet-5-5` (2026-10-19):

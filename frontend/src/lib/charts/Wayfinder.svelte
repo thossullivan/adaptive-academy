@@ -94,7 +94,8 @@
                   {#if p.status === 'current'}<Badge tone="accent" dot>you are here</Badge>{/if}
                   {#if p.status === 'traversed'}<Badge tone="success" mono>charted</Badge>{/if}
                 </div>
-                <h3 class="mt-1 truncate text-base {p.status === 'ahead' ? 'text-fg-dim' : 'text-fg'}">{p.title}</h3>
+                <!-- The whole title, wrapped: a waypoint's name is the thing you steer by, so never clip it. -->
+                <h3 class="mt-1 text-base text-balance break-words {p.status === 'ahead' ? 'text-fg-dim' : 'text-fg'}" data-testid="waypoint-title">{p.title}</h3>
               </div>
               <div class="flex items-baseline gap-2 md:block md:shrink-0 md:text-right">
                 <div class="nums text-sm text-muted">{p.done}/{p.total}</div>
@@ -107,9 +108,9 @@
             </div>
 
             {#if p.status === 'current' && nextItem}
-              <a href="/topics/{topicId}/tutor" class="mt-3 flex items-center gap-2 rounded-[var(--radius-sm)] border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-surface-2 px-3 py-2 text-sm transition-colors hover:border-accent">
+              <a href="/topics/{topicId}/tutor" title={plain(nextItem.text)} class="mt-3 flex items-start gap-2 rounded-[var(--radius-sm)] border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-surface-2 px-3 py-2 text-sm transition-colors hover:border-accent">
                 <span class="shrink-0 text-accent">↓ steer toward</span>
-                <span class="min-w-0 flex-1 truncate text-fg-dim">{plain(nextItem.text)}</span>
+                <span class="line-clamp-2 min-w-0 flex-1 break-words text-fg-dim">{plain(nextItem.text)}</span>
               </a>
             {/if}
 
