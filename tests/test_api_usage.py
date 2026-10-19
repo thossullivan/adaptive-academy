@@ -170,13 +170,13 @@ def test_over_budget_is_a_legible_429(client, session, api_key, monkeypatch):
 
 def test_unpriced_model_under_a_limit_is_a_legible_429(client, session, api_key, monkeypatch):
     monkeypatch.setattr(usage.settings, "daily_budget_usd", 5.0)
-    monkeypatch.setattr(usage.settings, "reasoning_model", "claude-opus-5-5")
+    monkeypatch.setattr(usage.settings, "reasoning_model", "claude-unpriced-test")
     calls: list = []
     _fake_anthropic(monkeypatch, calls)
     cid = _seed_conversation(client, session)
     r = client.post(f"/api/conversations/{cid}/messages", json={"content": "softmax?"})
     assert r.status_code == 429
     detail = r.json()["detail"]
-    assert "claude-opus-5-5" in detail and "no known price" in detail
+    assert "claude-unpriced-test" in detail and "no known price" in detail
     assert "AA_DAILY_BUDGET_USD" in detail
     assert calls == []

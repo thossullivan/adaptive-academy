@@ -35,6 +35,8 @@ def test_one_hour_cache_writes_are_priced_at_the_one_hour_rate():
         ("claude-sonnet-4-6", 3.0, 15.0, 0.30),
         ("claude-haiku-4-5", 1.0, 5.0, 0.10),
         ("claude-haiku-5-5", 0.10, 0.50, 0.01),
+        ("claude-opus-5-5", 4.0, 20.0, 0.20),
+        ("claude-fable-5-1", 10.0, 50.0, 0.25),
     ],
 )
 def test_per_million_rates(model, inp, out, read):

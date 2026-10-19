@@ -169,3 +169,27 @@ def test_pathsend_is_not_used_for_the_scratch_copy(file_db, scratch_tmp):
     body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
     assert body.startswith(b"SQLite format 3\x00")
     assert list(scratch_tmp.iterdir()) == []
+
+
+def test_check_is_ok_for_an_exportable_db_and_writes_nothing(client, file_db, scratch_tmp):
+    # The page calls this before handing the download to the browser, so a big file streams
+    # to disk instead of being buffered in the tab.
+    r = client.get("/api/export/check")
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+    assert list(scratch_tmp.iterdir()) == []
+
+
+def test_check_gives_the_legible_error_for_a_non_sqlite_db(client, monkeypatch):
+    monkeypatch.setattr(backup.settings, "database_url", "postgresql://localhost/aa")
+    r = client.get("/api/export/check")
+    assert r.status_code == 500
+    assert "SQLite" in r.json()["detail"]
+
+
+def test_check_gives_the_legible_error_for_a_missing_db(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(backup.settings, "database_url", f"sqlite:///{tmp_path / 'nope.db'}")
+    r = client.get("/api/export/check")
+    assert r.status_code == 500
+    assert "does not exist" in r.json()["detail"]
+    assert not (tmp_path / "nope.db").exists()

@@ -1,24 +1,25 @@
 <script lang="ts">
   import Page from '$lib/shell/Page.svelte';
-  import { fetchDownload, saveBlob } from '$lib/download';
+  import { checkExport, startDownload } from '$lib/download';
   import { Button, Card } from '$lib/ui';
 
-  // Fetched, not plain links: the API builds each file on request, and a plain `download`
-  // link would save an error response (a JSON body) as if it were the file. The server's
-  // filename (Content-Disposition) is kept.
+  // Check first, then let the browser download: a plain link alone would save an error
+  // response (a JSON body) as if it were the file, and fetching the file to inspect it would
+  // buffer a possibly large backup in the tab. The browser keeps the server's filename.
+  const CHECK_URL = '/api/export/check';
   const BACKUP_URL = '/api/export/backup';
   const RECORD_URL = '/api/export/record';
 
   let busy = $state<string | null>(null);
   let error = $state('');
 
-  async function download(url: string, fallbackName: string) {
+  async function download(url: string) {
     if (busy) return;
     busy = url;
     error = '';
     try {
-      const { blob, name } = await fetchDownload(url, fallbackName);
-      saveBlob(blob, name);
+      await checkExport(CHECK_URL);
+      startDownload(url);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -55,9 +56,9 @@
           <Button
             data-testid="download-backup"
             disabled={busy !== null}
-            onclick={() => download(BACKUP_URL, 'adaptive_academy.db')}
+            onclick={() => download(BACKUP_URL)}
           >
-            {busy === BACKUP_URL ? 'Preparing…' : 'Download backup (.db)'}
+            {busy === BACKUP_URL ? 'Checking…' : 'Download backup (.db)'}
           </Button>
           <p class="text-xs leading-relaxed text-faint">
             A consistent snapshot of the whole database, safe to take while you work. This is the
@@ -69,9 +70,9 @@
             variant="outline"
             data-testid="download-record"
             disabled={busy !== null}
-            onclick={() => download(RECORD_URL, 'adaptive_academy.json')}
+            onclick={() => download(RECORD_URL)}
           >
-            {busy === RECORD_URL ? 'Preparing…' : 'Download full record (.json)'}
+            {busy === RECORD_URL ? 'Checking…' : 'Download full record (.json)'}
           </Button>
           <p class="text-xs leading-relaxed text-faint">
             Every table as versioned JSON, for reading or moving elsewhere. Search indexes are left

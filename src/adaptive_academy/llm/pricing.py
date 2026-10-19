@@ -47,6 +47,9 @@ PRICES: dict[str, ModelPricing] = {
         long_prompt_threshold=100_000,
     ),
     "claude-haiku-4-5": ModelPricing(Rates(1.00, 5.00, 1.25, 2.00, 0.10)),
+    # The likeliest overrides, so a daily limit doesn't refuse them as unpriced.
+    "claude-opus-5-5": ModelPricing(Rates(4.00, 20.00, 5.00, 8.00, 0.20)),
+    "claude-fable-5-1": ModelPricing(Rates(10.00, 50.00, 12.50, 20.00, 0.25)),
 }
 
 _DATED_SNAPSHOT = re.compile(r"-\d{8}$")

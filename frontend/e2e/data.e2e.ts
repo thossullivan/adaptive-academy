@@ -45,12 +45,9 @@ test('download full record gives the versioned JSON export', async ({ page }) =>
   expect(doc.tables.topic.length).toBeGreaterThan(0);
 });
 
-for (const [testId, endpoint] of [
-  ['download-backup', '**/api/export/backup'],
-  ['download-record', '**/api/export/record']
-] as const) {
+for (const testId of ['download-backup', 'download-record'] as const) {
   test(`a failing ${testId} shows the API's error instead of saving it as a file`, async ({ page }) => {
-    await page.route(endpoint, (route) =>
+    await page.route('**/api/export/check', (route) =>
       route.fulfill({ status: 500, json: { detail: 'Backups need a SQLite database.' } })
     );
     let downloaded = false;
@@ -64,6 +61,21 @@ for (const [testId, endpoint] of [
     expect(downloaded).toBe(false);
   });
 }
+
+test('the file streams through the browser, not a fetch into tab memory', async ({ page }) => {
+  // The page may only fetch the cheap check endpoint; the export itself must be a navigation
+  // download, so a large backup never sits in the tab as a blob.
+  const fetched: string[] = [];
+  page.on('request', (req) => {
+    if (req.url().includes('/api/export/') && ['fetch', 'xhr'].includes(req.resourceType())) {
+      fetched.push(new URL(req.url()).pathname);
+    }
+  });
+  await page.goto('/data');
+  await settle(page);
+  await download(page, 'download-backup');
+  expect(fetched).toEqual(['/api/export/check']);
+});
 
 test('the rail links to the page', async ({ page }) => {
   await page.goto('/');

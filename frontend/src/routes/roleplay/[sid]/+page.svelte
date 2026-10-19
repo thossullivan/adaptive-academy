@@ -58,10 +58,25 @@
       await tick();
       scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
     } catch (e) {
-      // The server stores a learner turn only together with the persona's reply, so a
-      // failed call recorded nothing either.
-      withdraw();
-      error = e instanceof Error ? e.message : String(e);
+      const message = e instanceof Error ? e.message : String(e);
+      // A server-side error rolls back both turns, but a transport failure (a proxy timeout,
+      // a dropped connection) can land after the server committed them. Reload the
+      // transcript instead of assuming nothing was stored, so a resend can't duplicate it.
+      try {
+        const fresh = await api.getRoleplay(sid);
+        const stored = fresh.turns ?? [];
+        session = fresh;
+        turns = stored;
+        if (stored.length > before) {
+          error = '';
+        } else {
+          if (!input.trim()) input = content;
+          error = message;
+        }
+      } catch {
+        withdraw();
+        error = message;
+      }
     } finally {
       busy = false;
     }

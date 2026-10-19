@@ -77,3 +77,34 @@ test('a failed turn is withdrawn too and the text is kept', async ({ page }) => 
   await expect(page.getByText('Over budget answer', { exact: true })).toHaveCount(0);
   await expect(box).toHaveValue('Over budget answer');
 });
+
+test('a turn the server stored before the connection dropped is shown, not withdrawn', async ({ page }) => {
+  // The POST fails in transit, but the server had already committed both turns: a reload of
+  // the session shows them, so the page must too, and must not offer the text for a resend.
+  let stored = false;
+  await page.route(`**/api/roleplay/${SID}`, (route) =>
+    route.fulfill({
+      json: stored
+        ? {
+            ...SESSION,
+            turns: [
+              ...SESSION.turns,
+              { role: 'user', content: 'Committed answer' },
+              { role: 'persona', content: 'Noted.' }
+            ]
+          }
+        : SESSION
+    })
+  );
+  await page.route(`**/api/roleplay/${SID}/turns`, (route) => {
+    stored = true;
+    return route.abort('connectionreset');
+  });
+  await page.goto(`/roleplay/${SID}`);
+  const box = page.getByPlaceholder('Respond to the examiner…');
+  await box.fill('Committed answer');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByText('Noted.')).toBeVisible();
+  await expect(page.getByText('Committed answer', { exact: true })).toHaveCount(1);
+  await expect(box).toHaveValue('');
+});

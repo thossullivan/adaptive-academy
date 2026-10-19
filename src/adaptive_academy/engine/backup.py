@@ -99,6 +99,12 @@ def _live_db(database_url: str | None) -> Path:
     return path
 
 
+def check_exportable(database_url: str | None = None) -> Path:
+    """The cheap checks a snapshot or export would fail on first (a file-backed SQLite db
+    that exists), without copying anything. Raises BackupError with a user-facing message."""
+    return _live_db(database_url)
+
+
 def _claim(dest: Path) -> Path:
     """Validate `dest` and return a sibling temp path; callers os.replace() it into place, so
     a failed or interrupted run never leaves a half-written file under the final name."""

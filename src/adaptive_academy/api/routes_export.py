@@ -15,7 +15,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from starlette.types import Receive, Scope, Send
 
-from adaptive_academy.engine.backup import BackupError, default_name, export_record, snapshot
+from adaptive_academy.engine.backup import (
+    BackupError,
+    check_exportable,
+    default_name,
+    export_record,
+    snapshot,
+)
 
 router = APIRouter(prefix="/api/export", tags=["export"])
 
@@ -58,6 +64,18 @@ def _download(write: Callable[[Path], Path], name: str, media_type: str) -> File
         shutil.rmtree(scratch, ignore_errors=True)
         raise
     return _ScratchFileResponse(path, scratch, media_type=media_type, filename=name)
+
+
+@router.get("/check")
+def check_export() -> dict[str, bool]:
+    """Fail fast with the legible error before a download starts. The page calls this, then
+    hands the download URL to the browser, which streams the file to disk; buffering a large
+    db in the tab to inspect its status would hold all of it in memory."""
+    try:
+        check_exportable()
+    except BackupError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return {"ok": True}
 
 
 @router.get("/backup")

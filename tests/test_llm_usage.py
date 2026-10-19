@@ -429,7 +429,7 @@ def test_budget_counts_only_today_and_only_api_key_spend(session, api_key, monke
     assert AnthropicLLMClient().complete("s", [{"role": "user", "content": "x"}], []).text
 
 
-UNPRICED = "claude-opus-5-5"
+UNPRICED = "claude-unpriced-test"
 
 
 def test_unpriced_model_with_a_limit_is_refused_before_any_call(session, api_key,

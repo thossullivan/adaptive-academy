@@ -185,11 +185,11 @@ def test_setup_warns_when_the_limit_cannot_cap_an_unpriced_model(client, monkeyp
     monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
     monkeypatch.setattr(settings, "daily_budget_usd", 5.0)
-    monkeypatch.setattr(settings, "reasoning_model", "claude-opus-5-5")
+    monkeypatch.setattr(settings, "reasoning_model", "claude-unpriced-test")
     monkeypatch.setattr(settings, "copy_model", "claude-haiku-5-5")
     warnings = client.get("/api/setup").json()["warnings"]
     assert len(warnings) == 1
-    assert "claude-opus-5-5" in warnings[0] and "AA_DAILY_BUDGET_USD" in warnings[0]
+    assert "claude-unpriced-test" in warnings[0] and "AA_DAILY_BUDGET_USD" in warnings[0]
 
 
 def test_setup_has_no_warnings_by_default(client, monkeypatch):
@@ -204,7 +204,7 @@ def test_setup_has_no_budget_warning_in_agent_sdk_mode(client, monkeypatch):
 
     monkeypatch.setenv("AA_LLM_BACKEND", "agent_sdk")
     monkeypatch.setattr(settings, "daily_budget_usd", 5.0)
-    monkeypatch.setattr(settings, "reasoning_model", "claude-opus-5-5")
+    monkeypatch.setattr(settings, "reasoning_model", "claude-unpriced-test")
     assert client.get("/api/setup").json()["warnings"] == []
 
 
