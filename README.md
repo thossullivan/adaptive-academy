@@ -88,9 +88,6 @@ uv sync --extra memory        # optional: sqlite-vec + fastembed for hybrid (BM2
 > Without the extra, retrieval is FTS5/BM25 only — everything still works.
 > Set `AA_EMBEDDING_ALLOW_DOWNLOAD=false` on strict offline hosts to require a cached model.
 
-> Hybrid memory needs `uv sync --extra memory`. Compose caches the model at
-> `/data/fastembed_cache`. The download happens once per `aa-data` volume.
-
 > **`just seed` is optional** — it seeds one starter topic so there's something to explore
 > immediately. Otherwise you start from an empty state and create your own **Program** (a
 > researched milestone map) or topic from the app — that's the real entry point.
