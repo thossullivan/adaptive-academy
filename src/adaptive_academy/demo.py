@@ -23,7 +23,7 @@ from sqlalchemy import select as sa_select
 from sqlmodel import Session, SQLModel, col, select
 
 from adaptive_academy.engine import graph
-from adaptive_academy.engine.assess import level_from_score
+from adaptive_academy.engine.assess import GRADING_KINDS, level_from_score
 from adaptive_academy.engine.curriculum import load_bearing_concepts
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import (
@@ -725,8 +725,7 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
     # Knowledge estimates, as the Assessor leaves them: the latest probe it graded per concept
     # (teaching, productive failure and the ship review never write the estimate); the rest
     # not yet measured.
-    latest = {p.concept: p for p in PROBES
-              if p.kind not in {"teach", "productive_failure", "artifact_review"}}
+    latest = {p.concept: p for p in PROBES if p.kind in GRADING_KINDS}
     for key, concept in concepts.items():
         if key in latest:
             level, confidence = level_from_score(latest[key].score)
@@ -834,10 +833,17 @@ def _owned_rows(session: Session, topic_id: int) -> dict[Table, set[int]]:
     return owned
 
 
-def remove_demo(session: Session) -> bool:
-    """Delete the demo topic and every row that belongs to it. False when there is none."""
+def remove_demo(session: Session, topic_id: int | None = None) -> bool:
+    """Delete a demo topic and every row that belongs to it: the one with `topic_id`, or the
+    oldest demo when no id is given. False when there is no such demo topic (a non-demo
+    topic's id is never deleted here)."""
     with _LOCK:
-        topic = find_demo(session)
+        if topic_id is None:
+            topic = find_demo(session)
+        else:
+            topic = session.get(Topic, topic_id)
+            if topic is not None and not topic.is_demo:
+                topic = None
         if topic is None:
             return False
         owned = _owned_rows(session, topic.id)

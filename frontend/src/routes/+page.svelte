@@ -186,12 +186,13 @@
   }
 
   async function removeDemo() {
-    const id = topics.current?.id;
-    if (id == null) return;
+    const current = topics.current;
+    if (current == null || !current.is_demo) return;
+    const id = current.id;
     removing = true;
     demoError = '';
     try {
-      await api.deleteDemo();
+      await api.deleteDemo(id);
       topics.forget(id);
       await topics.refresh();
       confirmRemove = false;

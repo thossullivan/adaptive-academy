@@ -67,8 +67,10 @@ state; sending a message needs a key. (The demo's two past tutor conversations a
 but the app has no view of past conversations yet.)
 
 **Assess.** Probes that make you produce an answer: **Self-explanation**, **Calibration**
-(predict your confidence first), **Artifact review** and **Source quiz**. Each one writes a
-graded assessment that feeds the verdicts.
+(predict your confidence first), **Artifact review** and **Source quiz**. Each one writes an
+assessment that feeds the verdicts. Self-explanation, calibration and the source quiz set the
+concept's ◆ grade; an artifact review lights the ⚒ shipped signal and leaves the grade alone,
+so a single review can't be both the grade and the evidence that backs it.
 
 **Practice.** Two kinds of deliberate practice: **Productive Failure** (attempt a novel
 problem before any method is shown, then **Commit & reveal →**) and **Calibration** (lock a
@@ -89,8 +91,11 @@ prerequisite chain and jump to the tutor or an assessment for it.
 **Teach.** Explain a concept as if to a sharp peer; the review says what landed and what a
 reader would still be confused by. A good review lights the ◳ taught signal.
 
-**Story.** **The numbers behind the story** (progress, assessments, days active, solid
-concepts) needs no key; **Compose my story** has an agent write a progress narrative from them.
+**Story.** **The numbers behind the story** (progress, assessments, days active, and the
+concepts graded high, with how many have no grade yet) needs no key; **Compose my story** has
+an agent write a progress narrative from them. A concept nothing has graded counts as
+untested here, never as solid. (Story's "solid" means graded high; the dashboard's "concepts
+solid" is the stricter triangulated verdict from [section 5](#5-how-a-concept-earns-solid).)
 
 **Fleet** and **Programs** (under *Voyages*) cover all your topics and long-horizon programs.
 The demo has no program, so those pages stay mostly empty for now.
@@ -152,11 +157,17 @@ its latest assessment of each kind:
 
 | Signal | Lit (supports) when | Fails when |
 |---|---|---|
-| ◆ grade | the latest estimate is medium or high | it is low |
+| ◆ grade | the concept's estimate is medium or high | it is low |
 | ↺ decay | a delayed recall check scored 0.45 or more | it scored lower |
 | ◷ calibration | your predicted confidence was within 15 points of the grade | it was further off |
 | ◳ teaching | a teach-back scored 0.45 or more | it scored lower |
 | ⚒ shipping | an artifact review scored 0.45 or more | it scored lower |
+
+The grade is the estimate the Assessor stores when it grades a probe: a self-explanation,
+calibration or source-quiz assessment, a decay check, a roleplay or a paper probe. A new
+concept starts with a placeholder estimate from the curriculum, and teaching, productive
+failure and artifact reviews never change it, so until one of those graded probes exists the
+concept has **no grade**, whatever the placeholder says.
 
 The verdict, checked in this order:
 
@@ -165,7 +176,8 @@ The verdict, checked in this order:
 - **solid**: graded high **and** held on delayed recall, taught, or shipped. Calibration
   alone isn't enough.
 - **verified**: graded medium or high and at least one other signal lit (calibration counts).
-- **unverified**: graded, but nothing corroborates it yet.
+- **unverified**: everything else, which is one of two cases: graded medium or high with
+  nothing corroborating it yet, or a signal lit (taught or shipped, say) with no grade yet.
 
 So the way up is to come back to a concept cold (decay checks), teach it, or ship something
 that uses it. Programs use the same idea for their milestone gates: a milestone passes on

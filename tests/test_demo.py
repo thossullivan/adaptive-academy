@@ -288,7 +288,7 @@ def test_delete_demo_removes_every_row(client, session, no_llm):
                                                    "concept_id": concept_id}).status_code == 200
     assert _table_counts(session) != before
 
-    r = client.delete("/api/demo")
+    r = client.delete(f"/api/demo/{tid}")
     assert r.status_code == 204
     assert _table_counts(session) == before
     assert client.get(f"/api/topics/{tid}").status_code == 404
@@ -297,6 +297,41 @@ def test_delete_demo_removes_every_row(client, session, no_llm):
 
 def test_delete_demo_when_absent_is_404(client, session, no_llm):
     assert client.delete("/api/demo").status_code == 404
+    assert client.delete("/api/demo/12345").status_code == 404
+
+
+def test_delete_demo_refuses_a_topic_that_is_not_the_demo(client, session, no_llm):
+    real = client.post("/api/topics", json={"title": "Mine", "goal": "g"}).json()["id"]
+    client.post("/api/demo")
+    before = _table_counts(session)
+
+    r = client.delete(f"/api/demo/{real}")
+
+    assert r.status_code == 400
+    assert "not a demo" in r.json()["detail"]
+    assert _table_counts(session) == before
+
+
+def test_delete_demo_by_id_removes_only_the_named_demo(client, session, no_llm):
+    # Two demos can exist (a race, or an older database); Remove on one demo's dashboard must
+    # delete that demo, not whichever is oldest.
+    first = build_demo(session, now=NOW)
+    before = _table_counts(session)
+    second = build_demo(session, now=NOW)
+    assert first.id < second.id
+
+    assert client.delete(f"/api/demo/{second.id}").status_code == 204
+
+    assert _table_counts(session) == before
+    assert session.get(Topic, first.id) is not None
+    assert [t["id"] for t in client.get("/api/topics").json()] == [first.id]
+
+
+def test_delete_demo_without_an_id_still_removes_the_demo(client, session, no_llm):
+    # The id-less form stays for scripts (e2e cleanup, `just seed`'s hint).
+    tid = client.post("/api/demo").json()["topic_id"]
+    assert client.delete("/api/demo").status_code == 204
+    assert client.get(f"/api/topics/{tid}").status_code == 404
 
 
 def test_demo_pages_read_without_a_key(client, session, no_llm):

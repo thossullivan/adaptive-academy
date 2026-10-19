@@ -102,6 +102,8 @@ def review_artifact(
     session.add(deliverable)
 
     concepts = phase_concepts(session, phase) if phase else []
+    # The shipped signal only: artifact_review is outside assess.GRADING_KINDS, so these rows
+    # never write the KnowledgeEstimate and never make a concept's prior read as a grade.
     for c in concepts:
         session.add(Assessment(
             concept_id=c.id, kind="artifact_review",

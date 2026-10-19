@@ -72,3 +72,64 @@ def test_a_prior_is_not_a_grade_when_nothing_has_graded_the_concept(client, sess
 def test_empty_history(client, session):
     concept = _concept(session, "high")
     assert _history(client, concept.id) == []
+
+
+# --- The grade requires evidence the Assessor actually graded ------------------------------
+# The stored estimate is a grade only when the concept has at least one assessment of a kind
+# whose engine writes the estimate (assess.GRADING_KINDS). Everything else (teaching,
+# productive failure, the ship review) leaves the curriculum's prior in place, and a prior
+# is not a grade.
+
+
+def test_artifact_only_history_has_no_grade(client, session):
+    concept = _concept(session, "high")  # the curriculum's prior
+    session.add(Assessment(concept_id=concept.id, kind="artifact_review", prompt="Ship: x",
+                           score=0.9))
+    session.commit()
+    assert _history(client, concept.id)[0]["estimate_level"] is None
+
+
+def test_artifact_teach_and_productive_failure_together_have_no_grade(client, session):
+    concept = _concept(session, "high")
+    for kind in ("artifact_review", "teach", "productive_failure"):
+        session.add(Assessment(concept_id=concept.id, kind=kind, prompt="p", score=0.9))
+    session.commit()
+    assert all(r["estimate_level"] is None for r in _history(client, concept.id))
+
+
+@pytest.mark.parametrize(
+    "kind", ["self_explanation", "calibration", "source_quiz", "recall", "roleplay",
+             "paper_probe"])
+def test_one_graded_kind_makes_the_stored_estimate_the_grade(client, session, kind):
+    concept = _concept(session, "medium")
+    session.add(Assessment(concept_id=concept.id, kind=kind, prompt="p", score=0.6))
+    session.add(Assessment(concept_id=concept.id, kind="artifact_review", prompt="p",
+                           score=0.9))
+    session.commit()
+    rows = _history(client, concept.id)
+    assert rows[0]["kind"] == "artifact_review"
+    assert rows[0]["estimate_level"] == "medium"
+
+
+def test_an_unknown_kind_is_not_evidence_of_a_grade(client, session):
+    concept = _concept(session, "high")
+    session.add(Assessment(concept_id=concept.id, kind="mystery", prompt="p", score=0.9))
+    session.commit()
+    assert _history(client, concept.id)[0]["estimate_level"] is None
+
+
+def test_a_curriculum_seeded_concept_with_no_assessments_has_no_grade(client, session):
+    # The real seeding path: generate_track writes KnowledgeEstimate(level="high") per concept.
+    from adaptive_academy.engine.assess import graded_concept_ids
+
+    concept = _concept(session, "high")
+    assert _history(client, concept.id) == []
+    assert graded_concept_ids(session, [concept.id]) == set()
+
+
+def test_grading_kinds_are_exactly_the_kinds_that_write_the_estimate():
+    from adaptive_academy.engine.assess import GRADING_KINDS
+
+    assert GRADING_KINDS == {"self_explanation", "calibration", "source_quiz", "recall",
+                             "roleplay", "paper_probe"}
+    assert not GRADING_KINDS & {"teach", "productive_failure", "artifact_review"}

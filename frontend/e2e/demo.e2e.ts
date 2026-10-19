@@ -130,6 +130,9 @@ test('a keyless user explores the demo topic in one click and removes it', async
     await settle(page);
     await expect(page.getByText('The numbers behind the story')).toBeVisible();
     await expect(page.getByTestId('story-facts')).toContainText('Assessments');
+    // Only graded concepts count as solid; the six the demo never probed are untested (their
+    // stored estimate is a prior, not a grade).
+    await expect(page.getByTestId('story-facts')).toContainText('6 untested');
     await expectNoSideScroll(page);
 
     // A new tutor session starts with the reveal gate closed; sending without a key says how to

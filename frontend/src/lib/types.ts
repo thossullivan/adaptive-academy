@@ -96,6 +96,8 @@ export interface StoryFacts {
   items_done: number; items_total: number; progress_pct: number;
   phases_completed: number; phases_total: number; shipped: string[];
   concepts_solid: string[]; concepts_developing: string[]; concepts_shaky: string[];
+  /** Concepts with no graded assessment yet: their stored estimate is a prior, not a grade. */
+  concepts_untested: string[];
   load_bearing_shaky: string[]; assessments_count: number; mean_score: number | null;
   improvements: string[]; calibration_note: string;
 }

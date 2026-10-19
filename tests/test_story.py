@@ -1,5 +1,7 @@
 import json
 
+from sqlmodel import select
+
 from adaptive_academy.engine.story import (
     build_story_prompt,
     gather_story_facts,
@@ -89,6 +91,46 @@ def test_gather_story_facts_reflects_real_state(session):
     assert any("self-attention improved" in s for s in f.improvements)
     # Predicted 0.8 vs actual 0.3 dominates → overconfident.
     assert f.calibration_note == "tends to be overconfident"
+
+
+def test_fresh_topic_concepts_are_untested_not_solid(session):
+    # generate_track seeds every concept with KnowledgeEstimate(level="high"); that prior is
+    # not a grade, so a fresh topic has nothing solid, developing or shaky.
+    topic = Topic(title="Fresh")
+    session.add(topic)
+    session.commit()
+    track = Track(topic_id=topic.id, title="t", overview="o")
+    session.add(track)
+    session.commit()
+    for name in ("a", "b", "c"):
+        concept = Concept(track_id=track.id, name=name, is_load_bearing=True)
+        session.add(concept)
+        session.commit()
+        session.add(KnowledgeEstimate(concept_id=concept.id, level="high", confidence=0.5))
+    session.commit()
+
+    f = gather_story_facts(session, topic.id)
+
+    assert f.concepts_solid == [] and f.concepts_developing == [] and f.concepts_shaky == []
+    assert f.concepts_untested == ["a", "b", "c"]
+    assert "UNTESTED CONCEPTS: a, b, c" in build_story_prompt(f)[1]
+
+
+def test_shipped_or_taught_concepts_without_a_grade_are_untested(session):
+    topic = _seed(session)
+    track = session.exec(select(Track).where(Track.topic_id == topic.id)).one()
+    shipped = Concept(track_id=track.id, name="layernorm")
+    session.add(shipped)
+    session.commit()
+    session.add(KnowledgeEstimate(concept_id=shipped.id, level="high", confidence=0.5))
+    for kind in ("artifact_review", "teach", "productive_failure"):
+        session.add(Assessment(concept_id=shipped.id, kind=kind, prompt="p", score=0.9))
+    session.commit()
+
+    f = gather_story_facts(session, topic.id)
+
+    assert f.concepts_solid == ["softmax"]  # graded by its calibration probe
+    assert f.concepts_untested == ["layernorm"]
 
 
 def test_build_story_prompt_includes_priority_facts(session):

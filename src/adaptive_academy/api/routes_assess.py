@@ -3,7 +3,13 @@ from sqlmodel import Session, col, select
 
 from adaptive_academy.api.deps import get_llm, get_retriever, get_session
 from adaptive_academy.api.schemas import AssessIn, AssessmentOut, RubricOut
-from adaptive_academy.engine.assess import AnchorError, assess_concept, ensure_rubric
+from adaptive_academy.engine.assess import (
+    AnchorError,
+    AssessKindError,
+    assess_concept,
+    ensure_rubric,
+    graded_concept_ids,
+)
 from adaptive_academy.engine import scout
 from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
@@ -18,10 +24,6 @@ from adaptive_academy.models import (
 )
 
 router = APIRouter(prefix="/api/concepts", tags=["assess"])
-
-# Assessment kinds whose engines (teach.py, productive_failure.py) never write the concept's
-# KnowledgeEstimate.
-_NON_GRADING_KINDS = {"teach", "productive_failure"}
 
 
 def _assessment_out(a: Assessment, level: str | None = None) -> AssessmentOut:
@@ -88,7 +90,7 @@ def assess(concept_id: int, body: AssessIn, session: Session = Depends(get_sessi
                                 confidence_predicted=body.confidence_predicted,
                                 baseline_id=body.baseline_id, item_id=body.item_id,
                                 anchor_id=body.anchor_id, retriever=retriever)
-    except AnchorError as e:
+    except (AnchorError, AssessKindError) as e:
         raise HTTPException(400, str(e))
     # Engaging with a concept arms a delayed, unassisted retrieval check (§8.6).
     # A decay-check recall is itself rescheduled inside grade_decay_check, so skip re-arming.
@@ -96,7 +98,8 @@ def assess(concept_id: int, body: AssessIn, session: Session = Depends(get_sessi
         from adaptive_academy.engine.decay import schedule_decay_check
         schedule_decay_check(session, concept_id, retriever=retriever)
     _maybe_scout_after_assessment(session, concept, llm=llm)
-    return _assessment_out(result.assessment, result.estimate.level)
+    return _assessment_out(result.assessment,
+                           result.estimate.level if result.estimate else None)
 
 
 @router.get("/{concept_id}/assessments", response_model=list[AssessmentOut])
@@ -105,11 +108,11 @@ def list_assessments(concept_id: int, session: Session = Depends(get_session)) -
         select(Assessment).where(Assessment.concept_id == concept_id)
         .order_by(Assessment.id.desc())).all()
     # The competence grade is the concept's STORED estimate (written by the Assessor), carried
-    # on the newest row only; it is never recomputed from a row's own score. Teaching and
-    # productive-failure attempts never write the estimate, so a concept with only those rows
-    # still holds just the curriculum's prior, which is not a grade.
+    # on the newest row only; it is never recomputed from a row's own score. It counts as a
+    # grade only once an assessment of a kind that writes it exists (assess.GRADING_KINDS);
+    # until then the estimate is just the curriculum's prior, which is not a grade.
     level = None
-    if any(a.kind not in _NON_GRADING_KINDS for a in rows):
+    if graded_concept_ids(session, [concept_id]):
         estimate = session.exec(
             select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept_id)
         ).first()

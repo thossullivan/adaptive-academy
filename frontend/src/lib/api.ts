@@ -109,9 +109,9 @@ export const api = {
   listTopics: () => fetch('/api/topics').then(j<Topic[]>),
   /** Add the demo topic (idempotent; no API key needed) and return its id. */
   createDemo: () => fetch('/api/demo', { method: 'POST' }).then(j<DemoCreated>),
-  /** Remove the demo topic and everything that belongs to it. */
-  deleteDemo: () =>
-    fetch('/api/demo', { method: 'DELETE' }).then(async (r) => {
+  /** Remove this demo topic and everything that belongs to it (the API refuses a non-demo id). */
+  deleteDemo: (topicId: number) =>
+    fetch(`/api/demo/${topicId}`, { method: 'DELETE' }).then(async (r) => {
       if (!r.ok && r.status !== 404) await j<unknown>(r);
     }),
   getTopic: (id: number) => fetch(`/api/topics/${id}`).then(j<Topic>),

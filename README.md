@@ -24,11 +24,13 @@ an API key. New here? [Your first hour](docs/FIRST_HOUR.md) walks through it.
 | | |
 |---|---|
 | ![Today's session: warm up with due decay checks and cards, build the next track items, probe the shakiest concept, teach back](docs/images/today.png) | ![A tutor conversation in which the tutor asks questions until the learner logs an attempt, then gives the full picture](docs/images/tutor.png) |
-| **Today**: the daily loop, assembled from where you are. | **Tutor**: questions until you log an attempt, then the worked answer (a conversation from the demo's data). |
+| **Today**: the daily loop, assembled from where you are. | **Tutor**: questions until you log an attempt, then the worked answer. This is a session as it looks mid-conversation, using one of the demo's stored conversations; the page itself opens a new session, and past conversations aren't browsable yet. |
 | ![The Constellation: concepts as stars coloured by verdict, with one concept's prerequisite chain highlighted](docs/images/constellation.png) | ![The knowledge map with two concepts opened to show which signals made one shaky and the other verified](docs/images/competence.png) |
 | **Constellation**: the concept graph, lit by triangulated verdicts. | **Why this verdict**: each concept's signals and what would move it up. |
 
 Also: the [Usage page](docs/images/usage.png) and the [phone layout](docs/images/phone-today.png).
+The demo makes no model calls, so the Usage screenshot's rows are illustrative: they match the
+costs of one measured live run (2026-10-19, Claude Sonnet 5.5), not usage from the demo.
 The images are generated from the demo by `cd frontend && npm run screenshots`.
 
 ## What it does

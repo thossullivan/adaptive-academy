@@ -253,20 +253,27 @@ describe('demo api client', () => {
     expect(out).toEqual({ topic_id: 7, created: true });
   });
 
-  it('deleteDemo sends DELETE and treats an already-removed demo as done', async () => {
+  it('deleteDemo deletes the named demo and treats an already-removed one as done', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ detail: 'no demo topic' }), { status: 404 })
+      new Response(JSON.stringify({ detail: 'topic not found' }), { status: 404 })
     ) as any;
-    await expect(api.deleteDemo()).resolves.toBeUndefined();
+    await expect(api.deleteDemo(42)).resolves.toBeUndefined();
     const [url, opts] = (globalThis.fetch as any).mock.calls[0];
-    expect(url).toBe('/api/demo');
+    expect(url).toBe('/api/demo/42');
     expect(opts.method).toBe('DELETE');
+  });
+
+  it('deleteDemo surfaces a refusal for a topic that is not the demo', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'topic 3 is not a demo topic' }), { status: 400 })
+    ) as any;
+    await expect(api.deleteDemo(3)).rejects.toThrow('not a demo topic');
   });
 
   it('deleteDemo surfaces a real failure', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ detail: 'boom' }), { status: 500 })
     ) as any;
-    await expect(api.deleteDemo()).rejects.toThrow('boom');
+    await expect(api.deleteDemo(7)).rejects.toThrow('boom');
   });
 });

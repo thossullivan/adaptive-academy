@@ -40,7 +40,7 @@
           { l: 'Progress', v: `${facts.progress_pct}%`, h: `${facts.items_done}/${facts.items_total} steps` },
           { l: 'Assessments', v: facts.assessments_count, h: facts.mean_score == null ? 'no mean yet' : `mean ${Math.round(facts.mean_score * 100)}%` },
           { l: 'Days active', v: facts.span_days, h: `${facts.phases_completed}/${facts.phases_total} phases` },
-          { l: 'Solid concepts', v: facts.concepts_solid.length, h: `${facts.load_bearing_shaky.length} shaky load-bearing` }
+          { l: 'Solid concepts', v: facts.concepts_solid.length, h: `${facts.concepts_untested.length} untested · ${facts.load_bearing_shaky.length} shaky load-bearing` }
         ] as s}
           <div>
             <div class="eyebrow">{s.l}</div>

@@ -15,6 +15,6 @@ def seed(db_engine: Engine | None = None) -> None:
         topic, created = ensure_demo(session)
         if created:
             print(f"Added the demo topic {topic.id}: {topic.title!r}. "
-                  "Remove it from its dashboard, or with DELETE /api/demo.")
+                  f"Remove it from its dashboard, or with DELETE /api/demo/{topic.id}.")
         else:
             print(f"Demo topic already present ({topic.id}).")
