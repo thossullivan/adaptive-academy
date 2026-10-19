@@ -16,6 +16,7 @@ from adaptive_academy.api import (
     routes_memory,
     routes_momentum,
     routes_practice,
+    routes_setup,
     routes_story,
     routes_teach,
     routes_topics,
@@ -42,6 +43,7 @@ from adaptive_academy.api.routes_retention import (
 from adaptive_academy.api.routes_roleplay import router as roleplay_router
 from adaptive_academy.api.routes_scout import router as scout_router
 from adaptive_academy.db import create_db_and_tables
+from adaptive_academy.llm.keys import MissingAPIKeyError
 from adaptive_academy.llm.types import AgentSDKError
 
 
@@ -104,6 +106,13 @@ def create_app() -> FastAPI:
             detail = f"LLM request failed upstream ({type(exc).__name__}): {upstream}"[:300]
         return JSONResponse(status_code=502, content={"detail": detail})
 
+    @app.exception_handler(MissingAPIKeyError)
+    def _missing_key(request: Request, exc: MissingAPIKeyError) -> JSONResponse:
+        """No ANTHROPIC_API_KEY (unset/blank/placeholder) → a legible 503 telling a first-run
+        user exactly how to fix it, instead of a bare KeyError 500. Raised when an LLM-backed
+        route builds its Anthropic client, so it covers every such route at once."""
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
+
     @app.exception_handler(AgentSDKError)
     def _agent_sdk_error(request: Request, exc: AgentSDKError) -> JSONResponse:
         """Agent SDK (subscription-backend) failures → legible 502, like APIError."""
@@ -122,6 +131,7 @@ def create_app() -> FastAPI:
     def health() -> dict:
         return {"status": "ok"}
 
+    app.include_router(routes_setup.router)
     app.include_router(routes_topics.router)
     app.include_router(routes_story.router)
     app.include_router(routes_conversations.router)

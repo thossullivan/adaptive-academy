@@ -223,3 +223,20 @@ describe('program api client', () => {
     expect(out).toEqual(ctx);
   });
 });
+
+describe('api errors', () => {
+  it('surfaces the API detail message instead of the bare status', async () => {
+    const detail = 'No ANTHROPIC_API_KEY configured — copy .env.example to .env.';
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail }), { status: 503, statusText: 'Service Unavailable' })
+    ) as any;
+    await expect(api.listTopics()).rejects.toThrow(detail);
+  });
+
+  it('falls back to the status line when the body has no detail', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('<html>oops</html>', { status: 500, statusText: 'Internal Server Error' })
+    ) as any;
+    await expect(api.listTopics()).rejects.toThrow('500 Internal Server Error');
+  });
+});

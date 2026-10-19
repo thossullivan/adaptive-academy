@@ -1,0 +1,166 @@
+"""First-run legibility: /api/setup reports LLM readiness, and a missing key is a legible 503."""
+
+import pytest
+from fastapi.testclient import TestClient
+
+from adaptive_academy.api.app import app
+from adaptive_academy.api.deps import get_session
+from adaptive_academy.models import Concept, Topic, Track
+
+SECRET = "sk-ant-api03-SUPERSECRETVALUE-do-not-leak"
+
+
+@pytest.fixture
+def client(session):
+    app.dependency_overrides[get_session] = lambda: session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def no_network(monkeypatch):
+    """Fail loudly if anything tries to build a real Anthropic SDK client."""
+
+    class _NoNetwork:
+        def __init__(self, *a, **kw):
+            raise AssertionError("a real Anthropic client was constructed")
+
+    monkeypatch.setattr("adaptive_academy.llm.anthropic_client.Anthropic", _NoNetwork)
+    monkeypatch.setattr("adaptive_academy.llm.anthropic_researcher.Anthropic", _NoNetwork)
+
+
+def test_setup_ready_when_key_set(client, monkeypatch):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    r = client.get("/api/setup")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["llm_backend"] == "anthropic"
+    assert body["llm_ready"] is True
+    assert isinstance(body["message"], str) and body["message"]
+    # Neither the key nor any recognisable fragment of it is ever echoed back.
+    assert SECRET not in r.text
+    assert "SUPERSECRET" not in r.text
+    assert SECRET[-6:] not in r.text
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_setup_not_ready_when_key_unset_or_blank(client, monkeypatch, value):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    if value is None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", value)
+    body = client.get("/api/setup").json()
+    assert body["llm_backend"] == "anthropic"
+    assert body["llm_ready"] is False
+    assert "ANTHROPIC_API_KEY" in body["message"]
+
+
+@pytest.mark.parametrize("placeholder", ["sk-ant-xxxxx", "sk-ant-...", "sk-ant-…"])
+def test_setup_not_ready_when_key_is_a_documented_placeholder(client, monkeypatch, placeholder):
+    # Copying .env.example unedited, or pasting the README/notice example literally, is the
+    # commonest first-run slip.
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", placeholder)
+    r = client.get("/api/setup")
+    body = r.json()
+    assert body["llm_ready"] is False
+    assert placeholder not in r.text
+
+
+def test_setup_ready_in_agent_sdk_mode_without_key(client, monkeypatch):
+    monkeypatch.setenv("AA_LLM_BACKEND", "agent_sdk")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    body = client.get("/api/setup").json()
+    assert body["llm_backend"] == "agent_sdk"
+    assert body["llm_ready"] is True
+
+
+def test_agent_sdk_tutor_turn_runs_without_key(client, session, monkeypatch, no_network):
+    # agent_sdk reports llm_ready with no key, so the Tutor must actually work then: its
+    # tool turn goes through the SDK tutor (in-process tools), never the raising key bridge.
+    import adaptive_academy.engine.tutor_sdk as tutor_sdk
+    from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
+
+    monkeypatch.setenv("AA_LLM_BACKEND", "agent_sdk")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    class _Result:
+        def __init__(self, result):
+            self.result = result
+            self.is_error = False
+
+    async def fake_query(prompt, options):
+        assert "mcp__tutor__reveal_solution" in options.allowed_tools
+        yield _Result("Try writing the softmax denominator first.")
+
+    def bridge(*a, **kw):
+        raise AssertionError("agent_sdk Tutor turn used the API-key bridge")
+
+    monkeypatch.setattr(tutor_sdk, "ResultMessage", _Result)
+    monkeypatch.setattr(tutor_sdk, "query", fake_query)
+    monkeypatch.setattr(AgentSDKLLMClient, "complete", bridge)
+
+    cid = _seed_concept(session)
+    topic_id = session.get(Track, session.get(Concept, cid).track_id).topic_id
+    convo = client.post("/api/conversations", json={"topic_id": topic_id, "concept_id": cid})
+    assert convo.status_code == 200
+    r = client.post(f"/api/conversations/{convo.json()['id']}/messages",
+                    json={"content": "how does softmax work?"})
+    assert r.status_code == 200
+    assert r.json()["reply"] == "Try writing the softmax denominator first."
+
+
+def _seed_concept(session) -> int:
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    track = Track(topic_id=topic.id, title="tr")
+    session.add(track)
+    session.commit()
+    concept = Concept(track_id=track.id, name="softmax")
+    session.add(concept)
+    session.commit()
+    return concept.id
+
+
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_llm_route_without_key_is_legible_503(client, session, monkeypatch, no_network, value):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    if value is None:
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", value)
+    cid = _seed_concept(session)
+    r = client.post(f"/api/concepts/{cid}/assess",
+                    json={"kind": "self_explanation", "response": "..."})
+    assert r.status_code == 503
+    detail = r.json()["detail"]
+    assert "No ANTHROPIC_API_KEY configured" in detail
+    assert ".env.example" in detail
+    assert "just api" in detail
+
+
+def test_research_route_without_key_is_legible_503(client, session, monkeypatch, no_network):
+    # The Researcher client is built separately from the LLM client — cover it too.
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    topic = Topic(title="T", goal="g")
+    session.add(topic)
+    session.commit()
+    r = client.post(f"/api/topics/{topic.id}/research")
+    assert r.status_code == 503
+    assert "No ANTHROPIC_API_KEY configured" in r.json()["detail"]
+
+
+def test_anthropic_clients_raise_typed_error_without_key(monkeypatch, no_network):
+    from adaptive_academy.llm.anthropic_anchor import AnthropicAnchorClient
+    from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
+    from adaptive_academy.llm.anthropic_researcher import AnthropicResearcherClient
+    from adaptive_academy.llm.keys import MissingAPIKeyError
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", " ")
+    for ctor in (AnthropicLLMClient, AnthropicResearcherClient, AnthropicAnchorClient):
+        with pytest.raises(MissingAPIKeyError):
+            ctor()

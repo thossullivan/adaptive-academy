@@ -38,6 +38,7 @@ import type {
   ScoutResult,
   ScoutSuggestionGroup,
   SendResult,
+  SetupStatus,
   ShipResult,
   SourceDoc,
   SRSCard,
@@ -53,7 +54,13 @@ import type {
 } from './types';
 
 async function j<T>(r: Response): Promise<T> {
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  if (!r.ok) {
+    // Prefer the API's own `detail` (e.g. the missing-key 503 says how to fix it); fall back
+    // to the status line for non-JSON bodies.
+    const body = await r.json().catch(() => null);
+    const detail = typeof body?.detail === 'string' ? body.detail : null;
+    throw new Error(detail ?? `${r.status} ${r.statusText}`);
+  }
   return r.json() as Promise<T>;
 }
 
@@ -94,6 +101,7 @@ export function scoutCardTitle(suggestions: TopicSuggestion[]): string | null {
 }
 
 export const api = {
+  getSetup: () => fetch('/api/setup').then(j<SetupStatus>),
   listTopics: () => fetch('/api/topics').then(j<Topic[]>),
   getTopic: (id: number) => fetch(`/api/topics/${id}`).then(j<Topic>),
   startConversation: (topic_id: number, concept_id: number) =>

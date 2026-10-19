@@ -1,8 +1,8 @@
-import os
 from typing import Any
 
 from anthropic import Anthropic
 
+from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.types import LLMResponse, ToolCall
 
@@ -15,7 +15,7 @@ class AnthropicLLMClient:
         # the old ceilings and truncated mid-JSON → "malformed JSON" 502s. The curriculum prompt
         # also bounds scope (6-12 phases), but billing is per output token generated, not per
         # max_tokens, so a high ceiling is free insurance against truncation.
-        self._client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=3)
+        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3)
         self._model = get_model(role)
         self._max_tokens = max_tokens
 
