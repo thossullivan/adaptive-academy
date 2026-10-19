@@ -56,6 +56,7 @@ class TopicOut(BaseModel):
     intent: Optional[IntentOut] = None
     has_foundation: bool = False
     has_track: bool = False
+    is_demo: bool = False
 
 
 class StartConversationIn(BaseModel):

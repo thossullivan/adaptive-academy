@@ -65,6 +65,37 @@ def test_assess_then_history(session):
     app.dependency_overrides.clear()
 
 
+def test_artifact_review_probe_is_the_shipped_signal_not_a_grade(session):
+    # An artifact review lights "shipped"; if it also wrote the estimate, one high-scoring
+    # review would be both the grade and its own corroboration ("solid" from one action).
+    app.dependency_overrides[get_session] = lambda: session
+    grade = json.dumps({"score": 0.9, "verdict": "good", "gaps": [], "mechanism_present": True})
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient([LLMResponse(text=grade)])
+    cid = _seed_concept(session)
+    client = TestClient(app)
+    r = client.post(f"/api/concepts/{cid}/assess",
+                    json={"kind": "artifact_review", "response": "my repo"})
+    assert r.status_code == 200, r.text
+    assert r.json()["estimate_level"] is None
+    est = session.exec(select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == cid)).one()
+    session.refresh(est)
+    assert (est.level, est.confidence) == ("high", 0.5)  # the seeded prior, untouched
+    assert client.get(f"/api/concepts/{cid}/assessments").json()[0]["estimate_level"] is None
+    app.dependency_overrides.clear()
+
+
+def test_unknown_assessment_kind_is_refused(session):
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_llm] = lambda: _llm()
+    cid = _seed_concept(session)
+    client = TestClient(app)
+    for kind in ("mystery", "teach", "productive_failure"):
+        r = client.post(f"/api/concepts/{cid}/assess", json={"kind": kind, "response": "x"})
+        assert r.status_code == 400, (kind, r.text)
+    assert client.get(f"/api/concepts/{cid}/assessments").json() == []
+    app.dependency_overrides.clear()
+
+
 def test_get_rubric_generates(session):
     app.dependency_overrides[get_session] = lambda: session
     rubric = json.dumps({"criteria": ["c"], "must_include": ["x"], "strong_signs": [],

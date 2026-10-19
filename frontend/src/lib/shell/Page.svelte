@@ -8,6 +8,7 @@
     lead = '',
     width = 'normal',
     actions,
+    titleAside,
     children
   }: {
     eyebrow?: string;
@@ -15,6 +16,8 @@
     lead?: string;
     width?: 'normal' | 'wide' | 'narrow';
     actions?: Snippet;
+    /** Rendered beside the title (e.g. a status badge). */
+    titleAside?: Snippet;
     children: Snippet;
   } = $props();
 
@@ -26,7 +29,12 @@
     <header class="mb-7 flex flex-wrap items-end justify-between gap-4 rise">
       <div class="min-w-0">
         {#if eyebrow}<div class="eyebrow mb-2">{eyebrow}</div>{/if}
-        {#if title}<h1 class="text-3xl text-fg md:text-[2.1rem]">{title}</h1>{/if}
+        {#if title && titleAside}
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <h1 class="min-w-0 text-3xl text-fg [overflow-wrap:anywhere] md:text-[2.1rem]">{title}</h1>
+            {@render titleAside()}
+          </div>
+        {:else if title}<h1 class="text-3xl text-fg md:text-[2.1rem]">{title}</h1>{/if}
         {#if lead}<p class="mt-2 max-w-prose text-sm leading-relaxed text-muted">{lead}</p>{/if}
       </div>
       {#if actions}<div class="flex shrink-0 items-center gap-2">{@render actions()}</div>{/if}

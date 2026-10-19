@@ -15,6 +15,10 @@ services:
       # Optional daily spending limit (USD); blank = no limit. "Today" is the container's
       # day, which is UTC unless you also pass TZ.
       AA_DAILY_BUDGET_USD: ${AA_DAILY_BUDGET_USD:-}
+      # The app runs as this uid/gid (not root) and owns /data. On Linux, set them to your
+      # own ids in .env (AA_UID=$(id -u), AA_GID=$(id -g)) so vault exports are yours.
+      AA_UID: ${AA_UID:-1000}
+      AA_GID: ${AA_GID:-1000}
     volumes:
       - aa-data:/data
       # Optional Obsidian vault. Unset OBSIDIAN_VAULT_PATH mounts an empty

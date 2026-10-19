@@ -1,6 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { toasts } from '$lib/toast.svelte';
   import { api } from '$lib/api';
   import type { Concept, Assessment, Consolidation } from '$lib/types';
   import { pct } from '$lib/utils';
@@ -39,6 +40,8 @@
     consolidation = null;
     try {
       problem = (await api.generateChallenge(conceptId)).problem;
+    } catch (e) {
+      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
       generating = false;
     }
@@ -49,6 +52,8 @@
     consolidating = true;
     try {
       consolidation = await api.consolidate(conceptId, problem, attempt);
+    } catch (e) {
+      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
       consolidating = false;
     }
@@ -94,6 +99,8 @@
       });
       calPhase = 'result';
       await loadCalAccuracy();
+    } catch (e) {
+      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
       submitting = false;
     }

@@ -16,6 +16,8 @@ class Topic(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
     created_at: datetime = Field(default_factory=_now)
+    # The one-click example topic (adaptive_academy/demo.py): removable as a unit.
+    is_demo: bool = False
     tracks: list["Track"] = Relationship(back_populates="topic")
 
 

@@ -27,6 +27,15 @@ class TopicStore {
     if (browser) localStorage.setItem(KEY, String(id));
   }
 
+  /** Forget a topic that no longer exists (e.g. the removed demo); select the next one. */
+  forget(id: number) {
+    this.list = this.list.filter((t) => t.id !== id);
+    if (this.currentId === id) {
+      this.currentId = this.list[0]?.id ?? null;
+      if (browser) localStorage.removeItem(KEY);
+    }
+  }
+
   /** Re-fetch the list (e.g. after creating a topic) without losing selection. */
   async refresh() {
     this.list = await api.listTopics();

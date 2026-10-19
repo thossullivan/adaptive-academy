@@ -3,6 +3,7 @@
   import { onMount, tick } from 'svelte';
   import { api } from '$lib/api';
   import { topics } from '$lib/topics.svelte';
+  import { toasts } from '$lib/toast.svelte';
   import type { Conversation, EventOut, MessageOut, Topic } from '$lib/types';
   import { Badge, Select, Button } from '$lib/ui';
   import MemoryDisclosure from '$lib/ui/MemoryDisclosure.svelte';
@@ -69,6 +70,11 @@
       levels = { assistance: r.assistance_level, challenge: r.challenge_level, attempt: r.attempt_logged };
       await tick();
       scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+    } catch (e) {
+      // Nothing was sent (e.g. no API key): take the bubble back, keep the draft, say why.
+      messages = messages.slice(0, -1);
+      input = content;
+      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
       busy = false;
     }
@@ -122,8 +128,7 @@
                 ? 'rounded-br-sm bg-surface-3 text-fg'
                 : 'rounded-bl-sm border border-border bg-surface text-fg-dim'}"
             >
-              {#if m.role === 'tutor'}<div class="eyebrow mb-1.5 !text-[0.55rem] text-accent">tutor</div>{/if}
-              {m.content}
+              {#if m.role === 'tutor'}<div class="eyebrow mb-1.5 !text-[0.55rem] text-accent">tutor</div>{/if}{m.content}
             </div>
             {#if m.role === 'tutor'}
               <MemoryDisclosure hits={m.memory ?? []} />

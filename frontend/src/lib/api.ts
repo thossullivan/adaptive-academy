@@ -11,6 +11,7 @@ import type {
   CreateProgramBody,
   CreateTopicBody,
   Curriculum,
+  DemoCreated,
   DecayDue,
   DecayGrade,
   EventOut,
@@ -43,6 +44,7 @@ import type {
   SourceDoc,
   SRSCard,
   Story,
+  StoryFacts,
   TeachResult,
   Topic,
   TopicSuggestion,
@@ -105,6 +107,13 @@ export const api = {
   getSetup: () => fetch('/api/setup').then(j<SetupStatus>),
   getUsage: () => fetch('/api/usage').then(j<UsageReport>),
   listTopics: () => fetch('/api/topics').then(j<Topic[]>),
+  /** Add the demo topic (idempotent; no API key needed) and return its id. */
+  createDemo: () => fetch('/api/demo', { method: 'POST' }).then(j<DemoCreated>),
+  /** Remove this demo topic and everything that belongs to it (the API refuses a non-demo id). */
+  deleteDemo: (topicId: number) =>
+    fetch(`/api/demo/${topicId}`, { method: 'DELETE' }).then(async (r) => {
+      if (!r.ok && r.status !== 404) await j<unknown>(r);
+    }),
   getTopic: (id: number) => fetch(`/api/topics/${id}`).then(j<Topic>),
   startConversation: (topic_id: number, concept_id: number) =>
     fetch('/api/conversations', {
@@ -193,6 +202,8 @@ export const api = {
     fetch(`/api/topics/${topicId}/anchors`, { method: 'POST' }).then(j<AnchorGen>),
   listConceptAnchors: (conceptId: number) =>
     fetch(`/api/concepts/${conceptId}/anchors`).then(j<Anchor[]>),
+  getStoryFacts: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/story/facts`).then(j<StoryFacts>),
   makeStory: (topicId: number) =>
     fetch(`/api/topics/${topicId}/story`, { method: 'POST' }).then(j<Story>),
   listDecay: (topicId: number) => fetch(`/api/topics/${topicId}/decay`).then(j<DecayDue>),

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { topics } from '$lib/topics.svelte';
   import { setup } from '$lib/setup.svelte';
   import { api, scoutCardTitle } from '$lib/api';
@@ -60,23 +61,33 @@
       .catch(() => [] as TopicSuggestion[]);
   }
 
+  // A topic switch mid-load starts a second load; only the latest one may write state.
+  let loadSeq = 0;
+
   async function load(topicId: number) {
+    const seq = ++loadSeq;
+    const stale = () => seq !== loadSeq;
     loading = true;
     hasCurriculum = false;
     await loadScout(topicId);
+    if (stale()) return;
+    let c: Curriculum;
     try {
-      cur = await api.getCurriculum(topicId);
-      hasCurriculum = true;
+      c = await api.getCurriculum(topicId);
     } catch {
+      if (stale()) return;
       cur = null;
       loading = false;
       return;
     }
+    if (stale()) return;
+    cur = c;
+    hasCurriculum = true;
 
     // Progress from phases/items.
     let done = 0,
       total = 0;
-    phaseProg = cur.phases.map((p) => {
+    phaseProg = c.phases.map((p) => {
       const d = p.items.filter((it) => it.status === 'done').length;
       done += d;
       total += p.items.length;
@@ -87,17 +98,18 @@
 
     // Per-concept assessments → levels, trend, calibration.
     const assessLists = await Promise.all(
-      cur.concepts.map((c) => api.listAssessments(c.id).catch(() => [] as Assessment[]))
+      c.concepts.map((k) => api.listAssessments(k.id).catch(() => [] as Assessment[]))
     );
+    if (stale()) return;
 
-    rows = cur.concepts.map((c, idx) => {
+    rows = c.concepts.map((k, idx) => {
       const signals = conceptSignals(assessLists[idx]);
-      return { ...c, signals, verdict: conceptVerdict(signals), n: assessLists[idx].length };
+      return { ...k, signals, verdict: conceptVerdict(signals), n: assessLists[idx].length };
     });
 
     const flat: { id: number; a: Assessment; label: string }[] = [];
-    cur.concepts.forEach((c, idx) => {
-      assessLists[idx].forEach((a) => flat.push({ id: a.id, a, label: c.name }));
+    c.concepts.forEach((k, idx) => {
+      assessLists[idx].forEach((a) => flat.push({ id: a.id, a, label: k.name }));
     });
     flat.sort((x, y) => x.id - y.id);
     trend = flat.map((f, i) => ({ i, score: f.a.score, label: f.label }));
@@ -111,6 +123,7 @@
       api.listRetention(topicId, { due: true }).catch(() => ({ cards: [], prompts: [] })),
       api.listEvents(topicId).catch(() => [] as EventOut[])
     ]);
+    if (stale()) return;
     cardCount = ret.cards.length;
     dueCount = due.cards.length;
     events = evts;
@@ -150,6 +163,47 @@
 
   const tid = $derived(topics.current?.id ?? null);
 
+  // The demo topic: one click to a worked example (no API key), one confirmed click to remove.
+  let demoBusy = $state(false);
+  let demoError = $state('');
+  let confirmRemove = $state(false);
+  let removing = $state(false);
+
+  async function exploreDemo() {
+    demoBusy = true;
+    demoError = '';
+    try {
+      const { topic_id } = await api.createDemo();
+      // Select first: the list then arrives with the demo already current (one dashboard load).
+      topics.select(topic_id);
+      await topics.refresh();
+      await goto('/');
+    } catch (e) {
+      demoError = `Couldn't load the demo: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      demoBusy = false;
+    }
+  }
+
+  async function removeDemo() {
+    const current = topics.current;
+    if (current == null || !current.is_demo) return;
+    const id = current.id;
+    removing = true;
+    demoError = '';
+    try {
+      await api.deleteDemo(id);
+      topics.forget(id);
+      await topics.refresh();
+      confirmRemove = false;
+      await goto('/');
+    } catch (e) {
+      demoError = `Couldn't remove the demo: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      removing = false;
+    }
+  }
+
   // First-run entry points: a Program is the long-horizon path, a Topic the single-subject one.
   const entryPoints = [
     {
@@ -170,6 +224,10 @@
     [...rows].sort((a, b) => VERDICT_RANK[a.verdict] - VERDICT_RANK[b.verdict] || Number(b.is_load_bearing) - Number(a.is_load_bearing))
   );
 </script>
+
+{#snippet demoBadge()}
+  <span data-testid="page-demo-badge"><Badge tone="info" dot>Demo</Badge></span>
+{/snippet}
 
 {#if !topics.current}
   <!-- First-run welcome -->
@@ -201,14 +259,53 @@
           </a>
         {/each}
       </div>
+
+      <!-- Secondary: look around a worked example before spending anything. -->
+      <div class="mt-6 flex flex-col items-center gap-1 text-sm">
+        <button
+          type="button"
+          onclick={exploreDemo}
+          disabled={demoBusy}
+          class="rounded-[var(--radius-sm)] px-2 py-1 font-medium text-accent transition-colors hover:text-accent-bright hover:underline disabled:opacity-60"
+        >
+          {demoBusy ? 'Loading the demo…' : 'Explore a demo topic →'}
+        </button>
+        <p class="max-w-sm text-xs leading-relaxed text-faint">
+          A worked example with a few weeks of activity. Needs no API key, and you can remove it later.
+        </p>
+        {#if demoError}<p class="text-xs text-danger" role="alert">{demoError}</p>{/if}
+      </div>
     </div>
   </div>
 {:else}
-  <Page eyebrow="Learning command center" title={topics.current.title} width="wide">
+  <Page eyebrow="Learning command center" title={topics.current.title} width="wide" titleAside={topics.current.is_demo ? demoBadge : undefined}>
     {#snippet actions()}
       <Button variant="outline" href="/topics/{tid}/map">Constellation</Button>
       <Button href="/topics/{tid}/today">Start today's session →</Button>
     {/snippet}
+
+    {#if topics.current.is_demo}
+      <Card pad class="mb-4 rise" data-testid="demo-notice">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-3">
+          <p class="min-w-0 flex-1 basis-64 text-sm leading-relaxed text-fg-dim">
+            <span class="font-medium text-fg">This is a demo topic</span> — example data from a few weeks of use, so you
+            can see what each page does. Browsing it needs no API key; running the agents does.
+          </p>
+          {#if confirmRemove}
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm text-fg">Remove the demo topic and everything in it?</span>
+              <Button size="sm" variant="danger" onclick={removeDemo} disabled={removing}>
+                {removing ? 'Removing…' : 'Yes, remove it'}
+              </Button>
+              <Button size="sm" variant="ghost" onclick={() => (confirmRemove = false)} disabled={removing}>Cancel</Button>
+            </div>
+          {:else}
+            <Button size="sm" variant="outline" onclick={() => (confirmRemove = true)}>Remove demo</Button>
+          {/if}
+        </div>
+        {#if demoError}<p class="mt-2 text-xs text-danger" role="alert">{demoError}</p>{/if}
+      </Card>
+    {/if}
 
     <SetupNotice status={setup.status} class="mb-4" />
 

@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import { topics } from '$lib/topics.svelte';
+  import Badge from '$lib/ui/Badge.svelte';
 
   let open = $state(false);
 
@@ -44,7 +45,12 @@
       {topics.current?.title?.[0]?.toUpperCase() ?? '·'}
     </span>
     <span class="min-w-0 flex-1">
-      <span class="eyebrow !text-[0.55rem]">Topic</span>
+      <span class="flex items-center gap-1.5">
+        <span class="eyebrow !text-[0.55rem]">Topic</span>
+        {#if topics.current?.is_demo}
+          <span data-testid="switcher-demo-badge"><Badge tone="info" class="!px-1.5 !py-0 !text-[0.6rem]">Demo</Badge></span>
+        {/if}
+      </span>
       <span class="block truncate text-sm font-medium text-fg">{topics.current?.title ?? 'No topic yet'}</span>
     </span>
     <svg class="size-3.5 shrink-0 text-muted transition-transform" class:rotate-180={open} viewBox="0 0 16 16" fill="none">
@@ -67,7 +73,8 @@
             >
               <span class="size-1.5 shrink-0 rounded-full" style:background={t.id === topics.currentId ? 'var(--accent)' : 'transparent'}></span>
               <span class="truncate">{t.title}</span>
-              <span class="eyebrow ml-auto !text-[0.55rem]">{t.concepts.length}c</span>
+              {#if t.is_demo}<Badge tone="info" class="shrink-0 !px-1.5 !py-0 !text-[0.6rem]">Demo</Badge>{/if}
+              <span class="eyebrow ml-auto shrink-0 !text-[0.55rem]">{t.concepts.length}c</span>
             </button>
           </li>
         {/each}

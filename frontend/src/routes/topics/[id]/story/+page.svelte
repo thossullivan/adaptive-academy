@@ -1,7 +1,8 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { Story } from '$lib/types';
+  import type { Story, StoryFacts } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Markdown } from '$lib/ui';
 
@@ -22,8 +23,40 @@
     }
   }
 
-  const facts = $derived(story?.facts ?? null);
+  // The numbers are computed in code (no model call), so they show before any story is composed.
+  let recorded = $state<StoryFacts | null>(null);
+  onMount(async () => {
+    recorded = await api.getStoryFacts(topicId).catch(() => null);
+  });
+
+  const facts = $derived(story?.facts ?? recorded);
 </script>
+
+{#snippet factsCard(facts: StoryFacts)}
+  <div data-testid="story-facts">
+    <Card pad eyebrow="Grounded in" title="The numbers behind the story">
+      <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {#each [
+          { l: 'Progress', v: `${facts.progress_pct}%`, h: `${facts.items_done}/${facts.items_total} steps` },
+          { l: 'Assessments', v: facts.assessments_count, h: facts.mean_score == null ? 'no mean yet' : `mean ${Math.round(facts.mean_score * 100)}%` },
+          { l: 'Days active', v: facts.span_days, h: `${facts.phases_completed}/${facts.phases_total} phases` },
+          { l: 'Solid concepts', v: facts.concepts_solid.length, h: `${facts.concepts_untested.length} untested · ${facts.load_bearing_shaky.length} shaky load-bearing` }
+        ] as s}
+          <div>
+            <div class="eyebrow">{s.l}</div>
+            <div class="nums mt-1 font-display text-2xl text-fg">{s.v}</div>
+            <div class="text-xs text-faint">{s.h}</div>
+          </div>
+        {/each}
+      </div>
+      {#if facts.calibration_note}
+        <div class="mt-4 border-t border-border pt-3">
+          <Badge tone={facts.calibration_note.includes('well') ? 'success' : 'warn'} dot>calibration: {facts.calibration_note}</Badge>
+        </div>
+      {/if}
+    </Card>
+  </div>
+{/snippet}
 
 <Page eyebrow="Progress story" title="Your build-in-public chapter" lead="A generation-first narrative of how far you've come — grounded in your real numbers, honest about the gaps." width="normal">
   {#snippet actions()}
@@ -67,29 +100,7 @@
         </div>
       {/if}
 
-      {#if facts}
-        <Card pad eyebrow="Grounded in" title="The numbers behind the story">
-          <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {#each [
-              { l: 'Progress', v: `${facts.progress_pct}%`, h: `${facts.items_done}/${facts.items_total} steps` },
-              { l: 'Assessments', v: facts.assessments_count, h: facts.mean_score == null ? 'no mean yet' : `mean ${Math.round(facts.mean_score * 100)}%` },
-              { l: 'Days active', v: facts.span_days, h: `${facts.phases_completed}/${facts.phases_total} phases` },
-              { l: 'Solid concepts', v: facts.concepts_solid.length, h: `${facts.load_bearing_shaky.length} shaky load-bearing` }
-            ] as s}
-              <div>
-                <div class="eyebrow">{s.l}</div>
-                <div class="nums mt-1 font-display text-2xl text-fg">{s.v}</div>
-                <div class="text-xs text-faint">{s.h}</div>
-              </div>
-            {/each}
-          </div>
-          {#if facts.calibration_note}
-            <div class="mt-4 border-t border-border pt-3">
-              <Badge tone={facts.calibration_note.includes('well') ? 'success' : 'warn'} dot>calibration: {facts.calibration_note}</Badge>
-            </div>
-          {/if}
-        </Card>
-      {/if}
+      {#if facts}{@render factsCard(facts)}{/if}
     </article>
   {:else}
     <Card accent pad class="text-center">
@@ -103,5 +114,8 @@
         <div class="mt-6"><Button onclick={compose} size="lg" disabled={busy}>{busy ? 'Composing…' : 'Compose my story'}</Button></div>
       </div>
     </Card>
+    {#if facts && facts.assessments_count + facts.items_done > 0}
+      <div class="mt-4 rise">{@render factsCard(facts)}</div>
+    {/if}
   {/if}
 </Page>

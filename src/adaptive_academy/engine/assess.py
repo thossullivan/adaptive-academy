@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass, field
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.retriever_types import Retriever
@@ -28,9 +28,40 @@ _OMISSION_CEIL = 0.70
 _MISCONCEPTION_CEIL = 0.50
 _NO_MECHANISM_CEIL = 0.50  # the illusion-of-competence cap
 
+# The assessment kinds whose grade writes the concept's KnowledgeEstimate (in assess_concept,
+# below). Their callers: the /assess route (self_explanation, calibration, source_quiz),
+# decay.grade_decay_check (recall), roleplay.grade_roleplay (roleplay),
+# paper_probe.grade_paper_probe (paper_probe). The stored estimate is the concept's GRADE only when at least one of these
+# exists: the curriculum seeds every concept with a prior (level "high"), and a prior is not a
+# grade. Kinds that never write the estimate, and so never make it a grade:
+#   teach, productive_failure  (their own engines; corroborating signals, not grades)
+#   artifact_review            (the "shipped" signal: engine/artifact.py writes it per phase
+#                               concept without touching the estimate, and assess_concept
+#                               below skips the estimate for it too, so one high-scoring
+#                               review can't be both the grade and its own corroboration)
+GRADING_KINDS = frozenset(
+    {"self_explanation", "calibration", "source_quiz", "recall", "roleplay", "paper_probe"})
+ASSESSABLE_KINDS = GRADING_KINDS | {"artifact_review"}  # what assess_concept accepts
+
+
+def graded_concept_ids(session: Session, concept_ids: list[int]) -> set[int]:
+    """The concepts (of these) whose stored KnowledgeEstimate is a real grade: at least one
+    assessment of a GRADING_KINDS kind. Every other concept's estimate is only a prior."""
+    if not concept_ids:
+        return set()
+    return set(session.exec(
+        select(Assessment.concept_id).where(
+            col(Assessment.concept_id).in_(concept_ids),
+            col(Assessment.kind).in_(GRADING_KINDS),
+        ).distinct()).all())
+
 
 class AnchorError(Exception):
     """No ReferenceAnchor available for a source_quiz probe (route maps to HTTP 400)."""
+
+
+class AssessKindError(ValueError):
+    """An assessment kind assess_concept doesn't grade (route maps to HTTP 400)."""
 
 
 def level_from_score(score: float) -> tuple[str, float]:
@@ -164,7 +195,7 @@ def ensure_rubric(session: Session, concept: Concept, *, llm: LLMClient) -> Rubr
 @dataclass
 class AssessmentResult:
     assessment: Assessment
-    estimate: KnowledgeEstimate
+    estimate: KnowledgeEstimate | None  # None for a kind outside GRADING_KINDS (no grade)
     events: list[AgentEvent]
 
 
@@ -219,8 +250,13 @@ def assess_concept(
     anchor_id: int | None = None,
     retriever: Retriever | None = None,
 ) -> AssessmentResult:
-    """Run an anchored probe, persist an Assessment, and update the KnowledgeEstimate."""
+    """Run an anchored probe, persist an Assessment, and (for GRADING_KINDS) update the
+    KnowledgeEstimate."""
     from adaptive_academy.engine.memory import index_assessment, topic_id_for_concept
+
+    if kind not in ASSESSABLE_KINDS:
+        raise AssessKindError(
+            f"unknown assessment kind {kind!r}; expected one of {sorted(ASSESSABLE_KINDS)}")
 
     events: list[AgentEvent] = []
     topic_id = topic_id_for_concept(session, concept.id)
@@ -286,17 +322,20 @@ def assess_concept(
     session.flush()
     index_assessment(session, assessment, topic_id=topic_id, retriever=retriever)
 
-    level, conf = level_from_score(final_score)
-    estimate = session.exec(
-        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
-    if estimate is None:
-        estimate = KnowledgeEstimate(concept_id=concept.id)
-        session.add(estimate)
-    estimate.level, estimate.confidence = level, conf
-    emit("assess:estimate", f"level={level}")
+    estimate: KnowledgeEstimate | None = None
+    if kind in GRADING_KINDS:
+        level, conf = level_from_score(final_score)
+        estimate = session.exec(
+            select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
+        if estimate is None:
+            estimate = KnowledgeEstimate(concept_id=concept.id)
+            session.add(estimate)
+        estimate.level, estimate.confidence = level, conf
+        emit("assess:estimate", f"level={level}")
 
     emit("assess:done", f"concept {concept.id}")
     session.commit()
     session.refresh(assessment)
-    session.refresh(estimate)
+    if estimate is not None:
+        session.refresh(estimate)
     return AssessmentResult(assessment=assessment, estimate=estimate, events=events)

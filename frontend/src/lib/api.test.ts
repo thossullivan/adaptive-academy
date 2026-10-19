@@ -240,3 +240,40 @@ describe('api errors', () => {
     await expect(api.listTopics()).rejects.toThrow('500 Internal Server Error');
   });
 });
+
+describe('demo api client', () => {
+  it('createDemo posts to /api/demo and returns the topic id', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ topic_id: 7, created: true }) }) as any;
+    const out = await api.createDemo();
+    const [url, opts] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/demo');
+    expect(opts.method).toBe('POST');
+    expect(out).toEqual({ topic_id: 7, created: true });
+  });
+
+  it('deleteDemo deletes the named demo and treats an already-removed one as done', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'topic not found' }), { status: 404 })
+    ) as any;
+    await expect(api.deleteDemo(42)).resolves.toBeUndefined();
+    const [url, opts] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/demo/42');
+    expect(opts.method).toBe('DELETE');
+  });
+
+  it('deleteDemo surfaces a refusal for a topic that is not the demo', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'topic 3 is not a demo topic' }), { status: 400 })
+    ) as any;
+    await expect(api.deleteDemo(3)).rejects.toThrow('not a demo topic');
+  });
+
+  it('deleteDemo surfaces a real failure', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'boom' }), { status: 500 })
+    ) as any;
+    await expect(api.deleteDemo(7)).rejects.toThrow('boom');
+  });
+});

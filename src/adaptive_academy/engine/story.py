@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine.assess import graded_concept_ids
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import STORY
@@ -48,6 +49,7 @@ class StoryFacts:
     concepts_solid: list[str] = field(default_factory=list)
     concepts_developing: list[str] = field(default_factory=list)
     concepts_shaky: list[str] = field(default_factory=list)
+    concepts_untested: list[str] = field(default_factory=list)  # no graded assessment yet
     load_bearing_shaky: list[str] = field(default_factory=list)
     assessments_count: int = 0
     mean_score: float | None = None
@@ -103,8 +105,14 @@ def gather_story_facts(session: Session, topic_id: int) -> StoryFacts:
             round(100 * facts.items_done / facts.items_total) if facts.items_total else 0
         )
 
-    # Concepts by mastery level.
+    # Concepts by mastery level. The stored estimate is a level only for a concept the Assessor
+    # has graded (assess.GRADING_KINDS); every other concept still holds the curriculum's prior
+    # ("high"), which is not evidence, so it is untested.
+    graded = graded_concept_ids(session, [c.id for c in concepts])
     for c in concepts:
+        if c.id not in graded:
+            facts.concepts_untested.append(c.name)
+            continue
         est = session.exec(
             select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == c.id)
         ).first()
@@ -178,6 +186,7 @@ def build_story_prompt(facts: StoryFacts) -> tuple[str, str]:
         f"SOLID CONCEPTS: {', '.join(f.concepts_solid) or '(none yet)'}",
         f"DEVELOPING CONCEPTS: {', '.join(f.concepts_developing) or '(none)'}",
         f"SHAKY CONCEPTS: {', '.join(f.concepts_shaky) or '(none)'}",
+        f"UNTESTED CONCEPTS: {', '.join(f.concepts_untested) or '(none)'}",
         f"SHAKY LOAD-BEARING (priority): {', '.join(f.load_bearing_shaky) or '(none)'}",
         f"ASSESSMENTS: {f.assessments_count}, mean score "
         f"{f.mean_score if f.mean_score is not None else 'n/a'}",

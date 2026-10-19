@@ -122,6 +122,7 @@ def ensure_fts(db_engine: Engine) -> bool:
 def ensure_vec(db_engine: Engine) -> bool:
     """Load sqlite-vec and create its chunk vector table when available."""
     if sqlite_vec is None:
+        _drop_vec_triggers(db_engine)
         return False
 
     newly_registered = not event.contains(db_engine, "connect", _load_vec_extension)
@@ -135,18 +136,44 @@ def ensure_vec(db_engine: Engine) -> bool:
                 "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec "
                 "USING vec0(chunk_id INTEGER PRIMARY KEY, embedding float[384])"
             )
+            # Chunks deleted while the extension was unavailable (triggers dropped) left
+            # their vectors behind; purge them before the trigger takes over again.
             connection.exec_driver_sql(
                 "DELETE FROM chunk_vec WHERE chunk_id NOT IN (SELECT id FROM chunk)"
             )
-            connection.exec_driver_sql(
-                "CREATE TRIGGER IF NOT EXISTS chunk_vec_ad AFTER DELETE ON chunk BEGIN "
-                "DELETE FROM chunk_vec WHERE chunk_id = old.id; END"
-            )
+            for statement in VEC_TRIGGER_DDL.values():
+                connection.exec_driver_sql(statement)
     except (AttributeError, OSError, sqlite3.Error, SQLAlchemyError):
         if newly_registered:
             event.remove(db_engine, "connect", _load_vec_extension)
+        _drop_vec_triggers(db_engine)
         return False
     return True
+
+
+# Triggers on `chunk` whose bodies touch the vec0 table. SQLite compiles a trigger body when
+# the triggering statement runs, so on a connection WITHOUT sqlite-vec loaded every chunk
+# delete would fail with "no such module: vec0" (the memory extra is optional). They exist
+# only while the extension loads; ensure_vec drops them otherwise.
+VEC_TRIGGER_DDL: dict[str, str] = {
+    "chunk_vec_ad": (
+        "CREATE TRIGGER IF NOT EXISTS chunk_vec_ad AFTER DELETE ON chunk BEGIN "
+        "DELETE FROM chunk_vec WHERE chunk_id = old.id; END"
+    ),
+}
+
+
+def _drop_vec_triggers(db_engine: Engine) -> None:
+    """Without sqlite-vec, remove the vec triggers so chunk deletes keep working. Dropping a
+    trigger does not compile its body, so this needs no extension. The orphaned vectors this
+    leaves are never ranked (the vector leg only considers ids still in `chunk`) and are
+    purged by the next ensure_vec that loads the extension."""
+    try:
+        with db_engine.begin() as connection:
+            for name in VEC_TRIGGER_DDL:
+                connection.exec_driver_sql(f"DROP TRIGGER IF EXISTS {name}")
+    except SQLAlchemyError as exc:  # startup must never crash on this
+        logger.warning("could not drop the sqlite-vec triggers: %s", exc)
 
 
 def _load_vec_extension(dbapi_connection, _) -> None:

@@ -122,6 +122,7 @@ def _topic_out(session: Session, topic: Topic) -> TopicOut:
         else None,
         has_foundation=has_foundation,
         has_track=has_track,
+        is_demo=topic.is_demo,
     )
 
 

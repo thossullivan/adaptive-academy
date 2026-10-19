@@ -16,9 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
-from adaptive_academy.engine.assess import level_from_score
+from adaptive_academy.engine.assess import GRADING_KINDS, graded_concept_ids, level_from_score
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
     ItemView,
@@ -726,16 +726,28 @@ def _track_markdown(session: Session, track: Track) -> str:
 
 def _concept_verdict_summary(session: Session, concept: Concept) -> tuple[str, str]:
     """v1: verdict = the concept's knowledge level, but anti-Goodhart — a concept with NO
-    assessments reads 'untested', never the default-'high' KnowledgeEstimate. summary = latest
+    assessments reads 'untested', never the default-'high' KnowledgeEstimate, and one whose
+    assessments include no graded kind (assess.GRADING_KINDS: e.g. only shipped or taught)
+    reads 'ungraded', since its estimate is still the curriculum's prior. summary = latest
     assessment. Full 5-signal triangulation lives in frontend competence.ts (porting is a follow-up)."""
     latest = session.exec(
         select(Assessment).where(Assessment.concept_id == concept.id)
         .order_by(Assessment.id.desc())).first()
     if latest is None:
         return "untested", "No assessments yet."
-    est = session.exec(
-        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
-    verdict = est.level if est else level_from_score(latest.score)[0]
+    if not graded_concept_ids(session, [concept.id]):
+        verdict = "ungraded"
+    else:
+        est = session.exec(
+            select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
+        if est is not None:
+            verdict = est.level
+        else:
+            graded = session.exec(
+                select(Assessment).where(Assessment.concept_id == concept.id,
+                                         col(Assessment.kind).in_(GRADING_KINDS))
+                .order_by(Assessment.id.desc())).first()
+            verdict = level_from_score(graded.score)[0]
     bits = [f"Latest: **{latest.kind}** — score {latest.score:.2f}"]
     if latest.verdict:
         bits.append(latest.verdict)
@@ -837,9 +849,11 @@ def export_vault(session: Session, topic_id: int, vault_path: str) -> ExportResu
 
 
 def export_all_topics(session: Session, vault_path: str) -> ExportAllResult:
-    """Mirror every topic into its own `Adaptive Academy/<topic>/` folder in one pass."""
+    """Mirror every one of the learner's topics into its own `Adaptive Academy/<topic>/`
+    folder in one pass. The demo topic is sample data, not the learner's, so it is skipped
+    (an explicit single-topic export of it via export_vault still works: that is a choice)."""
     safe_vault_dir(vault_path)  # validate once, up front
-    topics = session.exec(select(Topic)).all()
+    topics = session.exec(select(Topic).where(col(Topic.is_demo).is_(False))).all()
     written: list[str] = []
     for t in topics:
         written.extend(export_vault(session, t.id, vault_path).written)

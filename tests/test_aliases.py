@@ -136,3 +136,41 @@ def test_stub_link_is_noop(session):
     result = apply_program_aliases(session, topic.id)
     assert result.registered == 0 and result.seeded == []
     assert session.exec(select(ConceptAlias)).all() == []
+
+
+def test_seed_ignores_non_grading_rows_on_an_ungraded_member(session):
+    """Only a real grade carries over: an artifact review (or teach / productive failure) on
+    a never-graded member leaves its curriculum placeholder "high" in place, so it must not
+    out-rank the one member with a graded assessment."""
+    p, m = _program(session)
+    topic_b, (graded,) = _seed_topic(session, p, m, [("Attention", "low")])
+    apply_program_aliases(session, topic_b.id)
+    _assess_and_set_level(session, graded.id, 0.2, "low")
+    topic_a, (placeholder,) = _seed_topic(session, p, m, [("attention", "high")])
+    apply_program_aliases(session, topic_a.id)
+    est_a = session.exec(
+        select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == placeholder.id)).one()
+    est_a.level = "high"  # the curriculum placeholder, never graded
+    session.add(est_a)
+    for kind in ("artifact_review", "teach", "productive_failure"):
+        session.add(Assessment(concept_id=placeholder.id, kind=kind, prompt="p", score=0.9))
+    session.commit()
+
+    topic_c, (concept_c,) = _seed_topic(session, p, m, [("ATTENTION", "high")])
+    r = apply_program_aliases(session, topic_c.id)
+    assert r.seeded == [(concept_c.id, "low")]
+
+
+def test_no_graded_member_seeds_nothing(session):
+    """With nothing graded in the group, every member's estimate is only a prior: keep the
+    new concept's own default instead of copying another placeholder."""
+    p, m = _program(session)
+    topic_a, (a,) = _seed_topic(session, p, m, [("Attention", "low")])
+    apply_program_aliases(session, topic_a.id)
+    session.add(Assessment(concept_id=a.id, kind="artifact_review", prompt="p", score=0.9))
+    session.commit()
+    topic_b, (b,) = _seed_topic(session, p, m, [("attention", "high")])
+    r = apply_program_aliases(session, topic_b.id)
+    assert r.seeded == []
+    est = session.exec(select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == b.id)).one()
+    assert est.level == "high"

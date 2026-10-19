@@ -252,3 +252,52 @@ def test_export_all_topics_writes_every_topic(session, tmp_path):
     assert (tmp_path / EXPORT_FOLDER / "build-llms" / "build-llms.md").exists()
     assert (tmp_path / EXPORT_FOLDER / "learn-rust" / "learn-rust.md").exists()
     assert len(res.written) >= 2
+
+
+def test_export_all_topics_skips_the_demo(session, tmp_path):
+    # "Export all" mirrors the learner's own topics; the demo is sample data and must not
+    # land in their real vault.
+    real = _seed_topic(session)
+    _seed_track(session, real)
+    demo = Topic(title="Demo: Language models", is_demo=True)
+    session.add(demo)
+    session.commit()
+    session.refresh(demo)
+    session.add(Track(topic_id=demo.id, title="demo track", overview="Sample."))
+    session.commit()
+
+    res = export_all_topics(session, str(tmp_path))
+
+    assert res.topics == 1
+    assert sorted(p.name for p in (tmp_path / EXPORT_FOLDER).iterdir()) == ["build-llms"]
+    assert not any("demo" in w for w in res.written)
+
+
+def test_export_single_demo_topic_is_still_allowed(session, tmp_path):
+    demo = Topic(title="Demo topic", is_demo=True)
+    session.add(demo)
+    session.commit()
+    session.refresh(demo)
+    session.add(Track(topic_id=demo.id, title="demo track", overview="Sample."))
+    session.commit()
+    export_vault(session, demo.id, str(tmp_path))
+    assert (tmp_path / EXPORT_FOLDER / "demo-topic" / "demo-topic.md").exists()
+
+
+@pytest.mark.parametrize("kinds", [["artifact_review"], ["artifact_review", "teach",
+                                                         "productive_failure"]])
+def test_export_concept_without_a_graded_assessment_is_not_the_prior(session, tmp_path, kinds):
+    """Same rule as the competence view: the stored estimate is a grade only when a kind that
+    writes it (assess.GRADING_KINDS) exists. Shipping or teaching alone leaves the prior."""
+    topic = _seed_topic(session)
+    _, c = _seed_track(session, topic)
+    session.add(KnowledgeEstimate(concept_id=c.id, level="high", confidence=0.5))
+    for kind in kinds:
+        session.add(Assessment(concept_id=c.id, kind=kind, prompt="p", score=0.9))
+    session.commit()
+
+    export_vault(session, topic.id, str(tmp_path))
+
+    note = tmp_path / EXPORT_FOLDER / "build-llms" / "Concepts" / "self-attention.md"
+    fm, _ = parse_frontmatter(note.read_text())
+    assert fm["verdict"] == "ungraded"
