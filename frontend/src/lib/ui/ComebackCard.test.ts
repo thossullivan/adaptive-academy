@@ -35,4 +35,11 @@ describe('ComebackCard', () => {
     expect(body).not.toContain('…');
     expect(body).not.toContain('Show all');
   });
+
+  it('keeps identifiers intact and strips only paired markdown', () => {
+    const { body } = render(ComebackCard, {
+      props: { wind, comeback: move('Implement `log_softmax` with **torch.no_grad** in _one_ pass') }
+    });
+    expect(body).toContain('Implement log_softmax with torch.no_grad in _one_ pass');
+  });
 });

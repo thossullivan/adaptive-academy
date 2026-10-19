@@ -46,7 +46,8 @@
     levels = { assistance: '—', challenge: '—', attempt: false };
     try {
       const p = await api.previewConversation(topicId, conceptId);
-      if (seq !== previewSeq) return; // a later concept switch superseded this one
+      // A later concept switch, or a send (whose reply carries the real levels), supersedes this.
+      if (seq !== previewSeq || conversation) return;
       levels = { assistance: p.assistance_level, challenge: p.challenge_level, attempt: p.attempt_logged };
     } catch {
       // The header keeps its placeholders; sending still works.
@@ -65,6 +66,7 @@
   }
 
   async function send() {
+    previewSeq++; // a preview still in flight must not overwrite the reply's levels
     if (conceptId == null || !input.trim() || busy) return;
     const forConcept = conceptId;
     const content = input;

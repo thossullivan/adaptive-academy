@@ -152,9 +152,10 @@ describe('verdictRationale (why this verdict)', () => {
 
 describe('artifactOutcome', () => {
   it('reads an artifact review against the same HELD threshold as the shipped signal', () => {
-    expect(artifactOutcome(0.72)).toEqual({ shipped: true, label: 'shipped ✓' });
-    expect(artifactOutcome(0.45)).toEqual({ shipped: true, label: 'shipped ✓' });
-    expect(artifactOutcome(0.44)).toEqual({ shipped: false, label: 'shipped ✗' });
+    expect(artifactOutcome(0.72)).toEqual({ shipped: true, meetsGate: true, label: 'shipped ✓' });
+    expect(artifactOutcome(0.55)).toEqual({ shipped: true, meetsGate: false, label: 'shipped ✓' });
+    expect(artifactOutcome(0.45)).toEqual({ shipped: true, meetsGate: false, label: 'shipped ✓' });
+    expect(artifactOutcome(0.44)).toEqual({ shipped: false, meetsGate: false, label: 'shipped ✗' });
     // stays in lockstep with conceptSignals
     expect(conceptSignals([a({ kind: 'artifact_review', score: 0.45 })]).shipped).toBe('lit');
     expect(conceptSignals([a({ kind: 'artifact_review', score: 0.44 })]).shipped).toBe('bad');

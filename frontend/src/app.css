@@ -31,6 +31,9 @@
      muted sits a step above faint so the hierarchy survives. */
   --muted: #9298a4; /* 6.1:1 on surface */
   --faint: #848a95; /* 5.1:1 on surface, 4.8:1 on surface-2 */
+  /* The "untested" verdict fill: a graphic, not text (3.3:1 on bg, 3.1:1 on surface), kept
+     visibly darker than --muted ("unverified", 2.0:1 apart) since colour tells them apart. */
+  --verdict-untested: #60667a;
 
   --accent: #e0a83e;
   --accent-bright: #f2bf5d;
@@ -66,6 +69,8 @@
   --fg-dim: #45413a;
   --muted: #5f5a4f; /* 6.5:1 on surface */
   --faint: #6f695c; /* 5.2:1 on surface, 4.8:1 on surface-2 */
+  /* "untested" fill: 3.1:1 on bg, 3.4:1 on surface, 1.9:1 apart from --muted ("unverified"). */
+  --verdict-untested: #8f8775;
 
   --accent: #7d5818;
   --accent-bright: #6a4a12;

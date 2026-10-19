@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { announce } from '$lib/text';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { toasts } from '$lib/toast.svelte';
@@ -49,7 +50,7 @@
     try {
       result = await api.gradeTeaching(conceptId, explanation);
       taught = new Set([...taught, conceptId]);
-      status = `Teaching review ready: ${Math.round(result.score * 100)}%.`;
+      status = announce(status, `Teaching review ready: ${Math.round(result.score * 100)}%.`);
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {

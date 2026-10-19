@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { announce } from '$lib/text';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { toasts } from '$lib/toast.svelte';
@@ -41,7 +42,7 @@
     consolidation = null;
     try {
       problem = (await api.generateChallenge(conceptId)).problem;
-      status = 'Challenge ready.';
+      status = announce(status, 'Challenge ready.');
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
@@ -54,7 +55,7 @@
     consolidating = true;
     try {
       consolidation = await api.consolidate(conceptId, problem, attempt);
-      status = `Consolidation ready: effort ${Math.round(consolidation.score * 100)}%. The canonical approach is shown.`;
+      status = announce(status, `Consolidation ready: effort ${Math.round(consolidation.score * 100)}%. The canonical approach is shown.`);
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
@@ -101,7 +102,7 @@
         confidence_predicted: confidence / 100
       });
       calPhase = 'result';
-      status = `You predicted ${pct(calResult.confidence_predicted)} and scored ${pct(calResult.confidence_actual)}.`;
+      status = announce(status, `You predicted ${pct(calResult.confidence_predicted)} and scored ${pct(calResult.confidence_actual)}.`);
       await loadCalAccuracy();
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);

@@ -5,7 +5,7 @@
   import { api } from '$lib/api';
   import type { Curriculum, Assessment } from '$lib/types';
   import { pct } from '$lib/utils';
-  import { artifactOutcome, HELD } from '$lib/competence';
+  import { artifactOutcome, HELD, MILESTONE_ARTIFACT } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Field, Select, Textarea, Markdown, LiveStatus } from '$lib/ui';
 
@@ -99,7 +99,7 @@
     result == null
       ? 'neutral'
       : artifact
-        ? artifact.shipped ? 'success' : 'danger'
+        ? artifact.meetsGate ? 'success' : artifact.shipped ? 'warn' : 'danger'
         : result.score >= 0.7 ? 'success' : result.score >= 0.4 ? 'warn' : 'danger'
   );
 </script>
@@ -189,7 +189,8 @@
             {#if artifact}
               <p class="mt-2 text-xs leading-relaxed text-muted">
                 Artifact reviews corroborate rather than grade: a score of {Math.round(HELD * 100)}+ lights the
-                <span class="text-fg-dim">shipped</span> signal; the concept's grade is unchanged.
+                <span class="text-fg-dim">shipped</span> signal, and a program milestone counts it as artifact
+                evidence at {Math.round(MILESTONE_ARTIFACT * 100)}+. The concept's grade is unchanged.
               </p>
             {/if}
 

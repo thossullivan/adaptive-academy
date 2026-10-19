@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { announce } from '$lib/text';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { toasts } from '$lib/toast.svelte';
@@ -26,7 +27,7 @@
     try {
       const r = await api.gradeDecay(promptId, resp);
       decayResults[promptId] = r;
-      status = `Recall ${r.held ? 'held' : 'decayed'}: ${Math.round(r.recall_score * 100)}%. ${r.verdict}`;
+      status = announce(status, `Recall ${r.held ? 'held' : 'decayed'}: ${Math.round(r.recall_score * 100)}%. ${r.verdict}`);
     } catch (e) {
       toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
     } finally {
@@ -58,7 +59,7 @@
   async function grade(id: number, result: string) {
     await api.gradeCard(id, result);
     await load();
-    status = `Card graded ${result}.`;
+    status = announce(status, `Card graded ${result}.`);
   }
 </script>
 

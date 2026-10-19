@@ -4,7 +4,7 @@
     sigColor,
     roleColor,
     verdictRationale,
-    VERDICT_COLOR,
+    VERDICT_TEXT_COLOR,
     VERDICT_LABEL,
     type ConceptSignals,
     type Verdict
@@ -51,7 +51,7 @@
         <span title="Taught to an audience ({signals.taught})" style:color={sigColor(signals.taught)}>◳</span>
         <span title="Shipped an artifact that meets its criteria ({signals.shipped})" style:color={sigColor(signals.shipped)}>⚒</span>
       </div>
-      <span class="eyebrow w-[4.5rem] text-right !tracking-[0.12em]" style:color={VERDICT_COLOR[verdict]}>
+      <span class="eyebrow w-[4.5rem] text-right !tracking-[0.12em]" style:color={VERDICT_TEXT_COLOR[verdict]}>
         {VERDICT_LABEL[verdict]}
       </span>
     </div>

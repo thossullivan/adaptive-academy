@@ -12,7 +12,14 @@
   // The move is a curriculum item and can run long: clip on a word boundary (never mid-word)
   // and keep the whole text one tap away (and on hover via the title).
   const MOVE_MAX = 120;
-  const label = $derived((comeback.move?.label ?? '').replace(/[*`_]/g, '').trim());
+  // Strip paired markdown emphasis and code ticks only: a bare `_` is part of identifiers
+  // like log_softmax that ML curricula are full of.
+  const label = $derived(
+    (comeback.move?.label ?? '')
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .trim()
+  );
   const clipped = $derived(clipWords(label, MOVE_MAX));
   let expanded = $state(false);
 </script>
