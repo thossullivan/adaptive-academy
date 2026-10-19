@@ -161,6 +161,32 @@ def _unique_hits(hits: list[Hit], *, limit: int) -> list[Hit]:
 class TurnResult:
     reply: str
     status: str
+    # False when the persona gave no usable reply: nothing was stored for this turn and
+    # `reply` is a notice for the learner, not the persona speaking.
+    recorded: bool = True
+
+
+# Shown (never stored) when a persona reply is unusable. Storing an empty assistant turn
+# would make every later turn fail with a 400, and keeping the declined learner turn would
+# resend it — likely declined again — on every later turn and stall the session.
+_NO_REPLY_REFUSAL = (
+    "(The model declined to respond to that message, so this turn wasn't recorded. "
+    "Try rephrasing it, or end the session to be scored on what you have so far.)"
+)
+_NO_REPLY_EMPTY = (
+    "(The persona returned an empty reply, so this turn wasn't recorded. "
+    "Please send your message again.)"
+)
+_ENDED_SILENTLY = "(The persona ended the conversation.)"
+
+
+def _unusable_reply(resp) -> str | None:
+    """Why a persona reply can't be stored as a turn, or None if it can."""
+    if resp.stop_reason == "refusal":
+        return "refusal"
+    if not resp.text.strip():
+        return f"empty reply (stop_reason={resp.stop_reason})"
+    return None
 
 
 def _history(session: Session, rp: RoleplaySession) -> list[dict]:
@@ -184,6 +210,22 @@ def run_roleplay_turn(
     concept_ids = [concept.id for concept in concepts if concept.id is not None]
     topic_id = topic_id_for_concept(session, concept_ids[0]) if concept_ids else None
 
+    # The new user turn is sent from memory and persisted only once the persona has given a
+    # usable reply (see _unusable_reply).
+    messages = [*_history(session, rp), {"role": "user", "content": user_text}]
+    system = build_roleplay_persona_prompt(rp.persona_brief)
+    _emit(session, rp, "prompt", ROLEPLAY_PERSONA.tag)
+    session.commit()  # release the write lock before the LLM call (F5)
+    resp = llm.complete(system=system, messages=messages, tools=[])
+
+    unusable = _unusable_reply(resp)
+    if unusable is not None:
+        _emit(session, rp, "roleplay:no_reply", unusable)
+        session.commit()
+        session.refresh(rp)
+        notice = _NO_REPLY_REFUSAL if unusable == "refusal" else _NO_REPLY_EMPTY
+        return TurnResult(reply=notice, status=rp.status, recorded=False)
+
     user_turn = RoleplayTurn(session_id=rp.id, role="user", content=user_text)
     session.add(user_turn)
     session.flush()
@@ -194,17 +236,16 @@ def run_roleplay_turn(
         concept_ids=concept_ids,
         retriever=retriever,
     )
-    session.commit()
-
-    system = build_roleplay_persona_prompt(rp.persona_brief)
-    _emit(session, rp, "prompt", ROLEPLAY_PERSONA.tag)
-    resp = llm.complete(system=system, messages=_history(session, rp), tools=[])
 
     reply = resp.text
     ended = False
     if _END in reply:
         reply = reply.replace(_END, "").strip()
         ended = True
+    if not reply:
+        # Only the end token: never store an empty persona turn. The session is ending, so
+        # this line is never resent to the persona model.
+        reply = _ENDED_SILENTLY
 
     persona_turn = RoleplayTurn(session_id=rp.id, role="persona", content=reply)
     session.add(persona_turn)

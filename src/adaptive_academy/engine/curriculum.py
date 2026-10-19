@@ -88,7 +88,7 @@ def insert_spaced_revisits(phases: list[PhaseView], load_bearing: set[str]) -> l
 
 
 
-# JSON Schema for forced-tool-use generation — guarantees the track comes back well-shaped.
+# JSON Schema for strict-tool generation (sent via llm/strict_schema.py) — guarantees the track comes back well-shaped.
 CURRICULUM_SCHEMA: dict = {
     "type": "object",
     "properties": {

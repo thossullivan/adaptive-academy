@@ -46,6 +46,7 @@ import type {
   TeachResult,
   Topic,
   TopicSuggestion,
+  UsageReport,
   VaultExportAllResult,
   VaultExportResult,
   VaultIngestResult,
@@ -102,6 +103,7 @@ export function scoutCardTitle(suggestions: TopicSuggestion[]): string | null {
 
 export const api = {
   getSetup: () => fetch('/api/setup').then(j<SetupStatus>),
+  getUsage: () => fetch('/api/usage').then(j<UsageReport>),
   listTopics: () => fetch('/api/topics').then(j<Topic[]>),
   getTopic: (id: number) => fetch(`/api/topics/${id}`).then(j<Topic>),
   startConversation: (topic_id: number, concept_id: number) =>

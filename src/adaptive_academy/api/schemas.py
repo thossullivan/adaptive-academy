@@ -576,6 +576,9 @@ class RoleplaySessionOut(BaseModel):
 class RoleplayTurnOut(BaseModel):
     reply: str
     status: str
+    # False when the persona gave no usable reply (e.g. a model refusal): nothing was stored
+    # for the turn and `reply` is a notice for the learner rather than the persona's line.
+    recorded: bool = True
 
 
 class PaperProbeStartIn(BaseModel):

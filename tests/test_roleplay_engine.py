@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from sqlmodel import select
 
 from adaptive_academy.prompts import (
@@ -118,3 +119,78 @@ def test_turn_cap_ends_session(session):
     llm = ScriptedLLMClient([LLMResponse(text="Still not interested.")])
     res = run_roleplay_turn(session, rp, "one more thing", llm=llm)
     assert res.status == "ended"
+
+
+# --- unusable persona replies (refusal / empty) ------------------------------------------
+# A stored empty assistant message makes every later turn fail with a 400, and a stored
+# refused user turn would be resent (and likely refused) on every later turn. So an unusable
+# reply records neither turn, and the learner gets a legible notice instead.
+
+
+def _turns(session, rp):
+    return session.exec(select(RoleplayTurn).where(RoleplayTurn.session_id == rp.id)
+                        .order_by(RoleplayTurn.id)).all()
+
+
+def _events(session, rp):
+    from adaptive_academy.models import AgentEvent
+
+    return session.exec(select(AgentEvent).where(
+        AgentEvent.roleplay_session_id == rp.id)).all()
+
+
+def test_refusal_records_nothing_and_returns_a_notice(session):
+    rp = _active_session(session)
+    llm = ScriptedLLMClient([LLMResponse(text="I can't continue with", stop_reason="refusal")])
+    res = run_roleplay_turn(session, rp, "something the model declines", llm=llm)
+
+    assert res.status == "active"
+    assert res.recorded is False
+    assert "wasn't recorded" in res.reply and "declined" in res.reply
+    assert "I can't continue with" not in res.reply  # partial refused text is not shown
+    assert _turns(session, rp) == []
+    assert any(e.kind == "roleplay:no_reply" and "refusal" in e.detail
+               for e in _events(session, rp))
+
+
+@pytest.mark.parametrize("text", ["", "   \n"])
+def test_empty_reply_records_nothing_and_returns_a_notice(session, text):
+    rp = _active_session(session)
+    llm = ScriptedLLMClient([LLMResponse(text=text, stop_reason="end_turn")])
+    res = run_roleplay_turn(session, rp, "hello?", llm=llm)
+
+    assert res.status == "active" and res.recorded is False
+    assert res.reply.strip()
+    assert _turns(session, rp) == []
+
+
+def test_turn_after_an_unusable_reply_sends_a_valid_history(session):
+    rp = _active_session(session)
+    llm = ScriptedLLMClient([
+        LLMResponse(text="Sure.", stop_reason="end_turn"),
+        LLMResponse(text="", stop_reason="refusal"),
+        LLMResponse(text="Go on.", stop_reason="end_turn"),
+    ])
+    run_roleplay_turn(session, rp, "first", llm=llm)
+    run_roleplay_turn(session, rp, "declined one", llm=llm)
+    res = run_roleplay_turn(session, rp, "second", llm=llm)
+
+    assert res.reply == "Go on." and res.recorded is True
+    sent = llm.calls[2]["messages"]
+    assert sent == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "Sure."},
+        {"role": "user", "content": "second"},
+    ]
+    assert [(t.role, t.content) for t in _turns(session, rp)] == [
+        ("user", "first"), ("persona", "Sure."), ("user", "second"), ("persona", "Go on.")]
+
+
+def test_unusable_reply_does_not_count_toward_the_turn_cap(session):
+    rp = _active_session(session)
+    for i in range(14):
+        session.add(RoleplayTurn(session_id=rp.id, role="user", content=f"u{i}"))
+    session.commit()
+    llm = ScriptedLLMClient([LLMResponse(text="", stop_reason="refusal")])
+    res = run_roleplay_turn(session, rp, "one more thing", llm=llm)
+    assert res.status == "active"

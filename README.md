@@ -57,6 +57,30 @@ That's the trade for depth and for keeping your data local. Note too that while 
 locally, the substance of each AI call is still sent to Anthropic's API — "local-first" here means
 your *records* live on your machine, not that inference is offline.
 
+**See what it costs.** Every model call is recorded locally (tokens, web searches, and the cost at
+Anthropic's list prices). The **Usage** page (`/usage`, or `GET /api/usage`) shows spend for today,
+the last 7 and 30 days, and all time, broken down by feature and by model. Models without a known
+price still have their tokens recorded and show "price unknown". In `agent_sdk` mode the dollar
+figure is the Agent SDK's own estimate; your Claude subscription pays, not an API key.
+
+**Cap it.** Set `AA_DAILY_BUDGET_USD=5` (any dollar amount, `0` to block every API-key call) in
+`.env` and restart the API. Before each API-key model call the app checks today's recorded spend;
+once it meets the limit, new calls are refused with a 429 that says what was spent and how to raise
+the limit. "Today" is the server's local day (UTC in the Docker image unless you set `TZ`). It is a
+soft cap on *recorded* spend at list price, not a hard billing limit:
+
+- The check runs before a call and a call's cost is only known after it, so the call that crosses
+  the limit (and any research searches already in flight alongside it) can overshoot it. Searches
+  not yet started are cancelled.
+- The SDK's own automatic retries (after a timeout or a dropped connection) aren't reported back,
+  so the rare retried call is undercounted.
+- A model with no known price can't be capped, so while a limit is set, calls on such a model
+  (e.g. `AA_MODEL_REASONING=` a model not in the price table) are refused with a 429 that names it,
+  and `GET /api/setup` and the Usage page warn about it. Use a priced model or unset the limit.
+
+Agent SDK (subscription) calls are recorded but never blocked. For a hard ceiling, also set a
+spend limit on the key in the Anthropic Console.
+
 ## Stack
 
 Python 3.12 · FastAPI · SQLModel · SQLite (WAL) · Alembic · Anthropic SDK ·
@@ -73,6 +97,9 @@ SvelteKit 2 / Svelte 5 / Tailwind 4. Package manager: `uv`. Task runner: `just`.
   # then edit .env and set ANTHROPIC_API_KEY=sk-ant-...
   ```
 
+  Models default to `claude-sonnet-5-5` / `claude-haiku-5-5`. If one is retired or not
+  available to your key, set `AA_MODEL_REASONING` / `AA_MODEL_COPY` in `.env` and restart the API.
+
 ## Setup (run once)
 
 ```bash
@@ -87,9 +114,6 @@ uv sync --extra memory        # optional: sqlite-vec + fastembed for hybrid (BM2
 > downloads once into `AA_EMBEDDING_CACHE_DIR` (the container keeps it on the data volume).
 > Without the extra, retrieval is FTS5/BM25 only — everything still works.
 > Set `AA_EMBEDDING_ALLOW_DOWNLOAD=false` on strict offline hosts to require a cached model.
-
-> Hybrid memory needs `uv sync --extra memory`. Compose caches the model at
-> `/data/fastembed_cache`. The download happens once per `aa-data` volume.
 
 > **`just seed` is optional** — it seeds one starter topic so there's something to explore
 > immediately. Otherwise you start from an empty state and create your own **Program** (a
@@ -166,6 +190,59 @@ Notes:
   serve that increasingly stale SPA at http://localhost:8000/ instead of
   a 404/API-only response. Run `rm -rf frontend/build` to restore pure-API
   host dev (frontend dev via `npm run dev` stays on :5173 either way).
+
+## Back up and restore your data
+
+Your whole learning record (topics, concepts, assessments, gates, conversations, the agent
+trace) is one SQLite file: `adaptive_academy.db` in the repo for host dev, or
+`/data/adaptive_academy.db` inside the `adaptive-academy-data` Docker volume.
+
+**Back up.** Each of these is safe while the app is running:
+
+```bash
+just backup          # snapshot -> backups/adaptive_academy-YYYYMMDD-HHMMSS.db
+just export          # full record as JSON -> backups/adaptive_academy-YYYYMMDD-HHMMSS.json
+uv run aa backup ~/somewhere/   # or name a directory / file yourself
+```
+
+The `.db` snapshot is a consistent copy made with SQLite's online backup API: one
+self-contained file you can restore. The `.json` export (`"format": "adaptive-academy-export"`,
+`"version": 1`) holds every table's rows for reading or migrating elsewhere; it leaves out the
+search indexes (`chunk_fts`, `chunk_vec`), which the app rebuilds. `backups/` is gitignored.
+
+In the container (or from any browser), open **Your data** in the sidebar and download either
+file, or fetch them directly:
+
+```bash
+curl -OJ http://localhost:8000/api/export/backup   # .db snapshot
+curl -OJ http://localhost:8000/api/export/record   # .json export
+```
+
+**Restore** a `.db` snapshot (the JSON export is for reading, not restoring). Stop the app
+first. On the host:
+
+```bash
+uv run aa restore backups/adaptive_academy-YYYYMMDD-HHMMSS.db --force
+uv run alembic upgrade head     # bring an older snapshot up to the current schema
+```
+
+`aa restore` refuses to replace an existing db without `--force`, and saves the current one to
+`backups/adaptive_academy-pre-restore-*.db` first. To restore by hand instead, stop the app,
+delete `adaptive_academy.db-wal` and `adaptive_academy.db-shm` if present (a stale WAL would be
+replayed onto the restored file), copy the snapshot to `adaptive_academy.db`, and run
+`uv run alembic upgrade head`.
+
+For Docker, download a backup of the current data first, then copy the snapshot into the
+volume (the same way `just db-migrate-to-volume` does); the container runs
+`alembic upgrade head` on start:
+
+```bash
+just down
+docker run --rm -v adaptive-academy-data:/data -v "$PWD/backups":/host alpine sh -c '
+  rm -f /data/adaptive_academy.db-wal /data/adaptive_academy.db-shm &&
+  cp /host/adaptive_academy-YYYYMMDD-HHMMSS.db /data/adaptive_academy.db'
+just up
+```
 
 ## Design & evidence
 

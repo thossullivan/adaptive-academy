@@ -26,6 +26,7 @@ from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import index_message, memory_blocks_for_tutor
 from adaptive_academy.engine.tools import reveal_gate
 from adaptive_academy.engine.tutor import TurnResult, _FALLBACK
+from adaptive_academy.llm.agent_sdk_client import record_sdk_result
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.llm.types import AgentSDKError
@@ -128,24 +129,33 @@ def run_tutor_turn_sdk(
 
     server = create_sdk_mcp_server("tutor", tools=[_log_attempt, _reveal_solution])
 
+    model = get_model(role)
+
     async def _run() -> str:
         text = ""
         async for msg in query(
             prompt=prompt,
             options=ClaudeAgentOptions(
-                model=get_model(role), system_prompt=system,
+                model=model, system_prompt=system,
                 mcp_servers={"tutor": server},
                 allowed_tools=["mcp__tutor__log_attempt", "mcp__tutor__reveal_solution"],
                 permission_mode="bypassPermissions", max_turns=_MAX_TURNS,
                 setting_sources=[]),
         ):
             if isinstance(msg, ResultMessage):
+                record_sdk_result(msg, model=model, role=role, operation="tutor_sdk")
                 if getattr(msg, "is_error", False):
                     raise AgentSDKError(getattr(msg, "result", "") or "agent SDK tutor error")
                 text = getattr(msg, "result", "") or ""
         return text
 
     emit("tutor:sdk", "subscription tutor turn")
+    # Release the write lock before the SDK run (F5): pending events, flushed by the lazy
+    # load in format_history, would otherwise hold it for the whole multi-turn query. The
+    # refresh reloads convo so the in-process tools only set attributes / add rows (no
+    # query, so no autoflush) until the reply is persisted below.
+    session.commit()
+    session.refresh(convo)
     reply = asyncio.run(_run())
     if not reply:
         emit("max_steps_exhausted")

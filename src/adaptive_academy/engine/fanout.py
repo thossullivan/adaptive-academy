@@ -5,10 +5,12 @@ brief as a legible "ExceptionType: message" string (the full traceback goes to
 the server log — the trace events alone proved undiagnosable in live use).
 """
 
+import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
+from adaptive_academy.llm.usage import BudgetExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -25,11 +27,22 @@ def fan_out_briefs(
     failures: dict[int, str] = {}
     if briefs:
         with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(briefs)))) as ex:
-            futures = {ex.submit(researcher.search, b): i for i, b in enumerate(briefs)}
+            # Each worker runs in a copy of the caller's context so the usage feature label
+            # (a contextvar set per API request) follows the call onto the pool thread.
+            futures = {
+                ex.submit(contextvars.copy_context().run, researcher.search, b): i
+                for i, b in enumerate(briefs)
+            }
             for fut in as_completed(futures):
                 idx = futures[fut]
                 try:
                     per_brief[idx] = fut.result()
+                except BudgetExceededError:
+                    # The daily limit is a stop, not a per-angle failure to retry. Cancel
+                    # the angles not yet started so they don't run (and bill) only to be
+                    # discarded; calls already in flight can't be stopped and finish.
+                    ex.shutdown(wait=False, cancel_futures=True)
+                    raise
                 except Exception as e:  # noqa: BLE001
                     logger.exception("research subagent failed: %s", briefs[idx].angle)
                     failures[idx] = f"{type(e).__name__}: {e}"[:_DETAIL_MAX]

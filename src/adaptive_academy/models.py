@@ -496,3 +496,29 @@ class TopicSuggestion(SQLModel, table=True):
     status: str = "proposed"  # proposed | accepted | dismissed
     created_at: datetime = Field(default_factory=_now)
     decided_at: Optional[datetime] = None
+
+
+class LLMUsage(SQLModel, table=True):
+    """One row per real model call: tokens, server-tool use, and list-price cost.
+
+    Written best-effort after the call returns (llm/usage.py), never inside the caller's
+    transaction. `cost_usd` is NULL when the model's price is unknown (llm/pricing.py). For
+    backend="agent_sdk" the cost is the Agent SDK's own estimate and is paid by the Claude
+    subscription, not the API key, so it never counts toward the daily spending limit.
+    """
+
+    __table_args__ = (Index("ix_llmusage_created_at", "created_at"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    created_at: datetime = Field(default_factory=_now)
+    backend: str  # anthropic | agent_sdk
+    model: str
+    role: str = ""
+    operation: str  # complete | complete_json | research_search | tutor_sdk
+    feature: Optional[str] = None  # from the API route that triggered the call, if any
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    web_search_requests: int = 0
+    cost_usd: Optional[float] = None

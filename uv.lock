@@ -41,7 +41,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
-    { name = "anthropic", specifier = ">=0.40" },
+    { name = "anthropic", specifier = ">=0.109.2" },
     { name = "claude-agent-sdk", specifier = ">=0.2.103" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "fastembed", marker = "extra == 'memory'", specifier = ">=0.3" },

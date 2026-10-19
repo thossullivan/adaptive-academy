@@ -1,9 +1,10 @@
 """Structured JSON output from an LLM, with graceful degradation.
 
-If the client implements `complete_json` (forced tool use against a JSON schema — a hard
-guarantee of well-formed, correctly-shaped output), use it. Otherwise fall back to a normal
+If the client implements `complete_json` (a strict tool against a JSON schema — a hard
+guarantee of well-formed, correctly-shaped output; see llm/strict_schema.py for the supported
+schema subset), use it. Otherwise fall back to a normal
 text completion parsed with the tolerant `extract_json`. This keeps the Agent SDK client (which
-has no forced-tool path) and lightweight test fakes working unchanged, while the API-key client
+has no strict-tool path) and lightweight test fakes working unchanged, while the API-key client
 gets the schema guarantee.
 
 Note: structured output guarantees SHAPE, not length — a response that exceeds max_tokens still

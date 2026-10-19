@@ -88,7 +88,8 @@ def test_graph_migration_upgrades_populated_database_and_downgrades(tmp_path):
     assert edge_foreign_keys == {("src_concept_id",), ("dst_concept_id",)}
     engine.dispose()
 
-    downgraded = _alembic(url, "downgrade", "-1")
+    # To the revision before the graph tables (head has moved past it since).
+    downgraded = _alembic(url, "downgrade", PRIOR_REVISION)
     assert downgraded.returncode == 0, downgraded.stderr
 
     engine = create_engine(url)

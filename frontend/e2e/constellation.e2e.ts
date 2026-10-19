@@ -199,7 +199,9 @@ test('reduced motion settles off-screen and renders the final layout at once', a
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const id = await topicId(page);
   await page.goto(`/topics/${id}/map`);
-  // No animation to wait out: the first rendered layout is already the settled one.
+  // No animation to wait out: once the graph is on screen it settles at once (an animated
+  // settle takes ~4s). Page load is not part of that budget, so wait for the graph first.
+  await expect(page.getByTestId('constellation')).toBeVisible();
   await expect(page.getByTestId('constellation')).toHaveAttribute('data-settled', 'true', {
     timeout: 3_000
   });

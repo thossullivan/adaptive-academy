@@ -5,6 +5,7 @@ from sqlmodel.pool import StaticPool
 
 from adaptive_academy.api import deps as api_deps
 from adaptive_academy.db import ensure_fts
+from adaptive_academy.llm import usage as llm_usage
 
 
 @pytest.fixture(autouse=True)
@@ -25,8 +26,19 @@ def _offline_retriever(monkeypatch):
     api_deps.reset_retriever_cache()
 
 
+@pytest.fixture(autouse=True)
+def _usage_bind_off(monkeypatch):
+    """LLM usage rows go to the `session` fixture's in-memory engine when a test uses it,
+    and nowhere otherwise — a test must never write usage into the real database file. No
+    daily spending limit either, whatever the developer's .env says."""
+    llm_usage.set_usage_bind(None)
+    monkeypatch.setattr(llm_usage.settings, "daily_budget_usd", None)
+    yield
+    llm_usage.reset_usage_bind()
+
+
 @pytest.fixture
-def session():
+def session(_usage_bind_off):
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -41,5 +53,6 @@ def session():
 
     SQLModel.metadata.create_all(engine)
     ensure_fts(engine)
+    llm_usage.set_usage_bind(engine)
     with Session(engine) as s:
         yield s

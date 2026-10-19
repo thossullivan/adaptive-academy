@@ -89,3 +89,25 @@ def test_full_roleplay_flow(session):
     assert body["status"] == "graded"
     assert body["outcome"]["result"] == "demo booked"
     assert body["scorecard"][0]["concept"] == "SPIN"
+
+
+def test_turn_route_reports_an_unrecorded_turn_legibly(session):
+    pid, mid = _seed_materialized(session)
+    brief = {"persona": "VP", "goal": "resist", "situation": "call",
+             "hidden_objections": [], "win_conditions": [], "difficulty": "low"}
+    client = _client(session, [LLMResponse(text=json.dumps(brief)),
+                               LLMResponse(text="", stop_reason="refusal"),
+                               LLMResponse(text="Who is this?")])
+    sid = client.post(f"/api/programs/{pid}/milestones/{mid}/roleplay").json()["session_id"]
+
+    r = client.post(f"/api/roleplay/{sid}/turns", json={"content": "declined"})
+    assert r.status_code == 200
+    assert r.json()["recorded"] is False
+    assert r.json()["status"] == "active"
+    assert "wasn't recorded" in r.json()["reply"]
+
+    r2 = client.post(f"/api/roleplay/{sid}/turns", json={"content": "hello"})
+    assert r2.json() == {"reply": "Who is this?", "status": "active", "recorded": True}
+    turns = client.get(f"/api/roleplay/{sid}").json()["turns"]
+    assert [(t["role"], t["content"]) for t in turns] == [
+        ("user", "hello"), ("persona", "Who is this?")]

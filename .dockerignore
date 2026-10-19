@@ -1,7 +1,6 @@
 .git
 .venv
 .env
-.env_template
 .ruff_cache
 .superpowers
 .claude

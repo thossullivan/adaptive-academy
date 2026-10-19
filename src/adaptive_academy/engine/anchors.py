@@ -1,3 +1,4 @@
+import contextvars
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -126,9 +127,17 @@ def generate_anchors(session: Session, topic, *, anchor_client: AnchorClient,
 
     per_source: list[list[RawAnchor]] = [[] for _ in briefs]
     with ThreadPoolExecutor(max_workers=max(1, min(max_workers, len(briefs)))) as ex:
-        futures = {ex.submit(anchor_client.generate, b): i for i, b in enumerate(briefs)}
+        # copy_context: the usage feature label (a contextvar) follows each pool worker.
+        futures = {ex.submit(contextvars.copy_context().run, anchor_client.generate, b): i
+                   for i, b in enumerate(briefs)}
         for fut in as_completed(futures):
-            per_source[futures[fut]] = fut.result()
+            try:
+                per_source[futures[fut]] = fut.result()
+            except BaseException:
+                # Any failure (the daily limit included) aborts the run: cancel sources not
+                # yet started so they don't bill for nothing. In-flight calls finish.
+                ex.shutdown(wait=False, cancel_futures=True)
+                raise
 
     pairs: list[tuple[int, RawAnchor]] = []
     for i, brief in enumerate(briefs):

@@ -13,6 +13,10 @@ from adaptive_academy.prompts import build_tutor_system_prompt
 
 _MAX_STEPS = 6
 _FALLBACK = "Let's slow down — tell me what you've tried so far, and we'll work from there."
+_REFUSAL = (
+    "I can't respond to that one — the model declined it. Try rephrasing, or tell me what "
+    "you've tried so far on this concept."
+)
 
 
 @dataclass
@@ -82,10 +86,23 @@ def run_tutor_turn(
 
     for step in range(_MAX_STEPS):
         emit("llm_call", f"step={step + 1}")
+        # Release the write lock before every model call (F5): pending trace events (and
+        # the lazy load in _history) would otherwise hold it for the whole round trip,
+        # stalling every other writer, the usage row this call records included.
+        session.commit()
         resp: LLMResponse = llm.complete(system=system, messages=messages, tools=TOOLS)
+
+        if resp.stop_reason == "refusal":
+            # A safety decline (Claude 5.5 models): never show or store partial declined
+            # text; store a legible, non-empty notice so the history stays resendable.
+            emit("llm_refusal")
+            reply_text = _REFUSAL
+            break
 
         if not resp.tool_calls:
             reply_text = resp.text
+            if not reply_text.strip():
+                emit("empty_reply", f"stop_reason={resp.stop_reason}")
             break
 
         # Echo the assistant tool-use turn into the running transcript.
@@ -106,8 +123,11 @@ def run_tutor_turn(
             reply_text = revealed_text
             break
 
-    if reply_text == "":
-        emit("max_steps_exhausted")
+    if not reply_text.strip():
+        # Never store an empty / whitespace-only tutor message: it is resent as an
+        # assistant turn next time, and the API rejects empty text content.
+        if not any(e.kind == "empty_reply" for e in events):
+            emit("max_steps_exhausted")
         reply_text = _FALLBACK
 
     # Persist the tutor reply.
@@ -127,6 +147,12 @@ def run_tutor_turn(
 
 
 def _assistant_tool_blocks(resp: LLMResponse) -> list[dict]:
+    # Echo the assistant turn exactly as the API returned it when the client exposes it:
+    # within a tool-use turn, thinking blocks must go back complete and unmodified (signature
+    # and empty text included) or the API rejects the request. Rebuild only for clients
+    # without raw blocks (scripted fakes), which never produce thinking blocks.
+    if resp.raw_content is not None:
+        return list(resp.raw_content)
     blocks: list[dict] = []
     if resp.text:
         blocks.append({"type": "text", "text": resp.text})

@@ -15,6 +15,7 @@ import asyncio
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
+from adaptive_academy.llm.agent_sdk_client import record_sdk_result
 from adaptive_academy.llm.anthropic_researcher import parse_sources_json
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
@@ -26,6 +27,7 @@ class AgentSDKResearcherClient:
     """One fan-out subagent: a single Agent SDK turn with WebSearch -> RawSource list."""
 
     def __init__(self, role: str = "reasoning", max_turns: int = 8):
+        self._role = role
         self._model = get_model(role)
         self._max_turns = max_turns
 
@@ -39,6 +41,8 @@ class AgentSDKResearcherClient:
                 permission_mode="bypassPermissions"),
         ):
             if isinstance(msg, ResultMessage):
+                record_sdk_result(msg, model=self._model, role=self._role,
+                                  operation="research_search")
                 if getattr(msg, "is_error", False):
                     raise AgentSDKError(getattr(msg, "result", "") or "agent SDK web-search error")
                 text = getattr(msg, "result", "") or ""

@@ -31,8 +31,18 @@ from claude_agent_sdk import (
 
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.types import AgentSDKError, LLMResponse
+from adaptive_academy.llm.usage import BACKEND_AGENT_SDK, record_usage
 
-__all__ = ["AgentSDKLLMClient", "AgentSDKError", "flatten_messages"]
+__all__ = ["AgentSDKLLMClient", "AgentSDKError", "flatten_messages", "record_sdk_result"]
+
+
+def record_sdk_result(msg, *, model: str, role: str, operation: str) -> None:
+    """Record a ResultMessage's usage (recorded even for an error result — it may have been
+    billed). Attributes are read defensively: tests fake ResultMessage, and older SDKs may
+    omit `usage` / `total_cost_usd`."""
+    record_usage(backend=BACKEND_AGENT_SDK, model=model, role=role, operation=operation,
+                 usage=getattr(msg, "usage", None),
+                 total_cost_usd=getattr(msg, "total_cost_usd", None))
 
 
 def flatten_messages(messages: list[dict]) -> str:
@@ -65,6 +75,7 @@ class AgentSDKLLMClient:
         text = ""
         async for msg in query(prompt=prompt, options=self._options(system)):
             if isinstance(msg, ResultMessage):
+                record_sdk_result(msg, model=self._model, role=self._role, operation="complete")
                 if getattr(msg, "is_error", False):
                     raise AgentSDKError(getattr(msg, "result", "") or "agent SDK error")
                 text = getattr(msg, "result", "") or ""

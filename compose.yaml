@@ -9,6 +9,12 @@ services:
       AA_EMBEDDING_CACHE_DIR: /data/fastembed_cache
       AA_OBSIDIAN_VAULT_PATH: /vault
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Optional model overrides from .env; blank falls back to the built-in default.
+      AA_MODEL_REASONING: ${AA_MODEL_REASONING:-}
+      AA_MODEL_COPY: ${AA_MODEL_COPY:-}
+      # Optional daily spending limit (USD); blank = no limit. "Today" is the container's
+      # day, which is UTC unless you also pass TZ.
+      AA_DAILY_BUDGET_USD: ${AA_DAILY_BUDGET_USD:-}
     volumes:
       - aa-data:/data
       # Optional Obsidian vault. Unset OBSIDIAN_VAULT_PATH mounts an empty

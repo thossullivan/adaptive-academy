@@ -13,6 +13,9 @@
   let input = $state('');
   let busy = $state(false);
   let ending = $state(false);
+  // A turn the server did not record (the persona gave no usable reply): shown as a system
+  // notice, never as a persona line, so the screen matches what a reload shows.
+  let notice = $state('');
   let scroller: HTMLDivElement | null = null;
 
   onMount(async () => {
@@ -29,20 +32,51 @@
   async function send() {
     if (!session || !input.trim() || busy || session.status === 'graded') return;
     const content = input;
+    const before = turns.length;
     input = '';
+    // Optimistic: shown now, withdrawn below if the server doesn't keep it.
     turns = [...turns, { role: 'user', content }];
     busy = true;
     error = '';
+    notice = '';
     await tick();
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
+    // Not sent after all: drop the optimistic line and give the text back to rephrase.
+    const withdraw = () => {
+      turns = turns.slice(0, before);
+      if (!input.trim()) input = content;
+    };
     try {
       const r = await api.sendRoleplayTurn(sid, content);
-      turns = [...turns, { role: 'persona', content: r.reply }];
+      if (r.recorded === false) {
+        withdraw();
+        notice = r.reply;
+      } else {
+        turns = [...turns, { role: 'persona', content: r.reply }];
+      }
       session = { ...session, status: r.status };
       await tick();
       scroller?.scrollTo({ top: scroller.scrollHeight, behavior: 'smooth' });
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      const message = e instanceof Error ? e.message : String(e);
+      // A server-side error rolls back both turns, but a transport failure (a proxy timeout,
+      // a dropped connection) can land after the server committed them. Reload the
+      // transcript instead of assuming nothing was stored, so a resend can't duplicate it.
+      try {
+        const fresh = await api.getRoleplay(sid);
+        const stored = fresh.turns ?? [];
+        session = fresh;
+        turns = stored;
+        if (stored.length > before) {
+          error = '';
+        } else {
+          if (!input.trim()) input = content;
+          error = message;
+        }
+      } catch {
+        withdraw();
+        error = message;
+      }
     } finally {
       busy = false;
     }
@@ -109,6 +143,15 @@
           </div>
         </div>
       {/each}
+      {#if notice && !busy}
+        <div
+          data-testid="roleplay-notice"
+          role="status"
+          class="mx-auto max-w-[90%] rounded-[var(--radius-md)] border border-dashed border-border px-4 py-2.5 text-center text-xs leading-relaxed text-muted"
+        >
+          <span class="eyebrow mr-1.5 !text-[0.55rem] text-faint">not sent</span>{notice}
+        </div>
+      {/if}
       {#if busy}
         <div class="flex justify-start">
           <div class="flex items-center gap-1.5 rounded-[var(--radius-lg)] rounded-bl-sm border border-border bg-surface px-4 py-3">

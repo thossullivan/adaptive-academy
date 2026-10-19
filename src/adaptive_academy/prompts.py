@@ -470,3 +470,22 @@ Each evidence_indexes value must be an integer index shown in the candidate dige
 Return the ranked items through the provided tool call, with scores from 0 to 1.
 Do not create topics or milestones. Return nothing outside the tool call.""",
 )
+
+
+# ── Structured output (transport) ───────────────────────────────────────────
+# Appended by the API-key client's complete_json. Forced tool_choice is rejected on Claude
+# Sonnet 5.5 (and gives up thinking where it is accepted), so the request uses
+# tool_choice=auto + a strict tool, and these lines tell the model to answer through it.
+STRUCTURED_TOOL_INSTRUCTION = Prompt(
+    "structured.tool_instruction",
+    1,
+    "Give your answer by calling the `{tool_name}` tool exactly once, with the complete "
+    "result as its input. Do not answer in plain text.",
+)
+
+STRUCTURED_TOOL_RETRY = Prompt(
+    "structured.tool_retry",
+    1,
+    "Your answer must arrive as a call to the `{tool_name}` tool; a plain-text reply can't "
+    "be used. Call `{tool_name}` now with the complete result as its input.",
+)
