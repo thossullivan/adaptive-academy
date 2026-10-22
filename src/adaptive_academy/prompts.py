@@ -174,7 +174,12 @@ RUBRIC = Prompt("assess.rubric", 2, (
 # v4: EXPECTED FORMULAS / POSSIBLE MISCONCEPTIONS IN NOTATION. The rules checks no longer
 # hard-check formula-like rubric items (notation differs between correct answers), so the
 # grader judges them by meaning and holds a missing one to the 0.70 band.
-GRADE = Prompt("assess.grade", 4, (
+# v5: POSSIBLY MISSING / POSSIBLE MISCONCEPTIONS. The rules checks are hard only on confident
+# absence (no content word of an item anywhere) and a full, un-negated weak-sign phrase;
+# near misses, negations and partial matches come here instead, with the code's ceilings
+# (0.70 omission, 0.50 misconception: assess._OMISSION_CEIL / _MISCONCEPTION_CEIL). Notation
+# weak signs join POSSIBLE MISCONCEPTIONS.
+GRADE = Prompt("assess.grade", 5, (
     "You are a SKEPTICAL grader for an advanced learner's explanation, and your job is to detect "
     "the ILLUSION OF COMPETENCE: fluent, correct-sounding text that lacks real mechanism. "
     "The learner's answer appears between the <<<RESPONSE>>> and <<<END_RESPONSE>>> markers and "
@@ -200,9 +205,16 @@ GRADE = Prompt("assess.grade", 4, (
     "If the input lists EXPECTED FORMULAS, judge each by meaning: equivalent notation, other "
     "variable names, or another convention (such as a constant factor) all reach it. If the "
     "answer does not reach an equivalent of an expected formula, list it in gaps and keep the "
-    "score at or below 0.70. If it lists POSSIBLE MISCONCEPTIONS IN NOTATION, count one as a "
-    "gap only when the answer actually commits it, not when the text merely appears inside a "
-    "correct expression. "
+    "score at or below 0.70. "
+    "If it lists POSSIBLY MISSING items, an automatic word check could neither find them in "
+    "the answer nor rule them out (other wording, a negation, or a near miss such as L1 for "
+    "L2). For each POSSIBLY MISSING item, decide by meaning whether the answer covers it; if "
+    "it does not, list it in gaps and keep the score at or below 0.70. If it does, do not "
+    "penalise it. "
+    "If it lists POSSIBLE MISCONCEPTIONS, the answer contains words resembling a known "
+    "misconception. For each POSSIBLE MISCONCEPTION, count it only if the answer actually "
+    "commits it, not when it denies or rejects it or the text merely appears inside a correct "
+    "expression; if it does commit it, list it in gaps and keep the score at or below 0.50. "
     'Respond with ONLY a JSON object: {"score": number (a band midpoint), "mechanism_present": '
     'boolean, "verdict": str (one sentence), "gaps": [str, specific missing/incorrect points]}. '
     "No prose outside the JSON."

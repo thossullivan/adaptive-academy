@@ -86,14 +86,21 @@ def compute_delta(score: float, baseline_score: float | None) -> float | None:
 
 
 # ── Anchor-term matching ─────────────────────────────────────────────────────
-# Rubric must_include / weak_signs (and a source anchor's key_points) are matched against the
-# learner's text. A WORD item is a hard check, matched as words in any script: casefolded,
-# accents stripped, inflections allowed ("residuals", "converges"), digits and code tokens
-# exact ("L2" is not "L1", "np.dot" is not "dot"), a negated occurrence ("not squared") not
-# counted. A FORMULA item (is_formula_like) is never a hard gap: a correct answer may use other
-# variable names (w for θ) or another convention (MSE without ½), which no literal match can
-# tell from a wrong one, so the grader judges it (build_grade_prompt). Formula items are
-# compared on an ASCII form (normalize_math), so X^T matches Xᵀ.
+# Rubric must_include / weak_signs (and a source anchor's key_points) are checked against the
+# learner's text. No word matcher strict enough to stop wrong answers leaves correct ones alone,
+# so the checks are only CONFIDENT about absence and leave everything uncertain to the grader:
+#   - a WORD must_include item is satisfied when its words occur un-negated in one sentence;
+#     a HARD gap (capped by penalize_score) only when none of its content words occur anywhere;
+#     otherwise "possibly missing", a note the grader decides by meaning (build_grade_prompt).
+#   - a WORD weak sign is a HARD misconception only as a full, un-negated phrase; a negated or
+#     partial match is a "possible misconception" note for the grader.
+#   - a FORMULA item (is_formula_like) is never a hard gap: a correct answer may use other
+#     variable names (w for θ) or another convention (MSE without ½), so the grader judges it.
+# Words are compared casefolded, accents and markdown emphasis stripped, possessives dropped,
+# contractions expanded, inflected ("residuals", "converged"), and as compounds either way
+# ("pre-training" ~ "pretraining" ~ "pre training"); digits and code tokens compare exactly
+# ("L2" is not "L1", "np.dot" is not "dot"). Formula items are compared on an ASCII form
+# (normalize_math), so X^T matches Xᵀ.
 
 # Unicode math notation -> ASCII. Spaced where the ASCII is a word ("grad J" for ∇J).
 _MATH_CHARS = {
@@ -143,7 +150,24 @@ _CJK = "{}-{}{}-{}{}-{}".format(*_chars(0x3040, 0x30FF, 0x3400, 0x4DBF, 0x4E00, 
 # A word token: Unicode word characters, with dotted/slashed parts (np.dot, TCP/IP) and a
 # C++ / C# / A* suffix kept on, so code tokens compare whole.
 _TOKEN = re.compile(r"\w+(?:[./]\w+)*(?:\+\+|[#*](?!\w))?")
-_CLAUSE_BREAK = re.compile(r"[,.;:!?()\[\]]")
+_CLAUSE_BREAK = re.compile(r"[,.;:!?()\[\]。！？；，、]")
+_SENTENCE_BREAK = re.compile(r"[.;!?。！？；]|\n\s*\n")
+_COMPOUND_GAP = re.compile(r"\s*-?\s*")  # what may sit inside a compound: pre training, 1-D
+# Markdown emphasis, paired so A*, C# and x * y keep their stars: **bold**, *it*, ***both***,
+# and _two words_ (a single-word _x_ is left alone: __init__ is a name, and a token's
+# underscore parts match anyway). Code-span backticks become spaces.
+_EMPHASIS = (
+    re.compile(r"(?<![\w*])(\*{1,3})(?=[^\s*])([^\n]+?)(?<=[^\s*])\1(?![\w*])"),
+    re.compile(r"(?<![\w_])(_{1,3})(?=[^\s_])([^\n]*?\s[^\n]*?)(?<=[^\s_])\1(?![\w_])"),
+)
+# Contractions spelled out (can't -> can not, not "ca not") and possessives dropped
+# (Jensen's -> Jensen, Bayes' -> Bayes), on casefolded text with ASCII apostrophes.
+_CONTRACTIONS = tuple((re.compile(p), r) for p, r in (
+    (r"\bcan't\b", "can not"), (r"\bwon't\b", "will not"), (r"\bshan't\b", "shall not"),
+    (r"\bain't\b", "is not"), (r"n't\b", " not"), (r"\bcannot\b", "can not"),
+    (r"'re\b", " are"), (r"'ve\b", " have"), (r"'ll\b", " will"), (r"'m\b", " am"),
+    (r"'d\b", " would"), (r"(?<=\w)'s\b", ""), (r"(?<=s)'(?!\w)", ""),
+))
 
 
 @lru_cache(maxsize=4096)
@@ -215,6 +239,8 @@ _SYMBOL_ACRONYM = re.compile(r"(?<![\w*+#])[A-Z][A-Z0-9]*(?:\+\+|[#*])(?![\w*+#]
 _CAPS_ACRONYM = re.compile(r"(?<!\w)[A-Z][A-Z0-9]{1,5}(?!\w)")  # KL, L2, MSE, GPT
 _SLASH_WORDS = re.compile(r"(?<![\w/])[A-Za-z]{2,}(?:/[A-Za-z]{2,})+(?![\w/])")  # TCP/IP
 _DOTTED_OR_SNAKE = re.compile(r"(?<![\w.])[\w.]*[._][\w.]*(?!\w)")
+# A Leibniz derivative (dL/dw, dy/dx, dz/dx1): notation, though it looks like word/word.
+_LEIBNIZ = re.compile(r"(?<![\w/])d[A-Za-z]\d*/d[A-Za-z]\d*(?![\w/])")
 
 
 def _is_identifier(tok: str) -> bool:
@@ -227,29 +253,31 @@ def _is_identifier(tok: str) -> bool:
 
 def _mask_word_tokens(item: str) -> str:
     """The item with its acronyms and code identifiers replaced by a plain word, so their
-    symbols (the ++ in C++, the _ in log_softmax) don't read as notation."""
-    s = _SYMBOL_ACRONYM.sub(" wordtoken ", item)
-    s = _SLASH_WORDS.sub(" wordtoken ", s)
+    symbols (the ++ in C++, the _ in log_softmax) don't read as notation. Unpadded: spaces
+    around the word would make the hyphen in AUC-ROC a spaced minus."""
+    s = _SYMBOL_ACRONYM.sub("wordtoken", item)
+    s = _SLASH_WORDS.sub("wordtoken", s)
     s = _DOTTED_OR_SNAKE.sub(
-        lambda m: " wordtoken " if _is_identifier(m.group()) else m.group(), s)
-    return _CAPS_ACRONYM.sub(" wordtoken ", s)
+        lambda m: "wordtoken" if _is_identifier(m.group()) else m.group(), s)
+    return _CAPS_ACRONYM.sub("wordtoken", s)
 
 
 def is_formula_like(item: str) -> bool:
     """Whether a rubric item is notation (checked by the grader) rather than words (checked
-    here). Acronyms (KL, L2, MSE, C++, A*, TCP/IP), word/word ("and/or") and code identifiers
-    (log_softmax, __init__, np.dot) count as words, not notation. Otherwise formula-like
-    when the item has ANY notation in it:
+    here). Acronyms (KL, L2, MSE, C++, A*, TCP/IP, AUC-ROC), word/word ("and/or") and code
+    identifiers (log_softmax, __init__, np.dot) count as words, not notation. Otherwise
+    formula-like when the item has ANY notation in it:
       - a Unicode math character (superscript/subscript, ∇ ‖ − ½ ...) or Greek used as
         notation (_greek_notation; Greek-language prose is words),
       - an ASCII operator or bracket: ^ _ = + * / \\ | < > ~ { } [ ],
       - a function call shape, a letter or digit directly before "(" ("f(x)", "sqrt(d)"),
       - a minus between single symbols ("x - y", "x-y") or a spaced minus; a hyphenated
         word ("p-value", "k-means", "top-1", "GPT-3") is not one,
+      - a Leibniz derivative ("dL/dw", "dy/dx"),
     or when it has no natural-language word at all: no word of 3+ letters in any script
     (other than a Greek letter name or a function name like sqrt/log/max) and no CJK
     character, e.g. "x theta", "X.T"."""
-    if any(_char_ascii(c)[1] for c in item) or _greek_notation(item):
+    if any(_char_ascii(c)[1] for c in item) or _greek_notation(item) or _LEIBNIZ.search(item):
         return True
     masked = _mask_word_tokens(item)
     norm = normalize_math(masked)
@@ -264,43 +292,27 @@ def is_formula_like(item: str) -> bool:
                    for w in words)
 
 
+def _strip_emphasis(s: str) -> str:
+    for _ in range(3):  # nested: **bold _two words_ bold**
+        before = s
+        for pattern in _EMPHASIS:
+            s = pattern.sub(r"\2", s)
+        if s == before:
+            break
+    return re.sub(r"\*{2,}", " ", s.replace("`", " "))
+
+
 def _word_text(s: str) -> str:
     """Text prepared for word matching, in any script: typography to ASCII, NFKC, casefold,
-    accents stripped, "n't" spelled "not", CJK characters spaced apart."""
+    accents and markdown emphasis stripped, contractions spelled out, possessives dropped,
+    CJK characters spaced apart."""
     s = "".join(_TEXT_CHARS.get(c, c) for c in s)
     s = unicodedata.normalize("NFKC", s).casefold()
     s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
-    s = unicodedata.normalize("NFC", s)
-    s = re.sub(r"n't\b", " not", re.sub(r"\bcannot\b", "can not", s))
+    s = _strip_emphasis(unicodedata.normalize("NFC", s))
+    for pattern, repl in _CONTRACTIONS:
+        s = pattern.sub(repl, s)
     return re.sub(f"([{_CJK}])", r" \1 ", s)
-
-
-@dataclass(frozen=True)
-class _Pos:
-    """One word of the learner's text: the forms it can match (a code token also matches
-    its parts: np.dot -> np, dot), and whether a negation directly precedes it."""
-
-    forms: frozenset[str]
-    negated: bool
-
-
-def _positions(text: str) -> list[_Pos]:
-    out: list[_Pos] = []
-    prev_end, prev_tok = 0, ""
-    s = _word_text(text)
-    for m in _TOKEN.finditer(s):
-        tok = m.group()
-        dotted = re.split(r"[./]", tok)
-        forms = {tok, *dotted, *(p for d in dotted for p in d.split("_"))} - {""}
-        joined = not _CLAUSE_BREAK.search(s[prev_end:m.start()])
-        negated = joined and prev_tok in _NEGATIONS and tok not in _NOT_NEGATING
-        out.append(_Pos(frozenset(forms), negated))
-        prev_end, prev_tok = m.end(), tok
-    return out
-
-
-def _item_tokens(item: str) -> list[str]:
-    return _TOKEN.findall(_word_text(item))
 
 
 @lru_cache(maxsize=4096)
@@ -315,76 +327,183 @@ def _inflections(w: str) -> frozenset[str]:
     return frozenset(forms)
 
 
-def _token_matches(t: str, pos: _Pos) -> bool:
-    """An item word matches a text word exactly, or (both 3+ letters) as an inflection
-    either way: converge ~ converges, normalize ~ normalized. Digits, acronyms with symbols
-    and code names match exactly only: L2 != L1, np.dot != dot."""
-    if t in pos.forms:
-        return True
-    if len(t) < 3 or not t.isalpha():
-        return False
-    return any(len(w) >= 3 and w.isalpha() and (w in _inflections(t) or t in _inflections(w))
-               for w in pos.forms)
+@lru_cache(maxsize=16384)
+def _bases(w: str) -> frozenset[str]:
+    """The word and the bases (3+ letters) it inflects: converged -> converge, pretraining ->
+    pretrain, overfitting -> overfit. Two words match when their bases meet, so inflected
+    forms match each other (converged ~ converges). Digits, short words, acronyms with
+    symbols and code names are their own only base: L2 != L1, np.dot != dot."""
+    if len(w) < 3 or not w.isalpha():
+        return frozenset({w})
+    out = {w}
+    for cut in (1, 2, 3, 4):
+        stem = w[:-cut]
+        out |= {b for b in (stem, stem + "e", stem + "y") if len(b) >= 3 and w in _inflections(b)}
+    return frozenset(out)
 
 
-def _has_words(item: str, positions: list[_Pos]) -> bool:
-    """A word item is present when all its content words (stopwords aside) occur, in any
-    order, within a window of len(item words) + 3 text words, none of them negated: "squared
-    error" matches "errors get squared" but not "the error is not squared". A negation the
-    item states itself ("not convex") is matched as an ordinary word."""
-    tokens = _item_tokens(item)
-    if not tokens:
-        return True
-    content = [t for t in tokens if t not in _STOPWORDS] or tokens
-    respect_negation = not any(t in _NEGATIONS for t in tokens)
-    window = len(tokens) + 3
-    for start in range(len(positions)):
-        span = positions[start:start + window]
-        if all(any(_token_matches(t, p) and not (respect_negation and p.negated) for p in span)
-               for t in content):
-            return True
-    return False
+def _index(forms) -> frozenset[str]:
+    return frozenset(b for f in forms for b in _bases(f))
 
 
-def _has_phrase(item: str, positions: list[_Pos]) -> bool:
-    """A weak sign is present as its words in order, contiguous and whole (inflections
-    allowed, so "always converge" is in "always converges" but "memory" is not in
-    "memoryless"), and not directly negated ("does not always converge")."""
-    tokens = _item_tokens(item)
+def _matches(w: str, index: frozenset[str]) -> bool:
+    return not _bases(w).isdisjoint(index)
+
+
+@dataclass(frozen=True)
+class _Pos:
+    """One word of the learner's text: the bases of the forms it can match (a code token also
+    matches its parts: np.dot -> np, dot), the bases of it written together with the next
+    word ("pre training" -> pretraining, "1-D" -> 1d), its sentence, and whether a negation
+    directly precedes it in the same clause, stopwords aside ("is not a convex function")."""
+
+    index: frozenset[str]
+    joined: frozenset[str]
+    sentence: int
+    negated: bool
+
+
+@dataclass(frozen=True)
+class _Answer:
+    positions: list[_Pos]
+    # Per sentence, the bases of every word and of the un-negated words (joins included).
+    sentences: list[tuple[frozenset[str], frozenset[str]]]
+    everywhere: frozenset[str]
+
+
+def _code_parts(tok: str) -> list[str]:
+    dotted = re.split(r"[./]", tok)
+    return [p for p in {*dotted, *(p for d in dotted for p in d.split("_"))} if p and p != tok]
+
+
+def _read_answer(text: str) -> _Answer:
+    s = _word_text(text)
+    matches = list(_TOKEN.finditer(s))
+    gaps = [s[(matches[k - 1].end() if k else 0):m.start()] for k, m in enumerate(matches)]
+    toks = [m.group() for m in matches]
+    positions: list[_Pos] = []
+    sentence, prev = 0, ""  # prev: the clause's last word that isn't a stopword
+    for k, tok in enumerate(toks):
+        if k and _SENTENCE_BREAK.search(gaps[k]):
+            sentence += 1
+        if k and _CLAUSE_BREAK.search(gaps[k]):
+            prev = ""
+        negated = prev in _NEGATIONS and tok not in _NOT_NEGATING
+        if tok not in _STOPWORDS:
+            prev = tok
+        compound = k + 1 < len(toks) and _COMPOUND_GAP.fullmatch(gaps[k + 1]) is not None
+        positions.append(_Pos(
+            index=_index([tok, *_code_parts(tok)]),
+            joined=_index([tok + toks[k + 1]]) if compound else frozenset(),
+            sentence=sentence, negated=negated))
+    sentences: list[tuple[frozenset[str], frozenset[str]]] = []
+    for n in range(sentence + 1 if positions else 0):
+        here = [p for p in positions if p.sentence == n]
+        sentences.append((
+            frozenset().union(*(p.index | p.joined for p in here)),
+            frozenset().union(*(p.index | p.joined for p in here if not p.negated))))
+    everywhere = frozenset().union(*(p.index | p.joined for p in positions))
+    return _Answer(positions, sentences, everywhere)
+
+
+def _item_tokens(item: str) -> list[str]:
+    return _TOKEN.findall(_word_text(item))
+
+
+def _covered(tokens: list[str], index: frozenset[str]) -> bool:
+    """Every content word of the item (stopwords may be skipped) is in `index`, alone or
+    written together with the next item word ("data set" ~ dataset)."""
+    content = [t for t in tokens if t not in _STOPWORDS]
+    skippable = _STOPWORDS if content else frozenset()
     n = len(tokens)
-    if not n:
-        return False
-    respect_negation = not any(t in _NEGATIONS for t in tokens)
-    for start in range(len(positions) - n + 1):
-        if respect_negation and positions[start].negated:
-            continue
-        if all(_token_matches(tokens[k], positions[start + k]) for k in range(n)):
+
+    @lru_cache(maxsize=None)
+    def from_(i: int) -> bool:
+        if i >= n:
             return True
-    return False
+        if tokens[i] in skippable and from_(i + 1):
+            return True
+        if _matches(tokens[i], index) and from_(i + 1):
+            return True
+        return i + 1 < n and _matches(tokens[i] + tokens[i + 1], index) and from_(i + 2)
+
+    return from_(0)
+
+
+def _states_negation(tokens: list[str]) -> bool:
+    """An item that states a negation itself ("no closed-form solution") is matched with
+    it, so negated words in the answer count for it."""
+    return any(t in _NEGATIONS for t in tokens)
+
+
+def _in_one_sentence(tokens: list[str], answer: _Answer, *, respect_negation: bool) -> bool:
+    return any(_covered(tokens, unnegated if respect_negation else every)
+               for every, unnegated in answer.sentences)
+
+
+def _any_word_present(tokens: list[str], answer: _Answer) -> bool:
+    """Whether ANY content word of the item occurs anywhere in the answer, negated or not: as
+    a stem, an exact digit/acronym/code token or one of a code token's parts (np.dot -> dot),
+    or as a compound either way (data set ~ dataset, pretraining ~ pre-training)."""
+    content = [t for t in tokens if t not in _STOPWORDS and t not in _NEGATIONS] or tokens
+    candidates = [*content, *(p for t in content for p in _code_parts(t) if len(p) >= 2),
+                  *(a + b for a, b in zip(tokens, tokens[1:]))]
+    return any(_matches(c, answer.everywhere) for c in candidates)
+
+
+def _phrase_matches(tokens: list[str], answer: _Answer) -> list[bool]:
+    """Every place the item occurs as its words in order, contiguous and in one sentence
+    (inflections and compounds either way allowed, so "always converge" is in "always
+    converges" and "overfit" in "over-fits", but "memory" is not in "memoryless"); for each,
+    whether a negation directly precedes it ("does not always converge")."""
+    ps, n = answer.positions, len(tokens)
+
+    def from_(i: int, j: int, sentence: int) -> bool:
+        if i == n:
+            return True
+        if j >= len(ps) or ps[j].sentence != sentence:
+            return False
+        if _matches(tokens[i], ps[j].index) and from_(i + 1, j + 1, sentence):
+            return True
+        if (i + 1 < n and _matches(tokens[i] + tokens[i + 1], ps[j].index)
+                and from_(i + 2, j + 1, sentence)):
+            return True
+        return _matches(tokens[i], ps[j].joined) and from_(i + 1, j + 2, sentence)
+
+    return [p.negated for j, p in enumerate(ps) if n and from_(0, j, p.sentence)]
 
 
 @dataclass
 class RulesCheck:
-    """The deterministic anchor checks on one response."""
+    """The deterministic anchor checks on one response. Only `gaps` caps the score; every
+    other list is a note for the grader, who decides by meaning (build_grade_prompt)."""
 
     gaps: list[str] = field(default_factory=list)  # hard: they set the score ceilings
     # Every formula-like must_include item: the grader is told to judge each by meaning.
     formulas: list[str] = field(default_factory=list)
-    # Formula-like must_include items the text doesn't contain literally, and formula-like
-    # weak signs it does: notation-dependent either way, so left to the grader, not capped.
+    # Formula-like must_include items the text doesn't contain literally.
     formulas_unmatched: list[str] = field(default_factory=list)
-    formula_signs_present: list[str] = field(default_factory=list)
+    # Word must_include items neither found nor confidently absent: a near miss (L1 for L2),
+    # a negated mention, or words spread over sentences.
+    possibly_missing: list[str] = field(default_factory=list)
+    # Word weak signs matched only negated or in part, and formula-like weak signs found
+    # literally (a fragment can sit inside a correct expression).
+    possible_misconceptions: list[str] = field(default_factory=list)
 
     @property
     def left_to_grader(self) -> list[str]:
-        return self.formulas_unmatched + self.formula_signs_present
+        return self.formulas_unmatched + self.possibly_missing + self.possible_misconceptions
 
 
 def check_anchor_terms(response: str, must_include: list[str],
                        weak_signs: list[str]) -> RulesCheck:
-    """Deterministic anchor checks (§2.3): the LLM grader cannot paper over these. Word items
-    are hard checks; formula-like items (is_formula_like) are soft notes for the grader."""
-    positions = _positions(response or "")
+    """Deterministic anchor checks (§2.3): the LLM grader cannot paper over the hard ones.
+    A word must_include item is satisfied when its words occur un-negated in one sentence, a
+    hard gap only when none of its content words occur anywhere, and possibly missing
+    otherwise. A word weak sign is a hard misconception only as a full, un-negated phrase,
+    and a possible one when matched negated or when its words share a sentence. Formula-like
+    items (is_formula_like) are always notes for the grader."""
+    answer = _read_answer(response or "")
     text_formula = _formula_key(response or "")
     result = RulesCheck()
     for term in must_include:
@@ -394,16 +513,28 @@ def check_anchor_terms(response: str, must_include: list[str],
             result.formulas.append(term)
             if _formula_key(term) not in text_formula:
                 result.formulas_unmatched.append(term)
-        elif not _has_words(term, positions):
+            continue
+        tokens = _item_tokens(term)
+        if not tokens or _in_one_sentence(
+                tokens, answer, respect_negation=not _states_negation(tokens)):
+            continue
+        if _any_word_present(tokens, answer):
+            result.possibly_missing.append(term)
+        else:
             result.gaps.append(f"omitted required element: {term}")
     for sign in weak_signs:
         if not sign or not sign.strip():
             continue
         if is_formula_like(sign):
             if _formula_key(sign) in text_formula:
-                result.formula_signs_present.append(sign)
-        elif _has_phrase(sign, positions):
+                result.possible_misconceptions.append(sign)
+            continue
+        tokens = _item_tokens(sign)
+        found = _phrase_matches(tokens, answer)
+        if found and (_states_negation(tokens) or not all(found)):
             result.gaps.append(f"contains likely misconception: {sign}")
+        elif found or (tokens and _in_one_sentence(tokens, answer, respect_negation=False)):
+            result.possible_misconceptions.append(sign)
     return result
 
 
@@ -526,19 +657,21 @@ class AssessmentResult:
 def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
                        reference: str, response: str, *,
                        formulas: list[str] | None = None,
-                       formula_signs: list[str] | None = None) -> tuple[str, str]:
-    """`formulas` / `formula_signs`: the formula-like must_include items (all of them) and the
-    formula-like weak signs found in the text, which the rules checks leave to the grader
-    (check_anchor_terms). GRADE says how to judge them and what a missing formula costs."""
+                       possibly_missing: list[str] | None = None,
+                       possible_misconceptions: list[str] | None = None) -> tuple[str, str]:
+    """The notes the rules checks leave to the grader (check_anchor_terms): `formulas`, every
+    formula-like must_include item; `possibly_missing`, word items the checks could neither
+    find nor rule out; `possible_misconceptions`, weak signs matched only negated or in part,
+    or written as notation. GRADE says how to judge each and what it costs."""
     lines = [f"CONCEPT: {concept_name}", f"PROBE KIND: {kind}", "", "RUBRIC / ANCHOR:"]
     for c in criteria:
         lines.append(f"- {c}")
-    if formulas:
-        lines.append("EXPECTED FORMULAS:")
-        lines += [f"- {f}" for f in formulas]
-    if formula_signs:
-        lines.append("POSSIBLE MISCONCEPTIONS IN NOTATION:")
-        lines += [f"- {s}" for s in formula_signs]
+    for heading, notes in (("EXPECTED FORMULAS:", formulas),
+                           ("POSSIBLY MISSING:", possibly_missing),
+                           ("POSSIBLE MISCONCEPTIONS:", possible_misconceptions)):
+        if notes:
+            lines.append(heading)
+            lines += [f"- {n}" for n in notes]
     if reference:
         lines.append(f"REFERENCE ANSWER: {reference}")
     lines += ["", "<<<RESPONSE>>>", escape_markers(response or "(empty)"), "<<<END_RESPONSE>>>"]
@@ -655,12 +788,13 @@ def grade_concept(
     rules_gaps = rules.gaps
     if rules.left_to_grader:
         emit("assess:rules-soft",
-             f"{len(rules.left_to_grader)} formula item(s) left to the grader: "
+             f"{len(rules.left_to_grader)} item(s) left to the grader: "
              + "; ".join(rules.left_to_grader))
     emit("prompt", GRADE.tag)
     system, user = build_grade_prompt(
-        concept.name, kind, criteria, reference, response,
-        formulas=rules.formulas, formula_signs=rules.formula_signs_present)
+        concept.name, kind, criteria, reference, response, formulas=rules.formulas,
+        possibly_missing=rules.possibly_missing,
+        possible_misconceptions=rules.possible_misconceptions)
     answer = checked_completion(
         session, llm, system=system, user=user, rubric=GRADE_RUBRIC, emit=emit,
         ctx=CheckContext(rules_gaps=tuple(rules_gaps)))

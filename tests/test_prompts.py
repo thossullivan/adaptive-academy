@@ -13,8 +13,9 @@ def test_prompt_is_a_str_with_metadata():
 
 
 def test_registry_prompts_have_tags():
-    # v2 injection clause, v3 bands + mechanism cap, v4 expected formulas judged by meaning
-    assert GRADE.tag == "assess.grade@v4"
+    # v2 injection clause, v3 bands + mechanism cap, v4 expected formulas judged by meaning,
+    # v5 possibly-missing items and possible misconceptions judged by meaning
+    assert GRADE.tag == "assess.grade@v5"
     assert STORY.tag == "story.compose@v1"
     # The skeptical-grader phrasing the assessor relies on is preserved.
     assert "SKEPTICAL grader" in GRADE
@@ -73,7 +74,39 @@ def test_grade_prompt_says_what_a_missing_expected_formula_costs():
     assert "EXPECTED FORMULAS" in GRADE
     assert ("If the answer does not reach an equivalent of an expected formula, list it in "
             "gaps and keep the score at or below 0.70.") in " ".join(GRADE.split())
-    assert "POSSIBLE MISCONCEPTIONS IN NOTATION" in GRADE
+
+
+def test_grade_prompt_says_how_to_judge_the_uncertain_rules_notes():
+    # The rules checks are hard only on confident absence; everything uncertain reaches the
+    # grader as POSSIBLY MISSING / POSSIBLE MISCONCEPTIONS, with the same ceilings the code
+    # applies to hard gaps (assess._OMISSION_CEIL, assess._MISCONCEPTION_CEIL).
+    from adaptive_academy.engine import assess
+
+    text = " ".join(GRADE.split())
+    assert GRADE.version >= 5
+    assert "POSSIBLY MISSING" in text and "POSSIBLE MISCONCEPTIONS" in text
+    assert ("For each POSSIBLY MISSING item, decide by meaning whether the answer covers it; "
+            f"if it does not, list it in gaps and keep the score at or below "
+            f"{assess._OMISSION_CEIL:.2f}.") in text
+    assert ("For each POSSIBLE MISCONCEPTION, count it only if the answer actually commits it"
+            in text)
+    assert (f"list it in gaps and keep the score at or below {assess._MISCONCEPTION_CEIL:.2f}"
+            in text)
+
+
+def test_grade_builder_lists_each_kind_of_rules_note():
+    from adaptive_academy.engine.assess import build_grade_prompt
+
+    _, user = build_grade_prompt(
+        "ridge", "self_explanation", ["c"], "", "L1 shrinks weights",
+        formulas=["||w||^2"], possibly_missing=["L2 regularization"],
+        possible_misconceptions=["always converge"])
+    assert "EXPECTED FORMULAS:\n- ||w||^2" in user
+    assert "POSSIBLY MISSING:\n- L2 regularization" in user
+    assert "POSSIBLE MISCONCEPTIONS:\n- always converge" in user
+    assert user.index("POSSIBLE MISCONCEPTIONS") < user.index("<<<RESPONSE>>>")
+    _, bare = build_grade_prompt("ridge", "self_explanation", ["c"], "", "x")
+    assert "POSSIBLY MISSING" not in bare and "POSSIBLE MISCONCEPTIONS" not in bare
 
 
 def test_grade_builder_delimits_the_learner_response():
