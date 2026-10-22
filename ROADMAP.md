@@ -41,5 +41,5 @@ Items marked **good first issue** are self-contained and a good way into the cod
 ## Principles that won't change
 
 - **Local-first records.** Your learning record stays on your machine. (Each model call does
-  send its content to Anthropic's API; see the README's cost and privacy note.)
+  send its content to Anthropic's API; see the README's "Cost and privacy" section.)
 - **No telemetry.** None, by design.

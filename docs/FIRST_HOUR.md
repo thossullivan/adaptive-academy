@@ -2,8 +2,7 @@
 
 A walkthrough for a new user: look around the demo topic first (no API key needed), then start
 something of your own. It assumes the app is running; if it isn't, follow
-[Quickstart (Docker)](../README.md#quickstart-docker) or
-[Quickstart (local)](../README.md#quickstart-local) and come back.
+[Get started](../README.md#get-started) and come back.
 
 The app is at http://localhost:8000 under Docker, or http://localhost:5173 with `just dev`.
 
@@ -215,8 +214,7 @@ From one measured run on `claude-sonnet-5-5` (2026-10-19):
 | One research angle with 2 web searches | $0.081 |
 
 Topic research runs five angles, so it is the largest single item; tutoring and grading are
-cheap per turn. The README's [cost note](../README.md#honest-note-on-cost--privacy) covers
-the rest.
+cheap per turn. [Costs](COSTS.md) covers the rest.
 
 - **Cap it:** set `AA_DAILY_BUDGET_USD=5` (any amount) in `.env` and restart the API. Once
   today's recorded spend reaches it, new API-key calls are refused with a message saying what
@@ -236,7 +234,7 @@ Your whole record is one SQLite file on your machine.
   moving elsewhere.
 - From a terminal: `just backup` and `just export` write the same files to `backups/`.
 - Restoring a snapshot: see
-  [Back up and restore your data](../README.md#back-up-and-restore-your-data).
+  [Back up and restore](BACKUP.md).
 - **Remove the demo** when you're done with it: open its dashboard and click **Remove demo**,
   then **Yes, remove it**. It deletes the demo topic and everything that belongs to it, and
   nothing else.

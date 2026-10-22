@@ -115,7 +115,7 @@ uv run alembic upgrade head</pre>
         </li>
       </ol>
       <p class="mt-4 text-xs text-faint">
-        Full steps are in the README under "Back up and restore your data".
+        Full steps are in <code class="code">docs/BACKUP.md</code> in the repo.
       </p>
     </Card>
   </div>
