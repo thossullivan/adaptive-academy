@@ -12,14 +12,18 @@ and the text of an allowed reveal_solution is never reviewed (the gate already d
 While a withheld draft is being regenerated the tutor cannot unlock itself mid-turn: a
 log_attempt then is DEFERRED (`ATTEMPT_DEFERRED`), so reveal_solution stays gated for the
 rest of the turn and the regenerated reply is always reviewed. The attempt is recorded after
-the turn only if that reply passes review (a genuine attempt the first draft forgot to log
-is kept); a turn that ends in the fallback records nothing.
+the turn only if that reply passes the MODEL check and the model also finds an attempt in
+the learner's own message (`learner_attempted`). So a genuine attempt the first draft forgot
+to log is kept, but a tutor caught leaking can't log an attempt the learner never made. A
+fallback, or screen-only mode, records nothing (`tool:log_attempt:dropped`).
 
 Detection:
-1. `screen_reply`: a deterministic screen, no model call, for obvious leaks (a long fenced
-   code block that is not a fill-in-the-blank scaffold, "here's the full solution"). It is
-   an INPUT to the model check (the model is told which rule fired), never a verdict on its
-   own while a model check is available: a Socratic question can trip a keyword.
+1. `screen_reply`: a deterministic screen, no model call. It names a rule ("phrase" for an
+   announced handover like "here's the full solution", "code_block" for a long fenced
+   block) as an INPUT to the model check, never a verdict while the check is available. In
+   screen-only mode only "phrase" blocks: a long code block could be a fill-in-the-blank
+   scaffold (a good hint) or a finished solution, and line-level rules couldn't tell them
+   apart without blocking real scaffolds or passing real solutions, so code passes then.
 2. A model check on the copy role (Haiku by default) with structured output and its own
    versioned prompt (prompts.TUTOR_SOLUTION_GUARD). It sees the concept, the tutor's previous
    message (often the question being answered), the learner's message, and the draft, and
@@ -73,9 +77,10 @@ GUARD_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "gives_away_solution": {"type": "boolean"},
+        "learner_attempted": {"type": "boolean"},
         "reason": {"type": "string"},
     },
-    "required": ["gives_away_solution", "reason"],
+    "required": ["gives_away_solution", "learner_attempted", "reason"],
     "additionalProperties": False,
 }
 # A verdict is a boolean and a sentence; this ceiling covers Haiku 5.5's adaptive thinking
@@ -90,10 +95,13 @@ GUARD_FALLBACK = (
 
 # The tool result for a log_attempt the tutor makes while regenerating a withheld draft. The
 # attempt is DEFERRED, not refused (the learner may really have tried, and the first draft
-# just forgot to log it): it is recorded after the turn, and only if the rewritten reply
-# passes review. Until then reveal_solution stays gated.
+# just forgot to log it). It is recorded after the turn only if the rewritten reply passes
+# the MODEL check and that check also finds an attempt in the learner's own message, so a
+# tutor caught leaking can't unlock the gate for itself. Until then reveal_solution stays
+# gated. The text is neutral on purpose: it must not invite a promise of a later reveal.
 ATTEMPT_DEFERRED = (
-    "Noted. Reply without stating the answer; the solution can be shown on the next turn."
+    "Noted. It is recorded only if the learner's own message contains their attempt. Do not "
+    "state, promise, or schedule the solution; reply with one question or one hint."
 )
 
 # Decisions returned by SolutionGuard.review.
@@ -111,24 +119,15 @@ FALLBACK = "fallback"
 # it is the thing being judged, and the tutor's own output is already bounded.
 _SECTION_MAX = 6_000
 
-# A fenced block with this many non-blank lines is an implementation, not a hint, unless it
-# is a fill-in-the-blank scaffold (a standard generation-first hint). A block is a scaffold
-# only if it has a real GAP, judged line by line (`_is_scaffold`): a token appearing
-# somewhere is not enough, since spreads (`[...a]`), Ellipsis subscripts (`y[..., 0]`),
-# `"computing..."`, `except E: pass` and `# TODO: memoize later` all occur in finished code.
-_CODE_LINES_LEAK = 6
+# The screen has two rules. "phrase" (an announced handover, below) is decisive when the model
+# check is unavailable. "code_block" (a long fenced block) is only ever a hint to the model:
+# a fill-in-the-blank scaffold is a standard generation-first hint and finished code can
+# look much the same, and no line-level rule told them apart without blocking real scaffolds
+# or passing real solutions. So in screen-only mode a code block passes, a known gap; that
+# mode is rare, since the check uses the same API as the tutor call that just succeeded.
+_CODE_LINES_HINT = 6
 _FENCE = re.compile(r"```[^\n]*\n(.*?)(?:```|\Z)", re.S)
-_STRING = re.compile(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\])*`")
-# A statement that is nothing but a placeholder: `...`, `pass`, `raise NotImplementedError`,
-# or an assignment / return of a bare ellipsis (`out = ...`, `return ...`).
-_PLACEHOLDER = re.compile(
-    r"^(?:\.\.\.|…|pass|raise\s+NotImplementedError\b.*"
-    r"|(?:.*[^=!<>]=|return)\s*(?:\.\.\.|…))\s*;?$")
-_TODO_COMMENT = re.compile(r"^(?:#|//)\s*TODO\b", re.I)
-_BLANK = re.compile(r"_{3,}")
-# Headers whose body is legitimately `pass` in finished code.
-_HANDLER_HEADER = re.compile(
-    r"^(?:except\b.*|finally|else|try)\s*:$|\b(?:catch|finally|else)\b.*\{$")
+_DECISIVE_RULES = frozenset({"phrase"})
 # Only announcements of a handover. A bare "the final answer is" also opens Socratic
 # questions ("Before we get to what the final answer is, ..."), so it is not matched.
 _ANNOUNCED = re.compile(
@@ -140,8 +139,8 @@ _ANNOUNCED = re.compile(
 )
 # What the model is told when a screen rule fired (our text, outside the untrusted blocks).
 _RULE_NOTES = {
-    "code_block": "a fenced code block of 6 or more lines that is not a fill-in-the-blank "
-                  "scaffold",
+    "code_block": "a fenced code block of 6 or more lines (fine if it is a fill-in-the-blank "
+                  "scaffold, a leak if it is a finished implementation)",
     "phrase": "a phrase announcing a full solution or answer",
 }
 
@@ -158,43 +157,20 @@ class GuardVerdict:
     source: str
     # The model's own words. Debug log only, never an event detail or a response.
     reason: str = ""
-
-
-def _indent(line: str) -> int:
-    return len(line) - len(line.lstrip())
-
-
-def _is_scaffold(lines: list[str]) -> bool:
-    """True when the (non-blank) code lines leave a gap for the learner to fill.
-
-    A gap is a `___` blank outside a string, a placeholder statement (`...`, `pass`,
-    `raise NotImplementedError`, `x = ...`) that does not follow an except/finally/else
-    header, or a TODO comment that is the whole body of a block (a header before it, and a
-    dedent, a closing brace or the end of the block after it)."""
-    for i, line in enumerate(lines):
-        code = _STRING.sub("''", line).strip()
-        prev = lines[i - 1].strip() if i else ""
-        if _BLANK.search(code):
-            return True
-        if _PLACEHOLDER.match(code) and not _HANDLER_HEADER.search(prev):
-            return True
-        if _TODO_COMMENT.match(code) and prev.endswith((":", "{")) \
-                and not _HANDLER_HEADER.search(prev):
-            after = lines[i + 1] if i + 1 < len(lines) else None
-            if after is None or _indent(after) < _indent(line) or after.strip().startswith("}"):
-                return True
-    return False
+    # Whether the learner's own message contains an attempt. Only the model judges this;
+    # the screen never claims it.
+    learner_attempted: bool = False
 
 
 def screen_reply(reply: str) -> str | None:
-    """Deterministic screen: the rule an obvious leak tripped ("code_block" or "phrase"),
-    or None. With a model check available this is a hint to it, not a verdict."""
-    for body in _FENCE.findall(reply or ""):
-        lines = [line for line in body.splitlines() if line.strip()]
-        if len(lines) >= _CODE_LINES_LEAK and not _is_scaffold(lines):
-            return "code_block"
+    """Deterministic screen: the rule the draft tripped ("phrase" or "code_block"), or
+    None. With a model check available either is a hint to it, not a verdict; without one,
+    only "phrase" blocks (see _DECISIVE_RULES)."""
     if _ANNOUNCED.search(reply or ""):
         return "phrase"
+    for body in _FENCE.findall(reply or ""):
+        if sum(1 for line in body.splitlines() if line.strip()) >= _CODE_LINES_HINT:
+            return "code_block"
     return None
 
 
@@ -233,7 +209,9 @@ def _model_verdict(llm: LLMClient, messages: list[dict[str, str]]) -> GuardVerdi
     if not isinstance(gives_away, bool):
         raise StructuredOutputError("invalid_verdict",
                                     "solution guard verdict has no boolean gives_away_solution")
-    return GuardVerdict(gives_away, "model", str(data.get("reason", "")).strip())
+    # Anything but an explicit true counts as no attempt: it only ever withholds a log.
+    attempted = data.get("learner_attempted") is True
+    return GuardVerdict(gives_away, "model", str(data.get("reason", "")).strip(), attempted)
 
 
 def _warn_degraded_once(category: str) -> None:
@@ -269,11 +247,13 @@ class SolutionGuard:
         self.regenerating = False
         self._pending_attempt: str | None = None  # a deferred log_attempt's summary
         self._regenerated_passed = False
+        self._attempt_confirmed = False  # the model check saw an attempt in the learner's text
 
     def check(self, reply: str) -> GuardVerdict:
         """The model check, told what the screen saw; the screen alone if it fails."""
         rule = screen_reply(reply)
-        screened = GuardVerdict(rule is not None, f"screen:{rule}" if rule else "screen")
+        decisive = rule in _DECISIVE_RULES
+        screened = GuardVerdict(decisive, f"screen:{rule}" if decisive else "screen")
         if self._llm is None:
             verdict = screened
         else:
@@ -304,6 +284,7 @@ class SolutionGuard:
         if not verdict.gives_away:
             if self.regenerating:
                 self._regenerated_passed = True
+                self._attempt_confirmed = verdict.source == "model" and verdict.learner_attempted
             return PASS
         self._emit("guard:solution_blocked", f"source={verdict.source}")
         if not self.regenerating:
@@ -322,9 +303,16 @@ class SolutionGuard:
         return ATTEMPT_DEFERRED
 
     def take_deferred_attempt(self) -> bool:
-        """After the turn: True if a deferred attempt should now be recorded (the rewritten
-        reply passed review). Emits the normal tool:log_attempt event when it is."""
-        if self._pending_attempt is None or not self._regenerated_passed:
+        """After the turn: True if a deferred attempt should now be recorded. That needs the
+        rewritten reply to have passed review AND the model check to have found an attempt in
+        the learner's own message (never the screen alone). Emits the normal tool:log_attempt
+        event when it is recorded, and a fixed `tool:log_attempt:dropped` when it is not."""
+        if self._pending_attempt is None:
+            return False
+        if not (self._regenerated_passed and self._attempt_confirmed):
+            self._emit("tool:log_attempt:dropped",
+                       "not recorded: no attempt confirmed in the learner's message")
+            self._pending_attempt = None
             return False
         self._emit("tool:log_attempt", self._pending_attempt)
         self._pending_attempt = None

@@ -312,8 +312,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "94fa95d8128d1970ee2081006657c36d8042fe51fe7ee108371cbd7001d3d76d",
-          "chars": 2495
+          "sha256": "0fc1df88e9e5d44fd248c8a50b2fa3306e1166eb50357444769d12a189c10d61",
+          "chars": 2979
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -324,7 +324,7 @@
         {
           "name": "emit_solution_check",
           "type": "custom",
-          "sha256": "d742f76eb9d8b7052576bcde4cf22b3a658ebd9590aa8698f4f7fa536a4c25d8"
+          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
         }
       ],
       "tool_choice": {
@@ -373,7 +373,7 @@
         "assistant",
         "user"
       ],
-      "messages_sha256": "b7d3d746fa8fa943e609b219de9a08d6dd6ad708dccf405ef65222b22a63f36c",
+      "messages_sha256": "67e79946f041054e408926a25a7b97bab551211550ec980cdc1405888e5c8435",
       "other_params": {},
       "cache_control": [
         "top-level",
@@ -387,8 +387,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "94fa95d8128d1970ee2081006657c36d8042fe51fe7ee108371cbd7001d3d76d",
-          "chars": 2495
+          "sha256": "0fc1df88e9e5d44fd248c8a50b2fa3306e1166eb50357444769d12a189c10d61",
+          "chars": 2979
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -399,7 +399,7 @@
         {
           "name": "emit_solution_check",
           "type": "custom",
-          "sha256": "d742f76eb9d8b7052576bcde4cf22b3a658ebd9590aa8698f4f7fa536a4c25d8"
+          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
         }
       ],
       "tool_choice": {

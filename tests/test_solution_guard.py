@@ -19,6 +19,7 @@ from adaptive_academy.db import ensure_fts
 from adaptive_academy.engine.solution_guard import (
     ATTEMPT_DEFERRED,
     GUARD_FALLBACK,
+    SolutionGuard,
     build_guard_messages,
     screen_reply,
 )
@@ -69,10 +70,14 @@ def _seed(session, *, attempt_logged=False) -> Conversation:
     return convo
 
 
-def _verdict(gives_away: bool, reason: str = "") -> LLMResponse:
+def _verdict(gives_away: bool, reason: str = "", attempted: bool = False) -> LLMResponse:
     # ScriptedLLMClient has no complete_json, so structured_json parses this text.
     return LLMResponse(text=json.dumps({"gives_away_solution": gives_away,
+                                        "learner_attempted": attempted,
                                         "reason": reason or ("leak" if gives_away else "hint")}))
+
+
+PHRASE_LEAK = "Here's the full solution: divide the scores by sqrt(d_k) before the softmax."
 
 
 class _SnapshotScripted(ScriptedLLMClient):
@@ -129,42 +134,22 @@ def test_screen_passes_socratic_questions_that_mention_the_answer(reply):
 
 
 @pytest.mark.parametrize("marker", ["    pass", "    out = ...", "    ...",
-                                    "    raise NotImplementedError", "    w = ___"])
-def test_screen_passes_a_fill_in_the_blank_scaffold(marker):
+                                    "    raise NotImplementedError", "    w = ___",
+                                    "    return weights @ v"])
+def test_any_long_code_block_is_only_a_hint_to_the_model(marker):
+    # Scaffold or finished code, the screen just names it; it never blocks on its own
+    # (screen-only mode lets a code block through: a known, documented gap).
     lines = ["def attention(q, k, v):", "    d_k = q.shape[-1]", "    scores = q @ k.T",
              "    scores = scores / d_k ** 0.5", "    weights = softmax(scores)", marker]
-    assert screen_reply("Fill in the gap:\n```python\n" + "\n".join(lines) + "\n```") is None
-    # The same block with the gap filled in is an implementation.
-    filled = lines[:-1] + ["    return weights @ v"]
-    assert screen_reply("```python\n" + "\n".join(filled) + "\n```") == "code_block"
+    assert screen_reply("```python\n" + "\n".join(lines) + "\n```") == "code_block"
+    guard = SolutionGuard(concept="attention", learner_text="help", llm=None,
+                          emit=lambda *a: None)
+    verdict = guard.check("```python\n" + "\n".join(lines) + "\n```")
+    assert verdict.gives_away is False and verdict.source == "screen"
 
 
 def _fenced(lang: str, code: str) -> str:
     return f"```{lang}\n{code.strip()}\n```"
-
-
-def test_screen_passes_blocks_whose_body_is_only_a_todo():
-    python = _fenced("python", """
-import numpy as np
-
-def softmax(x):
-    shifted = x - x.max(axis=-1, keepdims=True)
-    return np.exp(shifted) / np.exp(shifted).sum(axis=-1, keepdims=True)
-
-def attention(q, k, v):
-    # TODO: your code here
-""")
-    js = _fenced("js", """
-function merge(a, b) {
-  // TODO: merge the two sorted arrays
-}
-function mergeSort(xs) {
-  if (xs.length < 2) return xs;
-  const mid = xs.length >> 1;
-  return merge(mergeSort(xs.slice(0, mid)), mergeSort(xs.slice(mid)));
-}
-""")
-    assert screen_reply(python) is None and screen_reply(js) is None
 
 
 # Finished solutions that merely contain a scaffold-looking token (review regression): each
@@ -265,7 +250,7 @@ def test_guard_messages_demarcate_and_escape_untrusted_text():
 
 
 def test_guard_prompt_is_versioned_and_treats_inputs_as_untrusted():
-    assert TUTOR_SOLUTION_GUARD.tag == "tutor.solution_guard@v2"
+    assert TUTOR_SOLUTION_GUARD.tag == "tutor.solution_guard@v3"
     assert "UNTRUSTED" in TUTOR_SOLUTION_GUARD
     assert "—" not in GUARD_FALLBACK and "!" not in GUARD_FALLBACK
 
@@ -453,21 +438,34 @@ def test_a_failing_model_check_falls_back_to_the_screen(session, monkeypatch):
     # regenerated, clean reply passes, and the trace says the model was unavailable.
     monkeypatch.setattr(solution_guard, "_warned_degraded", False)
     convo = _seed(session)
-    llm = ScriptedLLMClient([LLMResponse(text=CODE_LEAK), LLMResponse(text=HINT)])
+    llm = ScriptedLLMClient([LLMResponse(text=PHRASE_LEAK), LLMResponse(text=HINT)])
     guard = _BrokenGuard()
 
     result = run_tutor_turn(session, convo, "write it for me", llm, guard_llm=guard)
 
     assert result.reply == HINT
     checked = [e.detail for e in result.events if e.kind == "guard:solution_checked"]
-    assert checked == ["source=screen:code_block gives_away=true",
+    assert checked == ["source=screen:phrase gives_away=true",
                        "source=screen gives_away=false"]
     assert [e.detail for e in result.events if e.kind == "guard:solution_blocked"] == [
-        "source=screen:code_block"]
+        "source=screen:phrase"]
     unavailable = [e.detail for e in result.events if e.kind == "guard:unavailable"]
     assert unavailable == ["unknown: model check failed, screen used"] * 2
     assert guard.calls == 2  # the screen hit still went to the model first
-    assert "line_0 = step(0)" not in _stored_text(session)
+    assert PHRASE_LEAK not in _stored_text(session)
+
+
+def test_screen_only_mode_lets_a_code_block_through(session, monkeypatch):
+    # The documented gap: with the model check down, a long code block is not decisive.
+    monkeypatch.setattr(solution_guard, "_warned_degraded", False)
+    convo = _seed(session)
+    llm = ScriptedLLMClient([LLMResponse(text=CODE_LEAK)])
+
+    result = run_tutor_turn(session, convo, "write it for me", llm, guard_llm=_BrokenGuard())
+
+    assert result.reply == CODE_LEAK
+    assert [e.detail for e in result.events if e.kind == "guard:solution_checked"] == [
+        "source=screen gives_away=false"]
 
 
 def test_a_clean_reply_passes_when_the_model_check_fails(session):
@@ -521,7 +519,7 @@ def test_a_failed_regeneration_stores_the_fallback_not_an_error(session):
 
 def test_without_a_guard_client_the_screen_still_runs(session):
     convo = _seed(session)
-    llm = ScriptedLLMClient([LLMResponse(text=CODE_LEAK), LLMResponse(text=HINT)])
+    llm = ScriptedLLMClient([LLMResponse(text=PHRASE_LEAK), LLMResponse(text=HINT)])
 
     result = run_tutor_turn(session, convo, "code please", llm)
 
@@ -595,7 +593,7 @@ def test_a_genuine_attempt_logged_during_regeneration_is_recorded_after_the_turn
         ]),
         LLMResponse(text=FOLLOW_UP),
     ])
-    guard = ScriptedLLMClient([_verdict(True), _verdict(False)])
+    guard = ScriptedLLMClient([_verdict(True), _verdict(False, attempted=True)])
 
     result = run_tutor_turn(session, convo, "My attempt: softmax(QK^T / sqrt(d_k)) times V?",
                             llm, guard_llm=guard)
@@ -823,7 +821,8 @@ def _sdk_regeneration(session, monkeypatch, *, first, regenerated, verdicts, lea
     monkeypatch.setattr(tutor_sdk, "create_sdk_mcp_server", capture_server)
     monkeypatch.setattr(tutor_sdk, "ResultMessage", _FakeResult)
     monkeypatch.setattr(tutor_sdk, "query", fake_query)
-    guard = ScriptedLLMClient([_verdict(v) for v in verdicts])
+    guard = ScriptedLLMClient([_verdict(*v) if isinstance(v, tuple) else _verdict(v)
+                               for v in verdicts])
     result = tutor_sdk.run_tutor_turn_sdk(session, convo, learner, guard_llm=guard)
     session.refresh(convo)
     return convo, result, tool_results, guard
@@ -852,7 +851,8 @@ def test_sdk_genuine_attempt_logged_during_regeneration_is_recorded_after_the_tu
         session, monkeypatch):
     convo, result, (deferred, reveal), guard = _sdk_regeneration(
         session, monkeypatch, first=CONFIRMING_DRAFT, regenerated=FOLLOW_UP,
-        verdicts=[True, False], learner="My attempt: softmax(QK^T / sqrt(d_k)) times V?")
+        verdicts=[True, (False, "", True)],
+        learner="My attempt: softmax(QK^T / sqrt(d_k)) times V?")
 
     assert result.reply == FOLLOW_UP
     assert convo.attempt_logged is True  # recorded after the turn
@@ -863,3 +863,68 @@ def test_sdk_genuine_attempt_logged_during_regeneration_is_recorded_after_the_tu
     assert len(guard.calls) == 2
     stored = _stored_text(session)
     assert CONFIRMING_DRAFT not in stored and SECOND_LEAK not in stored
+
+
+PROMISE = "Next message I'll walk you through the full working. First, what's your instinct?"
+
+
+def test_a_regeneration_cannot_record_an_attempt_the_learner_never_made(session):
+    # The review's self-unlock: the learner only asked for the answer, the draft leaked, and
+    # the regeneration logs an attempt and writes a clean reply. The reply passes, but the
+    # model check finds no attempt in the learner's message, so nothing is recorded and the
+    # gate stays shut for the next turn.
+    convo = _seed(session)
+    llm = ScriptedLLMClient([
+        LLMResponse(text=SUBTLE_LEAK),
+        LLMResponse(tool_calls=[
+            ToolCall(id="t1", name="log_attempt", input={"summary": "learner asked for it"})]),
+        LLMResponse(text=PROMISE),
+    ])
+    guard = ScriptedLLMClient([_verdict(True), _verdict(False, attempted=False)])
+
+    result = run_tutor_turn(session, convo, "just tell me the answer", llm, guard_llm=guard)
+
+    assert result.reply == PROMISE
+    session.refresh(convo)
+    assert convo.attempt_logged is False
+    kinds = _kinds(result)
+    assert "tool:log_attempt:deferred" in kinds and "tool:log_attempt:dropped" in kinds
+    assert "tool:log_attempt" not in kinds
+
+
+def test_screen_only_mode_never_records_a_deferred_attempt(session, monkeypatch):
+    # Only the model can confirm an attempt: with it down, a deferred log is dropped.
+    monkeypatch.setattr(solution_guard, "_warned_degraded", False)
+    convo = _seed(session)
+    llm = ScriptedLLMClient([
+        LLMResponse(text=PHRASE_LEAK),
+        LLMResponse(tool_calls=[
+            ToolCall(id="t1", name="log_attempt", input={"summary": "tried"})]),
+        LLMResponse(text=HINT),
+    ])
+
+    result = run_tutor_turn(session, convo, "My attempt: divide by d_k?", llm,
+                            guard_llm=_BrokenGuard())
+
+    assert result.reply == HINT
+    session.refresh(convo)
+    assert convo.attempt_logged is False
+    assert "tool:log_attempt:dropped" in _kinds(result)
+
+
+def test_sdk_regeneration_cannot_record_an_attempt_the_learner_never_made(
+        session, monkeypatch):
+    convo, result, (deferred, reveal), guard = _sdk_regeneration(
+        session, monkeypatch, first=SUBTLE_LEAK, regenerated=PROMISE,
+        verdicts=[True, (False, "", False)], learner="just tell me the answer")
+
+    assert result.reply == PROMISE
+    assert convo.attempt_logged is False
+    kinds = _kinds(result)
+    assert "tool:log_attempt:dropped" in kinds and "tool:log_attempt" not in kinds
+
+
+def test_attempt_deferred_text_never_invites_a_later_reveal():
+    text = ATTEMPT_DEFERRED.lower()
+    assert "next turn" not in text and "can be shown" not in text
+    assert "do not state, promise, or schedule the solution" in text
