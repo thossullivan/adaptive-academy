@@ -38,6 +38,9 @@ REVISIT_PREFIX = "Revisit & self-explain: "
 # 6 items; spacing is meant to thread a few load-bearing prerequisites through the track, and
 # a phase of 25 revisits (the live failure) is massed practice, the opposite of spacing.
 MAX_REVISITS_PER_PHASE = 2
+# A one-phase track's single revisit item lists at most this many names in its text (its
+# concept_refs still hold every concept it touches).
+MAX_REVISIT_NAMES_SHOWN = 5
 
 
 def _norm(name: str) -> str:
@@ -183,7 +186,10 @@ def insert_spaced_revisits(
     if len(phases) == 1:
         missing = [c for c in order if not _phases_referencing(phases, c)]
         if missing:
-            phases[0].items.append(ItemView(text=REVISIT_PREFIX + ", ".join(missing),
+            shown = ", ".join(missing[:MAX_REVISIT_NAMES_SHOWN])
+            if len(missing) > MAX_REVISIT_NAMES_SHOWN:
+                shown += f" and {len(missing) - MAX_REVISIT_NAMES_SHOWN} more"
+            phases[0].items.append(ItemView(text=REVISIT_PREFIX + shown,
                                             type="write", concept_refs=missing))
         return phases
     n = len(phases)

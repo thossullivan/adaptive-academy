@@ -137,6 +137,15 @@ def test_single_phase_track_touches_every_concept_in_one_item():
     assert len([it for it in one[0].items if it.text.startswith(REVISIT_PREFIX)]) == 1
 
 
+def test_single_phase_revisit_text_is_bounded_but_refs_complete():
+    one = _empty(1)
+    lb = {f"c{i:02d}" for i in range(12)}
+    insert_spaced_revisits(one, lb)
+    [item] = [it for it in one[0].items if it.text.startswith(REVISIT_PREFIX)]
+    assert sorted(item.concept_refs) == sorted(lb)
+    assert item.text == REVISIT_PREFIX + "c00, c01, c02, c03, c04 and 7 more"
+
+
 def test_unspaced_reports_what_the_cap_left_out():
     phases = _empty(2)
     lb = {"a", "b", "c"}

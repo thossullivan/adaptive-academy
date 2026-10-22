@@ -30,15 +30,20 @@ because a failing name is regenerated or repaired, never written as is):
             (" — ", " – ", " - "), and a ":" only before a short subtitle of at most
             MAX_SUBTITLE_WORDS words ("Sampling: Temperature and Top-k", a demo concept,
             passes; "Stability threshold: guaranteed descent for small steps" fails).
-            Hyphenated words ("1-D") pass, and so does " - " between two capitalised
-            words, read as a hyphen ("Gauss - Newton").
-  N5  FAIL  The name states no claim: a CLAIM_VERBS word (is, are, was, were, equals,
-            implies, guarantees, converges, diverges, becomes) standing as a whole
+            Hyphenated words ("1-D") pass, and so does " - " joining a name's first two
+            words when both are single capitalised words and the right one ends the name or
+            is followed by a lowercase word ("Gauss - Newton", "Gauss - Newton method");
+            "Momentum - Faster Convergence" and "Learning Rate - Too High Diverges" fail.
+  N5  FAIL  The name states no claim: a CLAIM_VERBS word (is, are, equals, ensures,
+            causes, means, yields, prevents, must, should, ...) standing as a whole
             whitespace token with words on both sides, i.e. a clause ("Least-squares cost is
-            convex"). Hyphenated tokens stay whole ("IS-LM model", "K-means"), a verb at
-            either end is not a clause, nor is a question ("What is a monad"). Words that
-            are also nouns or adjectives (means, yields, causes, equal, ensures) are not
-            claim verbs: "Equal error rate", "Bond yields", "Causes of overfitting" pass.
+            convex", "Ridge yields a unique solution"), or an END_CLAIM_VERBS word (vanishes,
+            diverges, decreases, ...) ending a name of two or more words ("Gradient
+            vanishes"). Hyphenated tokens stay whole ("IS-LM model", "K-means"); "causes of"
+            and "means" after a single letter ("k means") are nouns; a name whose FIRST word
+            is a question word is a question, not a claim ("What is a monad"), but a
+            relative clause is not ("Softmax, which is differentiable" fails). "Equal error
+            rate", "Bond yields", "Causes of overfitting", "Means-end analysis" pass.
 
 Repair (repair_name), for a failing name only — a passing name is returned untouched:
   1. read " - " between capitalised words as a hyphen; take the first ":" / ";" /
@@ -81,9 +86,15 @@ MAX_NAME_CHARS = 60
 
 # Verbs only: words that double as nouns or adjectives (means, yields, causes, equal,
 # ensures) name real concepts ("K-means", "Bond yields", "Equal error rate").
+# A clause needs words on both sides of the verb, so the noun uses of ensures / causes /
+# means / yields ("Bond yields", "Causes of overfitting") never qualify.
 CLAIM_VERBS = frozenset({
     "is", "are", "was", "were", "equals", "implies", "guarantees", "converges", "diverges",
-    "becomes",
+    "becomes", "ensures", "causes", "means", "yields", "prevents", "must", "should",
+})
+# Intransitive claims that end a short sentence ("Gradient vanishes").
+END_CLAIM_VERBS = frozenset({
+    "vanishes", "explodes", "diverges", "converges", "decreases", "increases", "saturates",
 })
 _INTERROGATIVES = frozenset({"what", "why", "how", "when", "where", "which", "who", "whether"})
 _TOKEN_PUNCT = ",.;:!?()[]{}\"'"
@@ -104,23 +115,32 @@ _PARENTHETICAL = re.compile(r"\s*\([^()]*\)")
 _APPLIED_TOKEN = re.compile(r"\S*[^\W_]\([^()]*\)\S*")
 _SPACED_OPERATOR = re.compile(r"\s*([/=<>^≤≥≠≈−×·*])\s*")
 _WORD = re.compile(r"[^\W_]+")
-_SPACED_COMPOUND = re.compile(r"\b([A-Z][\w]*) - (?=[A-Z])")  # "Gauss - Newton"
+# "Gauss - Newton", "Gauss - Newton method" — not Title Case "Momentum - Faster Convergence"
+_SPACED_COMPOUND = re.compile(r"^([A-Z]\w*) - ([A-Z]\w*)(?=$|\s+[a-z])")
 _FUNCTION_NAME = re.compile(r"^[^\W\d_]+(?=\()")
 
 
 def _join_compounds(text: str) -> str:
     """Read " - " between two capitalised words as a hyphen ("Gauss - Newton")."""
-    return _SPACED_COMPOUND.sub(r"\1-", text)
+    return _SPACED_COMPOUND.sub(r"\1-\2", text)
 
 
 def _claim_index(words: list[str]) -> int | None:
-    """Index of the first claim verb that forms a clause (words on both sides), or None."""
-    for i in range(1, len(words) - 1):
-        if words[i].strip(_TOKEN_PUNCT).casefold() not in CLAIM_VERBS:
+    """Index of the first claim verb that forms a clause, or None."""
+    bare = [w.strip(_TOKEN_PUNCT).casefold() for w in words]
+    if not bare or bare[0] in _INTERROGATIVES:
+        return None  # a question names a topic, it does not state the answer
+    for i in range(1, len(bare) - 1):
+        word = bare[i]
+        if word not in CLAIM_VERBS:
             continue
-        if words[i - 1].strip(_TOKEN_PUNCT).casefold() in _INTERROGATIVES:
-            continue  # a question names a topic, it does not state the answer
+        if word == "causes" and bare[i + 1] == "of":
+            continue  # "Root causes of failure"
+        if word == "means" and len(bare[i - 1]) == 1:
+            continue  # "k means clustering"
         return i
+    if len(bare) >= 2 and bare[-1] in END_CLAIM_VERBS:
+        return len(bare) - 1
     return None
 
 
@@ -452,7 +472,7 @@ def repair_names(key_concepts: Any, prerequisite_map: Any) -> NameRepair:
                 continue
             extra += 1
             new_prereq = assign(prereq, f"Prerequisite {extra}")
-            if new_prereq not in values:
+            if new_prereq != new_source and new_prereq not in values:  # no merged self-loop
                 values.append(new_prereq)
 
     for name in foundation_names(keys_in, map_in):

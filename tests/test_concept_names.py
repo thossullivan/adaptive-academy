@@ -132,8 +132,41 @@ REAL_NAMES = [
     "K-means clustering", "k-means++ initialization", "Equal error rate", "IS-LM model",
     "Means-end analysis", "Causes of overfitting", "Ensures in Eiffel", "Bond yields",
     "Mini-batch k-means", "Fuzzy c-means", "What causes vanishing gradients",
-    "What is a monad", "Gauss - Newton", "Gauss-Newton method",
+    "What is a monad", "Gauss - Newton", "Gauss-Newton method", "Gauss - Newton method",
+    "k means clustering", "Root causes of failure", "Bias-variance tradeoff",
+    "Must-link constraints", "Gradient descent", "Learning rate decay",
 ]
+
+
+# Review round 3: Title Case "Name - Claim" is a claim, not a hyphenated compound.
+@pytest.mark.parametrize("name", [
+    "Learning Rate - Too High Diverges", "Softmax - Outputs Sum To One",
+    "Dropout - Prevents Co-Adaptation", "Bias-Variance Tradeoff - Why Simple Models Underfit",
+    "Momentum - Faster Convergence",
+])
+def test_title_case_dash_claims_fail_n4(name):
+    assert "N4" in _ids(name)
+    assert name_problems(repair_name(name, fallback="Concept 1")) == []
+
+
+# Review round 3: claim verbs that double as nouns are claims inside a clause.
+@pytest.mark.parametrize("name", [
+    "Convexity ensures a unique minimum", "High learning rate causes divergence",
+    "Low bias means high variance", "Ridge yields a unique solution",
+    "Least-squares cost, which is convex", "Softmax, which is differentiable",
+    "Learning rate must be small", "Weights should be small",
+    "Dropout prevents co-adaptation", "Gradient vanishes", "Training loss decreases",
+    "Gradient converges",
+])
+def test_claims_fail_n5(name):
+    assert "N5" in _ids(name)
+    assert name_problems(repair_name(name, fallback="Concept 1")) == []
+
+
+def test_claim_repairs_keep_the_subject():
+    assert repair_name("High learning rate causes divergence", fallback="x") == \
+        "High learning rate"
+    assert repair_name("Gradient vanishes", fallback="x") == "Gradient"
 
 
 @pytest.mark.parametrize("name", REAL_NAMES)
@@ -144,7 +177,14 @@ def test_real_names_pass_and_repair_leaves_them_whole(name):
     assert fix.key_concepts == [name] and not fix.report.failed_ids
 
 
-@pytest.mark.parametrize("name", ["Is convex", "Gradient converges"])
+def test_merge_never_stores_a_self_loop():
+    fix = repair_names(["Learning rate", "Learning rate: step size α"],
+                       {"Learning rate: step size α": ["Learning rate"]})
+    assert fix.key_concepts == ["Learning rate"]
+    assert fix.prerequisite_map == {"Learning rate": []}
+
+
+@pytest.mark.parametrize("name", ["Is convex", "Bond yields", "Causes of overfitting"])
 def test_a_verb_at_either_end_is_not_a_clause(name):
     assert "N5" not in _ids(name)
 
