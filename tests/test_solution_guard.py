@@ -152,8 +152,8 @@ def _fenced(lang: str, code: str) -> str:
     return f"```{lang}\n{code.strip()}\n```"
 
 
-# Finished solutions that merely contain a scaffold-looking token (review regression): each
-# must still trip the screen.
+# Finished solutions that contain scaffold-looking tokens (`pass`, `...`, `# TODO`): each is
+# still named to the model as a code_block hint.
 FINISHED_SOLUTIONS = {
     "except_pass": _fenced("python", """
 def binary_search(xs, target):
@@ -928,3 +928,36 @@ def test_attempt_deferred_text_never_invites_a_later_reveal():
     text = ATTEMPT_DEFERRED.lower()
     assert "next turn" not in text and "can be shown" not in text
     assert "do not state, promise, or schedule the solution" in text
+
+
+OPTIONS_LEAK = "It's O(n log n): the merge step is linear and there are log n levels."
+
+
+def test_guard_prompt_treats_picking_among_listed_options_as_a_leak():
+    text = str(TUTOR_SOLUTION_GUARD)
+    assert "Choosing among options the learner listed" in text
+    assert "committed to ONE answer" in text
+
+
+@pytest.mark.parametrize("verdict", ['{"gives_away_solution": false, "reason": "fine"}',
+                                     '{"gives_away_solution": false, "learner_attempted":'
+                                     ' "true", "reason": "fine"}'])
+def test_a_verdict_without_a_boolean_learner_attempted_drops_the_deferred_attempt(
+        session, verdict):
+    # Conservative on the text-parsed (subscription) path: a missing or non-boolean
+    # learner_attempted only ever withholds the log, never records it.
+    convo = _seed(session)
+    llm = ScriptedLLMClient([
+        LLMResponse(text=SUBTLE_LEAK),
+        LLMResponse(tool_calls=[
+            ToolCall(id="t1", name="log_attempt", input={"summary": "tried"})]),
+        LLMResponse(text=HINT),
+    ])
+    guard = ScriptedLLMClient([_verdict(True), LLMResponse(text=verdict)])
+
+    result = run_tutor_turn(session, convo, "My attempt: divide by d_k?", llm, guard_llm=guard)
+
+    assert result.reply == HINT
+    session.refresh(convo)
+    assert convo.attempt_logged is False
+    assert "tool:log_attempt:dropped" in _kinds(result)

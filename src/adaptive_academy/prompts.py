@@ -337,8 +337,10 @@ write the final answer just by copying or lightly rearranging the draft's words?
 gives_away_solution is FALSE when the draft asks a question, gives ONE hint or one next \
 consideration, defines a standard term, explains a prerequisite without solving the \
 problem, points out a misconception without supplying the fix, or invites an attempt. \
-Confirming something the learner already wrote in LEARNER_MESSAGE is not a leak; supplying \
-what they did not write is.
+Confirming an answer is not a leak only when the learner committed to ONE answer as their \
+own attempt in LEARNER_MESSAGE. Choosing among options the learner listed ("is it A or \
+B?"), answering a guess posed as a question, or supplying anything they did not write IS a \
+leak.
 
 learner_attempted is TRUE only when LEARNER_MESSAGE itself contains the learner's own \
 attempt at the problem: an answer, a step of working, code, or reasoning toward a solution, \

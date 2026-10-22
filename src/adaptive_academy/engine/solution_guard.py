@@ -123,8 +123,10 @@ _SECTION_MAX = 6_000
 # check is unavailable. "code_block" (a long fenced block) is only ever a hint to the model:
 # a fill-in-the-blank scaffold is a standard generation-first hint and finished code can
 # look much the same, and no line-level rule told them apart without blocking real scaffolds
-# or passing real solutions. So in screen-only mode a code block passes, a known gap; that
-# mode is rare, since the check uses the same API as the tutor call that just succeeded.
+# or passing real solutions. So in screen-only mode a code block passes, a known gap. Outages
+# are rare (the check uses the same API as the tutor call that just succeeded), but the mode
+# is also reached when the check's output can't be parsed, which a learner message might
+# provoke on the subscription path (text-parsed verdicts), and under a budget refusal.
 _CODE_LINES_HINT = 6
 _FENCE = re.compile(r"```[^\n]*\n(.*?)(?:```|\Z)", re.S)
 _DECISIVE_RULES = frozenset({"phrase"})
