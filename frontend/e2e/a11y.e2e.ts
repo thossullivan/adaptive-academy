@@ -209,6 +209,8 @@ test('axe: the usage page with an experimental model row', async ({ page }) => {
   await mockOpenRouterUsage(page);
   await auditState(page, () => '/usage', async () => {
     await expect(page.getByTestId('experimental-label')).toBeVisible();
+    // The quality scorecard, with its tables and window buttons, is audited too.
+    await expect(page.getByTestId('quality-by-model')).toBeVisible();
   });
 });
 

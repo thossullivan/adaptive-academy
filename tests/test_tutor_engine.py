@@ -1,3 +1,5 @@
+import json
+
 from adaptive_academy.engine.tutor import _FALLBACK, _MAX_STEPS, run_tutor_turn
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse, ToolCall
@@ -52,7 +54,11 @@ def test_attempt_then_reveal_allowed(session):
                                          input={"text": "FULL ANSWER 42"})]),
         LLMResponse(text="Great — the full picture: FULL ANSWER 42"),
     ])
-    result = run_tutor_turn(session, convo, "I think attention is softmax(QK^T)V", llm)
+    # The solution guard's attempt check confirms the learner's message is an attempt.
+    guard = ScriptedLLMClient([LLMResponse(text=json.dumps(
+        {"gives_away_solution": False, "learner_attempted": True, "reason": "reasoned"}))])
+    result = run_tutor_turn(session, convo, "I think attention is softmax(QK^T)V", llm,
+                            guard_llm=guard)
 
     assert convo.attempt_logged is True
     assert "FULL ANSWER 42" in result.reply

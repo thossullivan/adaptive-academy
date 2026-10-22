@@ -66,6 +66,26 @@ __all__ = ["BACKEND_AGENT_SDK", "BACKEND_ANTHROPIC", "BACKEND_OPENROUTER"]
 # What a row cost: the service's reported charge when there is one, else the list price.
 effective_cost = func.coalesce(LLMUsage.reported_cost_usd, LLMUsage.cost_usd)
 
+# How a call ended (LLMUsage.outcome), set by the API-key client from the response itself:
+# the usage row is the one record every call already writes with its model and feature, and
+# the client is the only place a structured answer in the wrong format is seen (it raises
+# StructuredOutputError, which has no session or trace to write to). NULL = not recorded.
+OUTCOME_OK = "ok"
+OUTCOME_REFUSAL = "refusal"
+OUTCOME_CUT_OFF = "cut_off"  # max_tokens, or the context window was exceeded
+OUTCOME_EMPTY = "empty"  # no text and no tool call
+OUTCOME_INVALID = "invalid_output"  # a structured answer that wasn't usable
+_STOP_OUTCOMES = {
+    "refusal": OUTCOME_REFUSAL,
+    "max_tokens": OUTCOME_CUT_OFF,
+    "model_context_window_exceeded": OUTCOME_CUT_OFF,
+}
+
+
+def stop_outcome(stop_reason: str | None) -> str | None:
+    """The outcome a stop reason decides on its own (refusal, cut off), else None."""
+    return _STOP_OUTCOMES.get(stop_reason or "")
+
 
 class BudgetExceededError(RuntimeError):
     """Today's API-key spend already meets the AA_DAILY_BUDGET_USD limit (→ HTTP 429)."""
@@ -288,6 +308,7 @@ def _build_row(
     operation: str,
     usage: Any,
     total_cost_usd: Any = None,
+    outcome: str | None = None,
 ) -> LLMUsage:
     input_tokens = _int(_field(usage, "input_tokens"))
     output_tokens = _int(_field(usage, "output_tokens"))
@@ -323,6 +344,7 @@ def _build_row(
         web_search_requests=searches,
         cost_usd=cost,
         reported_cost_usd=_reported_charge(usage),
+        outcome=outcome,
     )
 
 
@@ -334,14 +356,16 @@ def record_usage(
     operation: str,
     usage: Any,
     total_cost_usd: Any = None,
+    outcome: str | None = None,
 ) -> None:
-    """Best-effort: queue one LLMUsage row. Never raises."""
+    """Best-effort: queue one LLMUsage row. Never raises. `outcome` is how the call ended
+    (OUTCOME_*), None where the caller doesn't record it."""
     try:
         bind = get_usage_bind()
         if bind is None:
             return
         row = _build_row(backend=backend, model=model, role=role, operation=operation,
-                         usage=usage, total_cost_usd=total_cost_usd)
+                         usage=usage, total_cost_usd=total_cost_usd, outcome=outcome)
         # One retry on a lock timeout: this row is what the daily limit counts.
         TRACE_WRITER.submit(bind, [row], retries=1)
     except Exception:  # noqa: BLE001 - accounting must never break a billed call
@@ -531,18 +555,29 @@ def cache_read_share(totals: dict) -> float | None:
     return read / prompt if prompt else None
 
 
-def usage_summary(session: Session, now: datetime | None = None) -> dict:
-    """Totals per window, 30-day breakdowns by feature and model, and the budget state.
-
-    Windows: "today" from local midnight; "last_7_days"/"last_30_days" are rolling.
-    """
+def window_starts(now: datetime | None = None) -> dict[str, datetime | None]:
+    """The Usage page's time windows: "today" from local midnight, "last_7_days" and
+    "last_30_days" rolling, "all_time" unbounded (None)."""
     now = now or datetime.now(timezone.utc)
-    starts = {
+    return {
         "today": local_day_start(now.astimezone()),
         "last_7_days": now - timedelta(days=7),
         "last_30_days": now - timedelta(days=30),
         "all_time": None,
     }
+
+
+def db_time(moment: datetime) -> datetime:
+    """`moment` as the naive UTC the database stores, for comparing with created_at."""
+    return _db_time(moment)
+
+
+def usage_summary(session: Session, now: datetime | None = None) -> dict:
+    """Totals per window, 30-day breakdowns by feature and model, and the budget state.
+
+    Windows: see window_starts.
+    """
+    starts = window_starts(now)
     totals: dict[str, dict] = {}
     for name, start in starts.items():
         stmt = select(*_aggregates())

@@ -30,7 +30,7 @@ from adaptive_academy.engine.solution_guard import (
     REGENERATE,
     SolutionGuard,
 )
-from adaptive_academy.engine.tools import reveal_gate
+from adaptive_academy.engine.tools import LOG_ATTEMPT, reveal_gate
 from adaptive_academy.engine.tutor import TurnResult, _FALLBACK
 from adaptive_academy.llm.agent_sdk_client import record_sdk_result
 from adaptive_academy.llm.registry import get_model
@@ -57,18 +57,18 @@ def _text_result(text: str, *, is_error: bool = False) -> dict:
     return out
 
 
-def log_attempt_result(convo: Conversation, emit, args: dict, *,
-                       guard: SolutionGuard | None = None) -> dict:
-    """Tool body for log_attempt — records the learner's attempt. Extracted so the
-    attempt-gate can be unit-tested without the live SDK. While the solution guard is
+def log_attempt_result(convo: Conversation, args: dict, *, guard: SolutionGuard) -> dict:
+    """Tool body for log_attempt — records the learner's attempt only if the guard's attempt
+    check finds a real one in the learner's own message (engine/solution_guard.py
+    `attempt_tool`); otherwise the tool result tells the tutor to ask for their reasoning.
+    Extracted so the attempt-gate can be unit-tested without the live SDK. While the guard is
     regenerating a withheld draft the attempt is deferred, not recorded: the tutor can't
     unlock the gate mid-turn (run_tutor_turn_sdk records it after the turn if the reply
-    passed review)."""
-    if guard is not None and guard.regenerating:
-        return _text_result(guard.defer_attempt(str(args.get("summary", ""))))
-    convo.attempt_logged = True
-    emit("tool:log_attempt", str(args.get("summary", "")))
-    return _text_result("ok: attempt recorded")
+    passed review). The guard writes the events."""
+    recorded, payload = guard.attempt_tool(str(args.get("summary", "")))
+    if recorded:
+        convo.attempt_logged = True
+    return _text_result(payload)
 
 
 def reveal_solution_result(convo: Conversation, emit, args: dict) -> dict:
@@ -91,7 +91,8 @@ def run_tutor_turn_sdk(
     guard_llm: LLMClient | None = None,
 ) -> TurnResult:
     """One learner turn on the subscription. `guard_llm` is the solution guard's copy-role
-    client (api/deps.get_guard_llm); None runs the guard's deterministic screen only."""
+    client (api/deps.get_guard_llm); None runs the guard's deterministic screen only, and
+    then no log_attempt is ever recorded (the attempt check fails closed)."""
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:
@@ -140,9 +141,13 @@ def run_tutor_turn_sdk(
     guard = SolutionGuard(concept=concept_name, learner_text=user_text, llm=guard_llm,
                           emit=emit, previous_tutor=previous_tutor)
 
-    @tool("log_attempt", "Record that the learner made a genuine attempt", {"summary": str})
+    @tool("log_attempt", LOG_ATTEMPT["description"], {"summary": str})
     async def _log_attempt(args):  # noqa: ANN001
-        return log_attempt_result(convo, emit, args, guard=guard)
+        # The attempt check may call the subscription guard client, which runs its own
+        # asyncio.run and so can't run on this event loop: it runs in a worker thread. This
+        # loop waits for it, so the session is still used by one thread at a time, and it
+        # only adds rows / sets attributes there (no query, so no autoflush: F5 holds).
+        return await asyncio.to_thread(log_attempt_result, convo, args, guard=guard)
 
     @tool("reveal_solution", "Reveal the full worked solution (only after an attempt)",
           {"text": str})

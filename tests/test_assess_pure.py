@@ -38,4 +38,18 @@ def test_penalize_score_applies_band_ceilings():
     assert penalize_score(0.9, gaps) == 0.5
     assert penalize_score(0.9, ["omitted required element: a"]) == 0.7  # omission only
     assert penalize_score(0.3, ["omitted required element: a"]) == 0.3  # already below ceiling
+
+
+def test_final_score_applies_the_mechanism_and_rubric_ceilings():
+    # The score record_grade writes: the grader's score under the no-mechanism ceiling
+    # (0.50) and the rubric ceilings (0.70 omission, 0.50 misconception). The grading eval
+    # (evals/grading) scores this same function, so the two can never drift apart.
+    from adaptive_academy.engine.assess import final_score
+
+    assert final_score(GradeDraft(score=0.9), []) == 0.9
+    assert final_score(GradeDraft(score=0.9, mechanism_present=False), []) == 0.5
+    assert final_score(GradeDraft(score=0.9), ["omitted required element: a"]) == 0.7
+    assert final_score(GradeDraft(score=0.9), ["contains likely misconception: b"]) == 0.5
+    assert final_score(GradeDraft(score=0.3, mechanism_present=False),
+                       ["omitted required element: a"]) == 0.3
     assert penalize_score(0.9, []) == 0.9  # a clean explanation passes through untouched

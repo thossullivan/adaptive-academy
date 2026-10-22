@@ -15,3 +15,4 @@ export { default as ScoutCard } from './ScoutCard.svelte';
 export { default as SetupNotice } from './SetupNotice.svelte';
 export { default as ExperimentalTag } from './ExperimentalTag.svelte';
 export { default as LiveStatus } from './LiveStatus.svelte';
+export { default as QualityScorecard } from './QualityScorecard.svelte';

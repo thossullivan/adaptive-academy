@@ -342,3 +342,50 @@ export interface UsageReport {
   pricing_source: string;
   pricing_as_of: string;
 }
+
+/** GET /api/usage/quality: the quality scorecard (definitions in engine/scorecard.py). */
+export interface QualityCalls {
+  calls: number;
+  cost_usd: number;
+  unpriced_calls: number;
+  cost_per_call_usd: number | null; // spend over the calls that had a cost
+  recorded_calls: number; // calls with an outcome; the four counts are out of these
+  refusals: number;
+  empty_replies: number;
+  cut_offs: number;
+  invalid_outputs: number; // structured answers in the wrong format, retried or not
+}
+export interface QualityGrading {
+  calls: number;
+  cost_usd: number;
+  unpriced_calls: number;
+  graded_assessments: number;
+  cost_per_assessment_usd: number | null;
+  first_attempts: number;
+  regenerations: number;
+  regenerations_per_grade: number | null;
+  rejected: number;
+  rejected_failed_checks: number;
+  rejected_stopped: number;
+  rejected_share: number | null;
+  top_failed_rules: { rule_id: string; count: number }[];
+}
+export interface QualityGuard {
+  checks: number;
+  blocked: number;
+  blocked_share: number | null;
+  fallbacks: number;
+  unavailable: number;
+  unavailable_share: number | null;
+}
+export interface QualityWindow {
+  by_feature: (QualityCalls & { feature: string | null })[];
+  by_model: (QualityCalls & { model: string; experimental?: boolean })[];
+  grading: QualityGrading;
+  guard: QualityGuard;
+}
+export type UsageWindowKey = 'today' | 'last_7_days' | 'last_30_days' | 'all_time';
+export interface QualityReport {
+  grading_features: string[];
+  windows: Record<UsageWindowKey, QualityWindow>;
+}

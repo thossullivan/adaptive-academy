@@ -70,6 +70,10 @@ test('the usage page labels experimental models and explains OpenRouter costs', 
   await page.goto('/usage');
   await expect(page.getByTestId('usage-report')).toBeVisible();
   await expect(page.getByTestId('usage-openrouter')).toContainText('what OpenRouter reported');
+  const footnote = page.getByTestId('usage-footnote');
+  await expect(footnote).toContainText('Dollar figures are the cost OpenRouter reported for each call');
+  await expect(footnote).toContainText("sent through OpenRouter to the model's provider.");
+  await expect(footnote).not.toContainText('sent to Anthropic');
   const byModel = page.getByTestId('usage-by-model');
   const flagged = byModel.getByRole('listitem').filter({ hasText: EXPERIMENTAL });
   await expect(flagged.getByText('Experimental', { exact: true })).toBeVisible();

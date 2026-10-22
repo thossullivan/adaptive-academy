@@ -30,6 +30,10 @@ backups/
 
 .env
 
+# Grading eval reports (evals/grading/results): local run output, only its README is kept
+evals/grading/results/*
+!evals/grading/results/README.md
+
 # Visual-companion brainstorming scratch
 .superpowers/
 

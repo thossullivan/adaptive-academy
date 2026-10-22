@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { UsageReport, UsageTotals } from '$lib/types';
+  import type { QualityReport, UsageReport, UsageTotals } from '$lib/types';
   import {
     budgetFraction,
     cacheShareLabel,
+    callDestination,
     costLabel,
     featureLabel,
     formatTokens,
@@ -13,15 +14,22 @@
   } from '$lib/usage';
   import { setup } from '$lib/setup.svelte';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, ExperimentalTag, Stat } from '$lib/ui';
+  import { Card, ExperimentalTag, QualityScorecard, Stat } from '$lib/ui';
 
   let report = $state<UsageReport | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
+  let quality = $state<QualityReport | null>(null);
+  let qualityError = $state<string | null>(null);
   const warnings = $derived(setup.status?.warnings ?? []);
 
   onMount(async () => {
     setup.refresh(); // limit warnings (GET /api/setup); a failure just shows none
+    // The scorecard loads beside the report; if it fails, only its own section says so.
+    api.getUsageQuality().then(
+      (q) => (quality = q),
+      (e) => (qualityError = e instanceof Error ? e.message : String(e))
+    );
     try {
       report = await api.getUsage();
     } catch (e) {
@@ -156,18 +164,22 @@
               {#each report.by_feature as row (row.feature ?? '—')}
                 {@const cached = cacheShareLabel(row.cache_read_share)}
                 <li class="min-w-0">
-                  <div class="flex items-baseline gap-3 text-sm">
-                    <span class="min-w-0 flex-1 truncate text-fg-dim" title={featureLabel(row.feature)}>{featureLabel(row.feature)}</span>
-                    <span class="eyebrow hidden text-faint sm:inline">{formatTokens(totalTokens(row))} tok</span>
-                    {#if cached}
-                      <span
-                        class="eyebrow hidden text-faint sm:inline"
-                        title="Share of input tokens read from the prompt cache"
-                        data-testid="cache-share">{cached}</span
-                      >
-                    {/if}
-                    <span class="eyebrow text-faint">{row.calls}×</span>
-                    <span class="nums w-24 text-right text-fg">{costLabel(row)}</span>
+                  <!-- The label is never cut short: when it and the figures don't fit on one
+                       line, the figures wrap below it. -->
+                  <div class="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-sm">
+                    <span class="flex-1 text-fg-dim" data-testid="feature-label">{featureLabel(row.feature)}</span>
+                    <span class="ml-auto flex shrink-0 items-baseline gap-3">
+                      <span class="eyebrow hidden text-faint sm:inline">{formatTokens(totalTokens(row))} tok</span>
+                      {#if cached}
+                        <span
+                          class="eyebrow hidden text-faint sm:inline"
+                          title="Share of input tokens read from the prompt cache"
+                          data-testid="cache-share">{cached}</span
+                        >
+                      {/if}
+                      <span class="eyebrow text-faint">{row.calls}×</span>
+                      <span class="nums w-24 text-right text-fg">{costLabel(row)}</span>
+                    </span>
                   </div>
                   <div class="mt-1 h-1 overflow-hidden rounded-full bg-border" aria-hidden="true">
                     <div class="h-full rounded-full bg-accent" style:width={`${Math.round(share(report.by_feature, row) * 100)}%`}></div>
@@ -204,12 +216,19 @@
         </Card>
       </div>
 
-      <p class="text-xs leading-relaxed text-faint">
-        {#if openrouter}OpenRouter calls use the cost OpenRouter reports. Otherwise prices{:else}Prices{/if} from
+      <QualityScorecard report={quality} error={qualityError} />
+
+      <p class="text-xs leading-relaxed text-faint" data-testid="usage-footnote">
+        {#if openrouter}
+          Dollar figures are the cost OpenRouter reported for each call, fees included. For a call
+          where it reported none, the price comes from
+        {:else}
+          Prices come from
+        {/if}
         <a class="underline decoration-border hover:text-fg" href={report.pricing_source} target="_blank" rel="noreferrer">Anthropic's pricing page<span class="sr-only"> (opens in a new tab)</span></a>,
         read {report.pricing_as_of}, for {report.priced_models.join(', ')}. Other models record
-        tokens with "price unknown". These records stay in your local database; each model call
-        itself is still sent to {openrouter ? "OpenRouter and the model's provider" : 'Anthropic'}.
+        tokens with "price unknown". These records stay in your local database.
+        {callDestination(report.backend)}
         {#if report.by_model.some((m) => m.experimental)}Models marked Experimental are not Claude models.{/if}
       </p>
     </div>

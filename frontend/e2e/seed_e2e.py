@@ -12,6 +12,7 @@ from sqlmodel import Session
 
 from adaptive_academy.db import engine
 from adaptive_academy.models import (
+    AgentEvent,
     Assessment,
     Concept,
     ConceptEdge,
@@ -80,10 +81,39 @@ USAGE = [
     (0, "assess", "claude-custom-finetune-with-a-very-long-model-identifier", 3_000, 400, 0, None),
     (3, "curriculum", "claude-sonnet-4-6", 20_000, 12_000, 0, 0.24),
     (12, "tutor", "claude-haiku-4-5", 8_000, 700, 0, 0.0115),
+    (2, "teach", "claude-sonnet-4-6", 4_000, 600, 0, 0.06),
 ]
 # USAGE row index → prompt-cache read tokens. Tutor over 30 days: 36k of 56k input tokens
 # read from cache, so the Usage page shows "64% cached".
 USAGE_CACHE_READS = {0: 36_000}
+# USAGE row index → how the call ended (LLMUsage.outcome); the 12-day-old tutor call has
+# none, like a call recorded before outcomes were. The quality scorecard over 30 days:
+# Research "1 wrong format (100%)", Curriculum "1 cut off (100%)", Tutor "none".
+USAGE_OUTCOMES = {0: "ok", 1: "invalid_output", 2: "ok", 3: "cut_off", 5: "ok"}
+
+# Quality events on the main topic, today, as engine/grade_gate.py and
+# engine/solution_guard.py write them: four grades (two pass, one regenerated then passes,
+# one regenerated then rejected) and five pre-attempt tutor replies (one held back, one
+# checked by the keyword screen alone). Scorecard: 0.50 regenerations per grade, 1 rejected,
+# G13 failed 3 times and G1 once; 20% held back, 20% screen only.
+QUALITY_EVENTS = [
+    ("grade:check", "grade attempt=1 pass"),
+    ("grade:check", "grade attempt=1 pass WARN G8"),
+    ("grade:check", "grade attempt=1 fail FAIL G13"),
+    ("grade:regenerated", "grade after FAIL G13"),
+    ("grade:check", "grade attempt=2 pass"),
+    ("grade:check", "grade attempt=1 fail FAIL G1,G13"),
+    ("grade:regenerated", "grade after FAIL G1,G13"),
+    ("grade:check", "grade attempt=2 fail FAIL G13"),
+    ("grade:rejected", "grade rejected after 2 attempts: FAIL G13; nothing recorded"),
+    ("guard:solution_checked", "source=model gives_away=false"),
+    ("guard:solution_checked", "source=model gives_away=true"),
+    ("guard:solution_blocked", "source=model"),
+    ("guard:solution_checked", "source=model gives_away=false"),
+    ("guard:unavailable", "network: model check failed, screen used"),
+    ("guard:solution_checked", "source=screen gives_away=false"),
+    ("guard:solution_checked", "source=model gives_away=false"),
+]
 
 # (concept index, kind, score)
 ASSESSMENTS = [
@@ -143,8 +173,11 @@ def seed() -> None:
                 backend="anthropic", model=model, role="reasoning", operation="complete",
                 feature=feature, input_tokens=inp, output_tokens=out,
                 cache_read_input_tokens=USAGE_CACHE_READS.get(i, 0),
-                web_search_requests=searches, cost_usd=cost,
+                web_search_requests=searches, cost_usd=cost, outcome=USAGE_OUTCOMES.get(i),
             ))
+        for kind, detail in QUALITY_EVENTS:
+            session.add(AgentEvent(topic_id=topic.id, kind=kind, detail=detail,
+                                   created_at=now - timedelta(minutes=2)))
         # A second, minimal topic so topic-switching can be exercised. Created last, so the
         # main topic stays first in GET /api/topics.
         other = Topic(title=SECOND_TOPIC_TITLE)

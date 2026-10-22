@@ -34,6 +34,11 @@ dev:
 test:
 	uv run pytest -q
 
+# Frozen grading eval (evals/grading/README.md): prints the cost estimate and stops;
+# `just eval-grading --live` calls the configured model on every case.
+eval-grading *args:
+	uv run python -m evals.grading.run_eval {{args}}
+
 # Create compose's default vault mount first: on Linux, Docker would create it as root.
 up:
 	mkdir -p data/vault

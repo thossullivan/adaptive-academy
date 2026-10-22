@@ -1,11 +1,15 @@
 # Tool schemas (Anthropic tool-use format) + tier table.
 # Tiers: "auto" executes immediately; "gated" is blocked until attempt_logged is True.
+# log_attempt is "auto" but checked: it records only if the solution guard's attempt check
+# finds a real attempt in the learner's own message (engine/solution_guard.py).
 
 LOG_ATTEMPT = {
     "name": "log_attempt",
     "description": (
-        "Record that the learner has made a genuine attempt or explanation. "
-        "Call this as soon as the learner tries, even partially."
+        "Record that the learner's latest message contains a genuine attempt: an answer with "
+        "some working, a step, code, or reasoning, right or wrong (partial is fine). A bare "
+        "guess, a request, or a question back is not an attempt; ask for their reasoning "
+        "instead. The app checks the learner's message and may refuse the record."
     ),
     "input_schema": {
         "type": "object",

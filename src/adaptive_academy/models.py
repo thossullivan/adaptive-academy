@@ -129,6 +129,10 @@ class AgentEvent(SQLModel, table=True):
     Exactly one of conversation_id / topic_id / program_id is set (app-level invariant).
     """
 
+    # The Usage page's quality scorecard counts a few kinds per time window
+    # (engine/scorecard.py); the index keeps that off a full scan of the trace.
+    __table_args__ = (Index("ix_agentevent_kind_created_at", "kind", "created_at"),)
+
     id: Optional[int] = Field(default=None, primary_key=True)
     conversation_id: Optional[int] = Field(default=None, foreign_key="conversation.id")
     topic_id: Optional[int] = Field(default=None, foreign_key="topic.id")
@@ -534,3 +538,8 @@ class LLMUsage(SQLModel, table=True):
     web_search_requests: int = 0
     cost_usd: Optional[float] = None
     reported_cost_usd: Optional[float] = None
+    # How the call ended, set by the API-key client (llm/anthropic_client.py): "ok",
+    # "refusal", "cut_off" (max_tokens or the context window), "empty" (no text and no tool
+    # call), or "invalid_output" (a structured answer that was not usable, retried or not).
+    # NULL = not recorded: rows from before the column, Agent SDK calls, research searches.
+    outcome: Optional[str] = None

@@ -7,6 +7,7 @@ file-backed db and, from inside the model call, try to take the write lock on a 
 connection with no wait.
 """
 
+import json
 import sqlite3
 
 import pytest
@@ -80,9 +81,14 @@ def test_no_write_lock_is_held_during_any_tutor_model_call(file_engine):
             LLMResponse(tool_calls=[ToolCall(id="t2", name="reveal_solution",
                                              input={"text": "ANSWER"})]),
         ])
-        result = run_tutor_turn(session, convo, "my attempt: softmax(QK^T)V", llm)
+        # The solution guard's attempt check, a model call too, confirms the attempt.
+        guard = _ProbingLLM(path, [LLMResponse(text=json.dumps(
+            {"gives_away_solution": False, "learner_attempted": True, "reason": "r"}))])
+        result = run_tutor_turn(session, convo, "my attempt: softmax(QK^T)V", llm,
+                                guard_llm=guard)
 
         assert llm.lock_free == [True, True]
+        assert guard.lock_free == [True]
         assert result.reply == "ANSWER"
         kinds = [e.kind for e in result.events]
         assert kinds.count("llm_call") == 2  # the trace is still written

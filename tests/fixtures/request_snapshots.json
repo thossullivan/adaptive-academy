@@ -484,8 +484,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -496,7 +496,7 @@
         {
           "name": "log_attempt",
           "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
         },
         {
           "name": "reveal_solution",
@@ -533,8 +533,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "5a68484aeb3f16283635ce3d4a191da6e74db6e046ffba822c0386be162fd6db",
-          "chars": 3134
+          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
+          "chars": 4301
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -579,8 +579,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -591,7 +591,7 @@
         {
           "name": "log_attempt",
           "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
         },
         {
           "name": "reveal_solution",
@@ -630,8 +630,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "5a68484aeb3f16283635ce3d4a191da6e74db6e046ffba822c0386be162fd6db",
-          "chars": 3134
+          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
+          "chars": 4301
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -678,8 +678,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -690,7 +690,7 @@
         {
           "name": "log_attempt",
           "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
         },
         {
           "name": "reveal_solution",
@@ -702,7 +702,104 @@
       "message_roles": [
         "user"
       ],
-      "messages_sha256": "b378b8dff1202a1aa739370afd66bfae253dab48af70786c07f74d4820521648",
+      "messages_sha256": "2a4b5f61be97810f1d2553b977136d382dcc3aa61c29189942d73bb6e9b04220",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete_json",
+      "role": "copy",
+      "model": "anthropic/claude-haiku-5.5",
+      "max_tokens": 4000,
+      "system": [
+        {
+          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
+          "chars": 4301
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "emit_solution_check",
+          "type": "custom",
+          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "189d34dc0c110dc894ce3a6fbef1780ac20de83a63a1a1b65cfdc32ef59b1759",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "c874f25833cd78155116149d2a730b0eb6b8b9c0725efb14f4e1295c739771c8",
       "other_params": {
         "extra_body": {
           "provider": {
@@ -727,8 +824,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -739,7 +836,7 @@
         {
           "name": "log_attempt",
           "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
         },
         {
           "name": "reveal_solution",
@@ -753,58 +850,7 @@
         "assistant",
         "user"
       ],
-      "messages_sha256": "2df9def22398fe0f5303292874fecc1a45968bb869bbc25d5a8a6f3056b844e6",
-      "other_params": {
-        "extra_body": {
-          "provider": {
-            "data_collection": "deny"
-          }
-        }
-      },
-      "cache_control": [
-        "top-level",
-        "system[0]"
-      ]
-    },
-    {
-      "endpoint": {
-        "base_url": "https://openrouter.ai/api",
-        "auth": "authorization-bearer",
-        "drops_x_api_key": true
-      },
-      "operation": "complete",
-      "role": "reasoning",
-      "model": "anthropic/claude-sonnet-5.5",
-      "max_tokens": 20000,
-      "system": [
-        {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
-        },
-        {
-          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
-          "chars": 38
-        }
-      ],
-      "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
-        },
-        {
-          "name": "reveal_solution",
-          "type": "custom",
-          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
-        }
-      ],
-      "tool_choice": null,
-      "message_roles": [
-        "user",
-        "assistant",
-        "user"
-      ],
-      "messages_sha256": "a03025c64a638e2147a3f2da1dfc7f96a4d86282a3eb036b1482e3dd00edbc98",
+      "messages_sha256": "34163a85fd7cdbe27ecfc343098eef1b4e61724836cf5b8502edadfe101ad8ec",
       "other_params": {
         "extra_body": {
           "provider": {
@@ -1037,8 +1083,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1049,7 +1095,7 @@
         {
           "name": "log_attempt",
           "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
         },
         {
           "name": "reveal_solution",
@@ -1080,8 +1126,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "5a68484aeb3f16283635ce3d4a191da6e74db6e046ffba822c0386be162fd6db",
-          "chars": 3134
+          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
+          "chars": 4301
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1120,8 +1166,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1132,7 +1178,7 @@
         {
           "name": "log_attempt",
           "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
         },
         {
           "name": "reveal_solution",
@@ -1165,8 +1211,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "5a68484aeb3f16283635ce3d4a191da6e74db6e046ffba822c0386be162fd6db",
-          "chars": 3134
+          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
+          "chars": 4301
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1207,8 +1253,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1219,7 +1265,7 @@
         {
           "name": "log_attempt",
           "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
         },
         {
           "name": "reveal_solution",
@@ -1231,7 +1277,92 @@
       "message_roles": [
         "user"
       ],
-      "messages_sha256": "b378b8dff1202a1aa739370afd66bfae253dab48af70786c07f74d4820521648",
+      "messages_sha256": "2a4b5f61be97810f1d2553b977136d382dcc3aa61c29189942d73bb6e9b04220",
+      "other_params": {},
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://api.anthropic.com",
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
+      "operation": "complete_json",
+      "role": "copy",
+      "model": "claude-haiku-5-5",
+      "max_tokens": 4000,
+      "system": [
+        {
+          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
+          "chars": 4301
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "emit_solution_check",
+          "type": "custom",
+          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "189d34dc0c110dc894ce3a6fbef1780ac20de83a63a1a1b65cfdc32ef59b1759",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://api.anthropic.com",
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "c874f25833cd78155116149d2a730b0eb6b8b9c0725efb14f4e1295c739771c8",
       "other_params": {},
       "cache_control": [
         "top-level",
@@ -1250,8 +1381,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
+          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
+          "chars": 2645
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1262,7 +1393,7 @@
         {
           "name": "log_attempt",
           "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
         },
         {
           "name": "reveal_solution",
@@ -1276,52 +1407,7 @@
         "assistant",
         "user"
       ],
-      "messages_sha256": "2df9def22398fe0f5303292874fecc1a45968bb869bbc25d5a8a6f3056b844e6",
-      "other_params": {},
-      "cache_control": [
-        "top-level",
-        "system[0]"
-      ]
-    },
-    {
-      "endpoint": {
-        "base_url": "https://api.anthropic.com",
-        "auth": "x-api-key",
-        "drops_x_api_key": false
-      },
-      "operation": "complete",
-      "role": "reasoning",
-      "model": "claude-sonnet-5-5",
-      "max_tokens": 20000,
-      "system": [
-        {
-          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
-          "chars": 2349
-        },
-        {
-          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
-          "chars": 38
-        }
-      ],
-      "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
-        },
-        {
-          "name": "reveal_solution",
-          "type": "custom",
-          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
-        }
-      ],
-      "tool_choice": null,
-      "message_roles": [
-        "user",
-        "assistant",
-        "user"
-      ],
-      "messages_sha256": "a03025c64a638e2147a3f2da1dfc7f96a4d86282a3eb036b1482e3dd00edbc98",
+      "messages_sha256": "34163a85fd7cdbe27ecfc343098eef1b4e61724836cf5b8502edadfe101ad8ec",
       "other_params": {},
       "cache_control": [
         "top-level",

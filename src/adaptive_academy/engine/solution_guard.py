@@ -17,6 +17,23 @@ the learner's own message (`learner_attempted`). So a genuine attempt the first 
 to log is kept, but a tutor caught leaking can't log an attempt the learner never made. A
 fallback, or screen-only mode, records nothing (`tool:log_attempt:dropped`).
 
+The attempt check: outside a regeneration, a log_attempt counts only if the learner's own
+message contains a real attempt (`attempt_tool` / `confirm_attempt`). Before, the tutor model
+alone decided, so "I think it's 42" or "is it 42?" was enough to unlock reveal_solution and
+end every later check. The same model check judges it (`learner_attempted`, defined in
+prompts.TUTOR_SOLUTION_GUARD: an answer with some working, a step, code, or reasoning, right
+or wrong; not a bare guess, a request, a question back, or a restatement of the task), asked
+with no draft. It costs at most one extra copy-role call per turn, and only on a turn where
+the tutor calls log_attempt: a model verdict this turn's message already has (from a review
+or an earlier log_attempt) is reused, and so is a failed check. A refused log_attempt is not
+recorded, reveal_solution stays gated, the tutor is told to ask for the learner's reasoning
+(`ATTEMPT_REJECTED`), and a fixed `tool:log_attempt:rejected` event is traced. A refusal
+stands for the turn: a deferred attempt later in it is dropped too. If the check can't run
+(no client, an API error, the budget, invalid output) the attempt is NOT recorded, failing
+closed, and the turn still completes (`guard:unavailable`, `ATTEMPT_UNVERIFIED`). By design
+that makes the tutor stricter during an outage: a learner who really tried is asked to show
+their working again rather than unlocking the answer unchecked.
+
 Detection:
 1. `screen_reply`: a deterministic screen, no model call. It names a rule ("phrase" for an
    announced handover like "here's the full solution", "code_block" for a long fenced
@@ -104,6 +121,20 @@ ATTEMPT_DEFERRED = (
     "state, promise, or schedule the solution; reply with one question or one hint."
 )
 
+# The tool result for a log_attempt the attempt check refused: the learner's message has no
+# real attempt in it yet. Like ATTEMPT_DEFERRED, it must not invite a promise of a later reveal.
+ATTEMPT_REJECTED = (
+    "Not recorded: the learner's message does not contain an attempt yet (an answer with some "
+    "working, a step, code, or reasoning). Ask them for their reasoning or their first step. "
+    "Do not state, promise, or schedule the solution; reply with one question or one hint."
+)
+# The tool result when the attempt check could not run: fail closed, not recorded.
+ATTEMPT_UNVERIFIED = (
+    "Not recorded: the attempt could not be checked just now. Respond to what the learner "
+    "wrote and ask them to show their working. Do not state, promise, or schedule the "
+    "solution; reply with one question or one hint."
+)
+
 # Decisions returned by SolutionGuard.review.
 PASS = "pass"
 REGENERATE = "regenerate"
@@ -149,6 +180,8 @@ _RULE_NOTES = {
 # One warning per process when the guard first degrades to screen-only; every later
 # degradation is still traced as a guard:unavailable event.
 _warned_degraded = False
+# The same, for the attempt check failing closed.
+_warned_attempt_unchecked = False
 
 
 @dataclass(frozen=True)
@@ -186,18 +219,29 @@ def _bounded(text: str, limit: int = _SECTION_MAX) -> str:
     return f"{text[:half]}\n[... {omitted} characters omitted ...]\n{text[-half:]}"
 
 
-def build_guard_messages(concept: str, learner_text: str, reply: str, *,
+# Our own note (outside the untrusted blocks) for the attempt check, which has no draft.
+_ATTEMPT_ONLY_NOTE = ("CHECK: there is no draft this time; the tutor wants to record an "
+                      "attempt. Judge learner_attempted only and set gives_away_solution to "
+                      "false.")
+
+
+def build_guard_messages(concept: str, learner_text: str, reply: str | None, *,
                          previous_tutor: str = "",
                          screen_rule: str | None = None) -> list[dict[str, str]]:
     """The check's user message: each untrusted part in its own escaped marker block, and
-    (outside them, as our own note) which screen rule fired, if any."""
+    (outside them, as our own note) which screen rule fired, if any. `reply=None` is the
+    attempt check: no DRAFT_REPLY section, and a note that only learner_attempted counts."""
     sections = [("CONCEPT", concept)]
     if previous_tutor:
         sections.append(("PREVIOUS_TUTOR_MESSAGE", _bounded(previous_tutor)))
-    sections += [("LEARNER_MESSAGE", _bounded(learner_text)), ("DRAFT_REPLY", reply)]
+    sections.append(("LEARNER_MESSAGE", _bounded(learner_text)))
+    if reply is not None:
+        sections.append(("DRAFT_REPLY", reply))
     parts = []
     for name, text in sections:
         parts += [f"<<<{name}>>>", escape_markers(text or "(empty)"), f"<<<END_{name}>>>"]
+    if reply is None:
+        parts.append(_ATTEMPT_ONLY_NOTE)
     if screen_rule is not None:
         parts.append(f"SCREEN: the keyword screen flagged the draft for "
                      f"{_RULE_NOTES[screen_rule]}. Look closely; this is not a verdict.")
@@ -226,6 +270,16 @@ def _warn_degraded_once(category: str) -> None:
         "failures are traced as guard:unavailable events, not logged again.", category)
 
 
+def _warn_attempt_unchecked_once(category: str) -> None:
+    global _warned_attempt_unchecked
+    if _warned_attempt_unchecked:
+        return
+    _warned_attempt_unchecked = True
+    logger.warning(
+        "Attempt check failed (%s); log_attempt is not recorded while it fails. Later "
+        "failures are traced as guard:unavailable events, not logged again.", category)
+
+
 class SolutionGuard:
     """One tutor turn's guard: review drafts, allow one regeneration, then the fallback.
 
@@ -233,9 +287,10 @@ class SolutionGuard:
     `previous_tutor` is the last stored tutor message (the question being answered, often).
     `emit(kind, detail)` writes the turn's AgentEvents. The caller releases the db write lock
     before `review` (it may make a model call) and decides, per the returned decision,
-    whether to show the draft, regenerate, or store GUARD_FALLBACK. While `regenerating`, the
-    caller defers log_attempt (`defer_attempt`), keeps reveal_solution gated, reviews the
-    reply regardless, and after the turn records the attempt only if
+    whether to show the draft, regenerate, or store GUARD_FALLBACK. The log_attempt tool goes
+    through `attempt_tool`: the caller records the attempt only when it says so. While
+    `regenerating` that defers it (`defer_attempt`); the caller keeps reveal_solution gated,
+    reviews the reply regardless, and after the turn records the attempt only if
     `take_deferred_attempt()` says so.
     """
 
@@ -250,6 +305,11 @@ class SolutionGuard:
         self._pending_attempt: str | None = None  # a deferred log_attempt's summary
         self._regenerated_passed = False
         self._attempt_confirmed = False  # the model check saw an attempt in the learner's text
+        # The model's latest learner_attempted judgement on this turn's learner message (from
+        # a review or an attempt check), reused instead of asking again. None: not judged yet.
+        self._learner_attempted: bool | None = None
+        self._attempt_check_failed = False  # the attempt check already failed this turn
+        self._attempt_refused = False  # a log_attempt was refused this turn
 
     def check(self, reply: str) -> GuardVerdict:
         """The model check, told what the screen saw; the screen alone if it fails."""
@@ -274,6 +334,7 @@ class SolutionGuard:
             else:
                 logger.debug("solution guard verdict gives_away=%s screen=%s reason=%r",
                              verdict.gives_away, rule, verdict.reason)
+                self._learner_attempted = verdict.learner_attempted
         detail = f"source={verdict.source} gives_away={str(verdict.gives_away).lower()}"
         if rule is not None and verdict.source == "model":
             detail += f" screen={rule}"
@@ -297,6 +358,70 @@ class SolutionGuard:
         self._emit("guard:fallback", "the regenerated draft also gave the answer away")
         return FALLBACK
 
+    def confirm_attempt(self) -> bool:
+        """The attempt check: does the learner's own message contain a real attempt?
+
+        Reuses the model's judgement if this turn's message already has one (from a review
+        or an earlier call), so a turn makes at most one extra call; otherwise asks the model
+        check once, with no draft. Fails CLOSED: no client, an API error, the budget, or
+        invalid output all answer False (and a failure is not retried this turn), so during
+        an outage a real attempt is not recorded and the tutor is stricter, by design. Never
+        raises. Event details are fixed strings; the model's reason goes to the debug log."""
+        if self._learner_attempted is not None:
+            attempted = self._learner_attempted
+            self._emit("guard:attempt_checked",
+                       f"source=reused attempted={str(attempted).lower()}")
+            return attempted
+        if self._attempt_check_failed:
+            self._emit("guard:unavailable", "reused: attempt check failed, attempt not recorded")
+            return False
+        if self._llm is None:
+            self._attempt_check_failed = True
+            self._emit("guard:unavailable",
+                       "no_client: attempt check unavailable, attempt not recorded")
+            return False
+        self._emit("prompt", TUTOR_SOLUTION_GUARD.tag)
+        messages = build_guard_messages(self._concept, self._learner_text, None,
+                                        previous_tutor=self._previous_tutor)
+        try:
+            verdict = _model_verdict(self._llm, messages)
+        except Exception as exc:  # noqa: BLE001 - any failure fails closed
+            # The category is one of llm/errors.py's fixed keys, never upstream text.
+            category = classify_llm_error(exc)
+            self._attempt_check_failed = True
+            self._emit("guard:unavailable",
+                       f"{category}: attempt check failed, attempt not recorded")
+            _warn_attempt_unchecked_once(category)
+            return False
+        logger.debug("attempt check learner_attempted=%s reason=%r",
+                     verdict.learner_attempted, verdict.reason)
+        self._learner_attempted = verdict.learner_attempted
+        self._emit("guard:attempt_checked",
+                   f"source=model attempted={str(verdict.learner_attempted).lower()}")
+        return verdict.learner_attempted
+
+    def attempt_tool(self, summary: str) -> tuple[bool, str]:
+        """The log_attempt tool on both tutor paths: (record the attempt now?, tool result).
+
+        While regenerating, the attempt is deferred (`defer_attempt`). Otherwise it counts
+        only if `confirm_attempt` finds a real attempt in the learner's own message. A refusal
+        returns ATTEMPT_REJECTED (ATTEMPT_UNVERIFIED when the check couldn't run), traces a
+        fixed `tool:log_attempt:rejected`, and stands for the rest of the turn."""
+        summary = str(summary or "")
+        if self.regenerating:
+            return False, self.defer_attempt(summary)
+        if self.confirm_attempt():
+            self._emit("tool:log_attempt", summary)
+            return True, "ok: attempt recorded"
+        self._attempt_refused = True
+        if self._attempt_check_failed:
+            self._emit("tool:log_attempt:rejected",
+                       "not recorded: the attempt check was unavailable")
+            return False, ATTEMPT_UNVERIFIED
+        self._emit("tool:log_attempt:rejected",
+                   "not recorded: no attempt in the learner's message")
+        return False, ATTEMPT_REJECTED
+
     def defer_attempt(self, summary: str) -> str:
         """log_attempt during a regeneration: hold it until the rewritten reply has passed
         review, and return the tool result telling the tutor so."""
@@ -307,11 +432,13 @@ class SolutionGuard:
     def take_deferred_attempt(self) -> bool:
         """After the turn: True if a deferred attempt should now be recorded. That needs the
         rewritten reply to have passed review AND the model check to have found an attempt in
-        the learner's own message (never the screen alone). Emits the normal tool:log_attempt
-        event when it is recorded, and a fixed `tool:log_attempt:dropped` when it is not."""
+        the learner's own message (never the screen alone), and no log_attempt to have been
+        refused earlier in the turn. Emits the normal tool:log_attempt event when it is
+        recorded, and a fixed `tool:log_attempt:dropped` when it is not."""
         if self._pending_attempt is None:
             return False
-        if not (self._regenerated_passed and self._attempt_confirmed):
+        if not (self._regenerated_passed and self._attempt_confirmed
+                and not self._attempt_refused):
             self._emit("tool:log_attempt:dropped",
                        "not recorded: no attempt confirmed in the learner's message")
             self._pending_attempt = None
