@@ -122,6 +122,7 @@ def test_claude_models_are_fully_supported(model):
     caps = model_catalog.capabilities(model)
     assert caps.family == "anthropic"
     assert caps.strict_tools and caps.anthropic_web_search and caps.thinking_replay
+    assert caps.structured_output == model_catalog.STRUCTURED_STRICT_TOOL
     assert not caps.experimental
 
 
@@ -134,6 +135,19 @@ def test_other_models_are_experimental(model):
     assert not caps.anthropic_web_search
     assert not caps.thinking_replay
     assert not caps.strict_tools
+    # No tools at all: output_config.format (llm/anthropic_client.py), after a live run where
+    # DeepSeek wrote its native tool-call markup as text instead of a tool_use block.
+    assert caps.structured_output == model_catalog.STRUCTURED_JSON_SCHEMA
+
+
+def test_structured_output_modes_are_the_three_known_ones():
+    modes = {f.structured_output for f in (*model_catalog.FAMILIES.values(),
+                                           model_catalog.OTHER)}
+    assert modes == {model_catalog.STRUCTURED_STRICT_TOOL, model_catalog.STRUCTURED_TOOL,
+                     model_catalog.STRUCTURED_JSON_SCHEMA}
+    for caps in (*model_catalog.FAMILIES.values(), model_catalog.OTHER):
+        assert caps.strict_tools == (caps.structured_output
+                                     == model_catalog.STRUCTURED_STRICT_TOOL)
 
 
 def test_web_search_tool_follows_the_catalog():

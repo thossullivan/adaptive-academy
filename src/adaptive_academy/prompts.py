@@ -620,6 +620,17 @@ STRUCTURED_TOOL_INSTRUCTION = Prompt(
     "result as its input. Do not answer in plain text.",
 )
 
+# The json_schema mode's counterpart (non-Claude models, llm/model_catalog.py): no tool is
+# sent, the request's output_config.format carries the schema, and some callers' prompts still
+# say "through the provided tool call", so this says what that means here.
+STRUCTURED_JSON_INSTRUCTION = Prompt(
+    "structured.json_instruction",
+    1,
+    "Give your answer as one JSON object that matches the required schema, with nothing "
+    "before or after it. No tool is available: where the instructions above mention a tool "
+    "call, this JSON object is that answer.",
+)
+
 STRUCTURED_TOOL_RETRY = Prompt(
     "structured.tool_retry",
     1,

@@ -4,6 +4,9 @@ curriculum phase as a string, and POST /api/topics/{id}/curriculum crashed with 
 (AttributeError in parse_curriculum_obj). Now the violation gets one corrective retry that
 names it, and a second bad answer is a legible 502 (category invalid_output).
 
+The tool path here runs on Claude before 4.5 (structured_output "tool"). Non-Claude models
+use output_config.format instead of a tool (tests/test_structured_json_schema.py).
+
 Offline: requests go through the real Anthropic SDK to an httpx MockTransport."""
 
 import copy
@@ -24,8 +27,8 @@ from adaptive_academy.models import SourceDoc, Topic, TopicFoundation, TopicInte
 from adaptive_academy.prompts import STRUCTURED_SCHEMA_RETRY
 from adaptive_academy.settings import settings
 
-DEEPSEEK = "deepseek/deepseek-v4.1-flash-1017"
-USER = {"role": "user", "content": "Build the track."}
+LEGACY = "claude-sonnet-4-0"  # Claude before 4.5: a tool without `strict`
+USER ={"role": "user", "content": "Build the track."}
 GOOD = {
     "overview": "A path",
     "phases": [{"title": "P1", "est_hours": "1w",
@@ -61,11 +64,11 @@ class Wire:
 
 
 @pytest.fixture
-def deepseek(monkeypatch):
-    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test-not-a-real-key")
-    monkeypatch.setattr(settings, "reasoning_model", DEEPSEEK)
-    monkeypatch.setattr(settings, "copy_model", DEEPSEEK)
+def legacy(monkeypatch):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-test-not-a-real-key")
+    monkeypatch.setattr(settings, "reasoning_model", LEGACY)
+    monkeypatch.setattr(settings, "copy_model", LEGACY)
 
 
 def _complete(wire):
@@ -73,9 +76,9 @@ def _complete(wire):
         "S", [USER], schema=CURRICULUM_SCHEMA, tool_name="emit_track")
 
 
-def test_live_shape_gets_one_named_correction_then_succeeds(session, deepseek):
-    wire = Wire(_tool_message(DEEPSEEK, LIVE_BAD, thinking=True),
-                _tool_message(DEEPSEEK, GOOD, tool_id="toolu_2"))
+def test_live_shape_gets_one_named_correction_then_succeeds(session, legacy):
+    wire = Wire(_tool_message(LEGACY, LIVE_BAD),
+                _tool_message(LEGACY, GOOD, tool_id="toolu_2"))
     assert _complete(wire) == GOOD
     assert len(wire.requests) == 2
     first, retry = wire.requests
@@ -84,7 +87,6 @@ def test_live_shape_gets_one_named_correction_then_succeeds(session, deepseek):
     assert retry["messages"][0] == USER
     assistant, correction = retry["messages"][1:]
     assert assistant["role"] == "assistant"
-    # This model's thinking is not replayed (model_catalog: thinking_replay=False).
     assert [b["type"] for b in assistant["content"]] == ["tool_use"]
     assert assistant["content"][0]["input"] == LIVE_BAD
     [result] = correction["content"]
@@ -97,8 +99,8 @@ def test_live_shape_gets_one_named_correction_then_succeeds(session, deepseek):
     assert retry["tools"] == first["tools"] and retry["system"] == first["system"]
 
 
-def test_two_bad_answers_are_invalid_output(session, deepseek):
-    wire = Wire(_tool_message(DEEPSEEK, LIVE_BAD), _tool_message(DEEPSEEK, LIVE_BAD))
+def test_two_bad_answers_are_invalid_output(session, legacy):
+    wire = Wire(_tool_message(LEGACY, LIVE_BAD), _tool_message(LEGACY, LIVE_BAD))
     with pytest.raises(StructuredOutputError) as caught:
         _complete(wire)
     assert len(wire.requests) == 2
@@ -109,28 +111,28 @@ def test_two_bad_answers_are_invalid_output(session, deepseek):
     assert "retry" in failure.detail.lower()
 
 
-def test_bad_answer_then_prose_is_no_tool_use(session, deepseek):
-    prose = _tool_message(DEEPSEEK, GOOD)
+def test_bad_answer_then_prose_is_no_tool_use(session, legacy):
+    prose = _tool_message(LEGACY, GOOD)
     prose["content"] = [{"type": "text", "text": "Here is the track: ..."}]
     prose["stop_reason"] = "end_turn"
-    wire = Wire(_tool_message(DEEPSEEK, LIVE_BAD), prose)
+    wire = Wire(_tool_message(LEGACY, LIVE_BAD), prose)
     with pytest.raises(StructuredOutputError) as caught:
         _complete(wire)
     assert caught.value.reason == "no_tool_use"
 
 
-def test_prose_then_bad_answer_is_schema_mismatch(session, deepseek):
-    prose = _tool_message(DEEPSEEK, GOOD)
+def test_prose_then_bad_answer_is_schema_mismatch(session, legacy):
+    prose = _tool_message(LEGACY, GOOD)
     prose["content"] = [{"type": "text", "text": "Sure."}]
     prose["stop_reason"] = "end_turn"
-    wire = Wire(prose, _tool_message(DEEPSEEK, LIVE_BAD))
+    wire = Wire(prose, _tool_message(LEGACY, LIVE_BAD))
     with pytest.raises(StructuredOutputError) as caught:
         _complete(wire)
     assert caught.value.reason == "schema_mismatch"
 
 
-def test_a_valid_first_answer_costs_one_call(session, deepseek):
-    wire = Wire(_tool_message(DEEPSEEK, GOOD))
+def test_a_valid_first_answer_costs_one_call(session, legacy):
+    wire = Wire(_tool_message(LEGACY, GOOD))
     assert _complete(wire) == GOOD
     assert len(wire.requests) == 1
 
@@ -189,18 +191,18 @@ def _route_client(session, wire) -> TestClient:
     return TestClient(app)
 
 
-def test_curriculum_route_two_bad_answers_is_a_legible_502(session, deepseek):
+def test_curriculum_route_two_bad_answers_is_a_legible_502(session, legacy):
     topic = _topic(session)
-    wire = Wire(_tool_message(DEEPSEEK, LIVE_BAD), _tool_message(DEEPSEEK, LIVE_BAD))
+    wire = Wire(_tool_message(LEGACY, LIVE_BAD), _tool_message(LEGACY, LIVE_BAD))
     r = _route_client(session, wire).post(f"/api/topics/{topic.id}/curriculum")
     assert r.status_code == 502, r.text
     assert r.json()["category"] == "invalid_output"
     assert "retry" in r.json()["detail"].lower()
 
 
-def test_curriculum_route_recovers_after_the_correction(session, deepseek):
+def test_curriculum_route_recovers_after_the_correction(session, legacy):
     topic = _topic(session)
-    wire = Wire(_tool_message(DEEPSEEK, LIVE_BAD), _tool_message(DEEPSEEK, GOOD))
+    wire = Wire(_tool_message(LEGACY, LIVE_BAD), _tool_message(LEGACY, GOOD))
     r = _route_client(session, wire).post(f"/api/topics/{topic.id}/curriculum")
     assert r.status_code == 200, r.text
     assert len(wire.requests) == 2
