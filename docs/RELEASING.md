@@ -51,7 +51,7 @@ Then open http://localhost:8000.
 
 - **Obsidian vault (optional):** add `-v "/path/to/vault:/vault" -e AA_OBSIDIAN_VAULT_PATH=/vault`.
 - **Linux file ownership:** add `-e AA_UID="$(id -u)" -e AA_GID="$(id -g)"` so vault exports
-  are owned by you (the app runs as an unprivileged user; see the README's container notes).
+  are owned by you (the app runs as an unprivileged user; see [SETUP.md](SETUP.md#docker)).
 - **Other settings** (models, daily spending limit) are the same `AA_*` variables as in
   [`.env.example`](../.env.example), passed with `-e`. Don't pass `AA_DATABASE_URL` (and so don't
   use `--env-file .env` with the example file as is): the image already points it at `/data`,
@@ -64,5 +64,5 @@ Then open http://localhost:8000.
   2. `docker pull ghcr.io/thossullivan/adaptive-academy:latest`, then remove and re-run the
      container. The data volume is kept, and the container migrates the database on start.
   3. Migrations only go forward: an older image can't start on a database a newer one has
-     migrated. To roll back, restore the snapshot into the volume (README, "Back up and restore
-     your data") before running the older image.
+     migrated. To roll back, restore the snapshot into the volume
+     ([BACKUP.md](BACKUP.md#with-docker)) before running the older image.

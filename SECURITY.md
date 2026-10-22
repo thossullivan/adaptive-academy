@@ -1,9 +1,8 @@
 # Security Policy
 
-Adaptive Academy is a **local-first, bring-your-own-key** application: your learning records and
-your `ANTHROPIC_API_KEY` stay on your machine. (Each AI call still sends its content to Anthropic's
-API — "local-first" refers to *records*, not offline inference.) There is no hosted service and no
-telemetry.
+Adaptive Academy runs on your own machine with your own API key. Your learning records and your
+`ANTHROPIC_API_KEY` stay on your computer. Each AI request does send its content to Anthropic's
+API. There is no hosted service and no telemetry.
 
 ## Reporting a vulnerability
 
@@ -22,7 +21,7 @@ Please include:
 You can expect an initial acknowledgment within a few days. Because this is a small,
 volunteer-run project, please allow reasonable time for a fix before any public disclosure.
 
-## Scope & good-to-know
+## Good to know
 
 - **Secrets:** never commit your `.env` or API key. If you believe a key was exposed in a commit,
   rotate it immediately at the Anthropic console.
