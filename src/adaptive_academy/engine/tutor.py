@@ -18,6 +18,9 @@ from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
 from adaptive_academy.prompts import TUTOR_GUARD_CORRECTION, build_tutor_system_prompt
 
 _MAX_STEPS = 6
+# Steps a regeneration is always left, however late the withheld draft came: two tool steps
+# and the reply.
+_REGEN_STEPS = 3
 _FALLBACK = "Let's slow down — tell me what you've tried so far, and we'll work from there."
 _REFUSAL = (
     "I can't respond to that one — the model declined it. Try rephrasing, or tell me what "
@@ -92,8 +95,11 @@ def run_tutor_turn(
 
     messages = _history(convo)
     reply_text = ""
+    # The guard also sees the tutor's last stored message: often the question being answered.
+    previous_tutor = next((m["content"] for m in reversed(messages)
+                           if m["role"] == "assistant"), "")
     guard = SolutionGuard(concept=concept.name if concept else "", learner_text=user_text,
-                          llm=guard_llm, emit=emit)
+                          llm=guard_llm, emit=emit, previous_tutor=previous_tutor)
 
     step = 0
     max_steps = _MAX_STEPS
@@ -124,10 +130,12 @@ def run_tutor_turn(
             reply_text = resp.text
             if not reply_text.strip():
                 emit("empty_reply", f"stop_reason={resp.stop_reason}")
-            elif not convo.attempt_logged:
+            elif guard.regenerating or not convo.attempt_logged:
                 # The solution guard: a reply finalised before any attempt is logged (this
-                # turn's log_attempt included) must not hand over the answer. Release the
-                # write lock first (F5): the check may make a model call.
+                # turn's log_attempt included) must not hand over the answer. A regenerated
+                # reply is always reviewed (it was pre-attempt, and log_attempt is refused
+                # while regenerating). Release the write lock first (F5): the check may make
+                # a model call.
                 session.commit()
                 decision = guard.review(reply_text)
                 if decision == REGENERATE:
@@ -138,7 +146,9 @@ def run_tutor_turn(
                                      "content": _assistant_tool_blocks(resp)})
                     messages.append({"role": "user", "content": str(TUTOR_GUARD_CORRECTION)})
                     reply_text = ""
-                    max_steps += 1  # the regeneration never eats the tool-step budget
+                    # A late draft still leaves the regeneration room for a tool step or two
+                    # (a refused log_attempt, a blocked reveal) before its reply.
+                    max_steps = max(max_steps, step + _REGEN_STEPS)
                     continue
                 if decision == FALLBACK:
                     reply_text = GUARD_FALLBACK
@@ -149,7 +159,7 @@ def run_tutor_turn(
         tool_results = []
         revealed_text: str | None = None
         for call in resp.tool_calls:
-            ok, payload = _execute_tool(session, convo, call, emit)
+            ok, payload = _execute_tool(session, convo, call, emit, guard)
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": call.id, "content": payload}
             )
@@ -209,10 +219,15 @@ def _execute_tool(
     convo: Conversation,
     call: ToolCall,
     emit: Callable[..., None],
+    guard: SolutionGuard | None = None,
 ) -> tuple[bool, str]:
     tier = TIERS.get(call.name, "auto")
 
     if call.name == "log_attempt":
+        if guard is not None and guard.regenerating:
+            # Rewriting a withheld draft: the tutor can't unlock the gate for itself. Nothing
+            # is recorded, so reveal_solution stays gated and the reply is still reviewed.
+            return False, guard.refuse_attempt()
         convo.attempt_logged = True
         session.add(convo)
         session.commit()

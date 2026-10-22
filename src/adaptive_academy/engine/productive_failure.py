@@ -200,9 +200,9 @@ def consolidate(
 
     # Fails closed: an answer that fails CONSOLIDATE_RUBRIC twice raises before anything is
     # written.
-    answer, _report = checked_completion(
+    answer = checked_completion(
         session, llm, system=PF_CONSOLIDATE, user=user, rubric=CONSOLIDATE_RUBRIC, emit=emit)
-    canonical, feedback, score = consolidation_from_dict(answer)
+    canonical, feedback, score = consolidation_from_dict(answer.data)
 
     assessment = Assessment(
         concept_id=concept.id,
@@ -212,7 +212,8 @@ def consolidate(
         verdict=feedback,
         score=score,
         gaps=[],
-        prompt_tag=PF_CONSOLIDATE.tag,  # the grade's prompt; PF_GENERATE only wrote the problem
+        # the grade's prompt(s); PF_GENERATE only wrote the problem
+        prompt_tag=answer.prompt_tag(PF_CONSOLIDATE),
     )
     session.add(assessment)
     session.flush()

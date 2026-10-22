@@ -306,7 +306,7 @@ def grade_roleplay(
 
     _emit(session, rp, "prompt", ROLEPLAY_GRADE.tag)
     user = "<<<TRANSCRIPT>>>\n" + escape_markers(transcript) + "\n<<<END_TRANSCRIPT>>>"
-    outcome, _report = checked_completion(
+    outcome = checked_completion(
         session, llm, system=ROLEPLAY_GRADE, user=user, rubric=OUTCOME_RUBRIC,
         emit=lambda kind, detail="": _emit(session, rp, kind, detail))
 
@@ -325,7 +325,7 @@ def grade_roleplay(
         session.add(result.assessment)
         graded.append(result.assessment)
 
-    rp.outcome = outcome
+    rp.outcome = outcome.data
     rp.status = "graded"
     _emit(session, rp, "roleplay:graded", f"{len(graded)} concept(s)")
     session.add(rp)

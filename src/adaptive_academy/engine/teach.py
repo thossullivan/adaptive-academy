@@ -72,9 +72,9 @@ def grade_teaching(
 
     trace_prompt(session, TEACH, topic_id=topic_id)
     # Fails closed: an answer that fails TEACH_RUBRIC twice raises before anything is written.
-    answer, _report = checked_completion(
+    answer = checked_completion(
         session, llm, system=TEACH, user=user, rubric=TEACH_RUBRIC, emit=emit)
-    score, feedback, strengths, gaps = teaching_from_dict(answer)
+    score, feedback, strengths, gaps = teaching_from_dict(answer.data)
 
     assessment = Assessment(
         concept_id=concept.id,
@@ -84,7 +84,7 @@ def grade_teaching(
         verdict=feedback,
         score=score,
         gaps=gaps,
-        prompt_tag=TEACH.tag,
+        prompt_tag=answer.prompt_tag(TEACH),
     )
     session.add(assessment)
     session.flush()

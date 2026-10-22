@@ -81,6 +81,13 @@
     ],
     "warn": []
   },
+  "grade_bad_score_huge_integer.txt": {
+    "rubric": "grade",
+    "fail": [
+      "G1"
+    ],
+    "warn": []
+  },
   "grade_bad_score_missing.json": {
     "rubric": "grade",
     "fail": [

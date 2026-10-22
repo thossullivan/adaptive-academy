@@ -68,6 +68,7 @@ RULE_TABLE = [
     (oc.G1, {"score": 7}, _CTX, True),
     (oc.G1, {"score": math.nan}, _CTX, True),
     (oc.G1, {"score": math.inf}, _CTX, True),
+    (oc.G1, {"score": 10 ** 400}, _CTX, True),  # float() would overflow
     (oc.G1, {"score": "0.7"}, _CTX, True),
     (oc.G1, {"score": True}, _CTX, True),
     (oc.G1, {"score": [0.7]}, _CTX, True),

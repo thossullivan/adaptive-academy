@@ -22,20 +22,22 @@ from adaptive_academy.api.deps import get_llm, get_session
 from adaptive_academy.engine.artifact import review_artifact
 from adaptive_academy.engine.assess import assess_concept
 from adaptive_academy.engine.decay import grade_decay_check, schedule_decay_check
-from adaptive_academy.engine.output_checks import GradeCheckError
+from adaptive_academy.engine.output_checks import GradeCheckError, GRADE_RUBRIC, check_output
 from adaptive_academy.engine.paper_probe import grade_paper_probe
 from adaptive_academy.engine.productive_failure import consolidate
 from adaptive_academy.engine.roleplay import grade_roleplay
 from adaptive_academy.engine.teach import grade_teaching
 from adaptive_academy.llm.errors import classify_llm_error
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
-from adaptive_academy.llm.types import LLMResponse
+from adaptive_academy.llm.types import LLMResponse, StructuredOutputError
 from adaptive_academy.models import (
     AgentEvent, Assessment, Concept, Deliverable, Item, KnowledgeEstimate, Milestone,
     PaperProbe, PaperProbeAnswer, Phase, Program, ProgramTopicLink, RecallPrompt,
     RoleplaySession, RoleplayTurn, Rubric, Topic, Track,
 )
-from adaptive_academy.prompts import GRADE_CORRECTION
+from adaptive_academy.prompts import (
+    ASSESS_ARTIFACT, GRADE, GRADE_CORRECTION, PF_CONSOLIDATE, TEACH, Prompt,
+)
 
 GOOD_GRADE = json.dumps({"score": 0.7, "mechanism_present": True, "verdict": "solid",
                          "gaps": ["masking left vague"]})
@@ -165,20 +167,25 @@ class Grader:
     steps: list[tuple[str, str, str]]  # per model call: (good answer, bad answer, failed id)
     rows: int  # Assessment rows a good run writes
     score: float  # the score those rows get
+    prompt: Prompt  # the grader prompt whose tag those rows carry
 
 
 GRADERS = {
-    "assess": Grader(_run_assess, [(GOOD_GRADE, BAD_GRADE, "G1")], 1, 0.7),
-    "teach": Grader(_run_teach, [(GOOD_TEACH, BAD_TEACH, "F1")], 1, 0.75),
-    "consolidate": Grader(_run_consolidate, [(GOOD_PF, BAD_PF, "P1")], 1, 0.7),
-    "artifact": Grader(_run_artifact, [(GOOD_GRADE, BAD_GRADE_MECH, "G5")], 1, 0.7),
-    "decay": Grader(_run_decay, [(GOOD_GRADE, BAD_GRADE_MECH, "G5")], 1, 0.7),
+    "assess": Grader(_run_assess, [(GOOD_GRADE, BAD_GRADE, "G1")], 1, 0.7, GRADE),
+    "teach": Grader(_run_teach, [(GOOD_TEACH, BAD_TEACH, "F1")], 1, 0.75, TEACH),
+    "consolidate": Grader(_run_consolidate, [(GOOD_PF, BAD_PF, "P1")], 1, 0.7,
+                          PF_CONSOLIDATE),
+    "artifact": Grader(_run_artifact, [(GOOD_GRADE, BAD_GRADE_MECH, "G5")], 1, 0.7,
+                       ASSESS_ARTIFACT),
+    "decay": Grader(_run_decay, [(GOOD_GRADE, BAD_GRADE_MECH, "G5")], 1, 0.7, GRADE),
+    # Multi-step graders: step i < 2 grades concept c1 / c2 (one row each); step 2 is the
+    # debrief, which writes no row.
     "roleplay": Grader(_run_roleplay, [(GOOD_GRADE, BAD_GRADE, "G1"),
                                        (GOOD_GRADE, BAD_GRADE_MECH, "G5"),
-                                       (GOOD_OUTCOME, BAD_OUTCOME, "J1")], 2, 0.7),
+                                       (GOOD_OUTCOME, BAD_OUTCOME, "J1")], 2, 0.7, GRADE),
     "paper_probe": Grader(_run_paper_probe, [(GOOD_GRADE, BAD_GRADE, "G1"),
                                              (GOOD_GRADE, BAD_GRADE, "G1"),
-                                             (GOOD_OUTCOME, BAD_OUTCOME, "J1")], 2, 0.7),
+                                             (GOOD_OUTCOME, BAD_OUTCOME, "J1")], 2, 0.7, GRADE),
 }
 STEP_CASES = [(name, i) for name, g in GRADERS.items() for i in range(len(g.steps))]
 
@@ -187,8 +194,15 @@ def _goods(g: Grader) -> list[str]:
     return [good for good, _bad, _rid in g.steps]
 
 
-def _script(texts: list[str]) -> ScriptedLLMClient:
-    return ScriptedLLMClient([LLMResponse(text=t) for t in texts])
+def _script(texts: list[str | LLMResponse]) -> ScriptedLLMClient:
+    return ScriptedLLMClient(
+        [t if isinstance(t, LLMResponse) else LLMResponse(text=t) for t in texts])
+
+
+def _row_tags(session) -> list[str]:
+    """prompt_tag per Assessment row, in concept order (c1 before c2)."""
+    rows = session.exec(select(Assessment).order_by(Assessment.concept_id)).all()
+    return [a.prompt_tag for a in rows]
 
 
 @pytest.mark.parametrize("name", list(GRADERS))
@@ -202,6 +216,7 @@ def test_good_answer_makes_no_extra_call(session, name):
     assert len(rows) == g.rows and {a.score for a in rows} == {g.score}
     assert len(_events(session, "grade:check")) == len(g.steps)
     assert not _events(session, "grade:regenerated") and not _events(session, "grade:rejected")
+    assert _row_tags(session) == [g.prompt.tag] * g.rows
 
 
 @pytest.mark.parametrize("name,step", STEP_CASES)
@@ -232,6 +247,16 @@ def test_bad_then_good_regenerates_once_with_an_append_only_correction(session, 
     assert f"attempt=1 fail FAIL {rule_id}" in checks[step]
     assert "attempt=2 pass" in checks[step + 1]
     assert not _events(session, "grade:rejected")
+
+    # The row says the correction ran — built from the two tags — only for the grade that
+    # was regenerated (a regenerated debrief writes no row).
+    combined = f"{g.prompt.tag}+{GRADE_CORRECTION.tag}"
+    assert combined == "+".join([g.prompt.tag, "grade.correction@v1"])
+    if len(g.steps) == 1:
+        expected = [combined] * g.rows
+    else:
+        expected = [combined if i == step else g.prompt.tag for i in range(g.rows)]
+    assert _row_tags(session) == expected
 
 
 @pytest.mark.parametrize("name,step", STEP_CASES)
@@ -361,3 +386,75 @@ def test_warning_is_recorded_but_does_not_block(session):
     assert len(llm.calls) == 1
     assert session.exec(select(Assessment)).one().score == 0.82
     assert _events(session, "grade:check")[0].detail == "grade attempt=1 pass WARN G8,G10"
+
+
+# ── Stop reasons a retry can't fix: refusal / cut_off, one call, nothing written ──
+
+_STOP_CATEGORY = {"refusal": "refusal", "max_tokens": "cut_off",
+                  "model_context_window_exceeded": "cut_off"}
+STOP_CASES = [(name, step, reason)
+              for name, step in [(n, 0) for n in GRADERS] + [("roleplay", 2), ("paper_probe", 1)]
+              for reason in _STOP_CATEGORY]
+
+
+@pytest.mark.parametrize("name,step,reason", STOP_CASES)
+def test_unretryable_stop_reason_raises_its_own_category_after_one_call(
+        session, name, step, reason):
+    g, w = GRADERS[name], _world(session)
+    if name == "decay":
+        schedule_decay_check(session, w.c1.id)
+    before = _learning_state(session, w)
+    run = g.run
+    if name == "decay":
+        prompt = session.exec(select(RecallPrompt)).one()
+
+        def run(s, w, llm):
+            grade_decay_check(s, prompt.id, "from memory", llm=llm)
+
+    # Even a complete-looking answer is not trusted when the model stopped this way.
+    stopped = LLMResponse(text=g.steps[step][0], stop_reason=reason)
+    llm = _script(_goods(g)[:step] + [stopped])
+    with pytest.raises(StructuredOutputError) as err:
+        run(session, w, llm)
+
+    assert not isinstance(err.value, GradeCheckError)
+    assert err.value.reason == reason
+    assert classify_llm_error(err.value) == _STOP_CATEGORY[reason]
+    assert len(llm.calls) == step + 1  # no regeneration: it would stop the same way
+    session.rollback()
+    assert _learning_state(session, w) == before
+    rejected = _events(session, "grade:rejected")
+    assert len(rejected) == 1 and f"stop_reason={reason}" in rejected[0].detail
+    assert not _events(session, "grade:regenerated")
+
+
+def test_stop_reason_on_the_regeneration_also_stops(session):
+    w = _world(session)
+    llm = _script([BAD_GRADE, LLMResponse(text="", stop_reason="refusal")])
+    with pytest.raises(StructuredOutputError) as err:
+        _run_assess(session, w, llm)
+    assert classify_llm_error(err.value) == "refusal" and len(llm.calls) == 2
+    session.rollback()
+    assert not session.exec(select(Assessment)).all()
+
+
+def test_other_stop_reasons_are_checked_normally(session):
+    w = _world(session)
+    llm = _script([LLMResponse(text=GOOD_GRADE, stop_reason="end_turn")])
+    _run_assess(session, w, llm)
+    assert session.exec(select(Assessment)).one().prompt_tag == GRADE.tag
+
+
+def test_route_reports_refusal_not_invalid_output(session):
+    w = _world(session)
+    before = _learning_state(session, w)
+    r = _post_teach(_client(session, [LLMResponse(text="", stop_reason="refusal")]), w)
+    assert r.status_code == 502 and r.json()["category"] == "refusal"
+    session.rollback()
+    assert _learning_state(session, w) == before
+
+
+def test_huge_integer_score_is_a_g1_fail_not_a_crash():
+    _data, report = check_output(
+        GRADE_RUBRIC, '{"score": 1' + "0" * 400 + ', "verdict": "v", "gaps": ["x"]}')
+    assert report.failed_ids == ("G1",)

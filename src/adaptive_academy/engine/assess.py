@@ -270,6 +270,8 @@ class CheckedGrade:
     confidence_predicted: float | None = None
     baseline_id: int | None = None
     events: list[AgentEvent] = field(default_factory=list)
+    # GRADE's tag, or "GRADE-tag+GRADE_CORRECTION-tag" when the answer was regenerated.
+    prompt_tag: str = GRADE.tag
 
 
 def grade_concept(
@@ -324,14 +326,15 @@ def grade_concept(
     rules_gaps = apply_rules_checks(response, must_include, weak_signs)
     emit("prompt", GRADE.tag)
     system, user = build_grade_prompt(concept.name, kind, criteria, reference, response)
-    answer, _report = checked_completion(
+    answer = checked_completion(
         session, llm, system=system, user=user, rubric=GRADE_RUBRIC, emit=emit,
         ctx=CheckContext(rules_gaps=tuple(rules_gaps)))
     return CheckedGrade(
         concept=concept, kind=kind, response=response, probe=probe,
-        grade=grade_from_dict(answer), rules_gaps=rules_gaps, topic_id=topic_id,
+        grade=grade_from_dict(answer.data), rules_gaps=rules_gaps, topic_id=topic_id,
         rubric_id=rubric_id, anchor_id=anchor_ref_id, item_id=item_id,
-        confidence_predicted=confidence_predicted, baseline_id=baseline_id, events=events)
+        confidence_predicted=confidence_predicted, baseline_id=baseline_id, events=events,
+        prompt_tag=answer.prompt_tag(GRADE))
 
 
 def record_grade(
@@ -372,7 +375,7 @@ def record_grade(
         confidence_predicted=checked.confidence_predicted, confidence_actual=confidence_actual,
         rubric_id=checked.rubric_id, anchor_id=checked.anchor_id,
         baseline_assessment_id=baseline_id, delta=delta,
-        prompt_tag=GRADE.tag)  # the grading prompt, as traced above (not RUBRIC)
+        prompt_tag=checked.prompt_tag)  # the grading prompt(s), as traced (not RUBRIC)
     session.add(assessment)
     session.flush()
     index_assessment(session, assessment, topic_id=checked.topic_id, retriever=retriever)

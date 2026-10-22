@@ -57,9 +57,13 @@ def _text_result(text: str, *, is_error: bool = False) -> dict:
     return out
 
 
-def log_attempt_result(convo: Conversation, emit, args: dict) -> dict:
+def log_attempt_result(convo: Conversation, emit, args: dict, *,
+                       guard: SolutionGuard | None = None) -> dict:
     """Tool body for log_attempt — records the learner's attempt. Extracted so the
-    attempt-gate can be unit-tested without the live SDK."""
+    attempt-gate can be unit-tested without the live SDK. While the solution guard is
+    regenerating a withheld draft it is refused: the tutor can't unlock the gate itself."""
+    if guard is not None and guard.regenerating:
+        return _text_result(guard.refuse_attempt(), is_error=True)
     convo.attempt_logged = True
     emit("tool:log_attempt", str(args.get("summary", "")))
     return _text_result("ok: attempt recorded")
@@ -128,10 +132,15 @@ def run_tutor_turn_sdk(
         covered_block=covered_block,
     )
     prompt = format_history(convo)
+    # Built before the run so the log_attempt tool can see whether a regeneration is under
+    # way. The guard also sees the tutor's last stored message (often the question answered).
+    previous_tutor = next((m.content for m in reversed(convo.messages) if m.role == "tutor"), "")
+    guard = SolutionGuard(concept=concept_name, learner_text=user_text, llm=guard_llm,
+                          emit=emit, previous_tutor=previous_tutor)
 
     @tool("log_attempt", "Record that the learner made a genuine attempt", {"summary": str})
     async def _log_attempt(args):  # noqa: ANN001
-        return log_attempt_result(convo, emit, args)
+        return log_attempt_result(convo, emit, args, guard=guard)
 
     @tool("reveal_solution", "Reveal the full worked solution (only after an attempt)",
           {"text": str})
@@ -172,10 +181,6 @@ def run_tutor_turn_sdk(
         emit("max_steps_exhausted")
         reply = _FALLBACK
     elif not convo.attempt_logged:
-        # concept_name was read before the run: reloading the expired concept here would
-        # flush the tools' pending events and hold the write lock through the check (F5).
-        guard = SolutionGuard(concept=concept_name, learner_text=user_text, llm=guard_llm,
-                              emit=emit)
         reply = _guarded_reply(session, convo, guard, reply, prompt, _run)
 
     tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply)
@@ -198,9 +203,10 @@ def _guarded_reply(session: Session, convo: Conversation, guard: SolutionGuard, 
     """The solution guard on a pre-attempt subscription reply (engine/solution_guard.py).
 
     A withheld draft gets ONE regeneration: a second query whose prompt is the same flattened
-    history with the draft and the correction appended (append-only, like the API path). If
-    that run logs an attempt, its reply is post-attempt and shown; otherwise it is checked
-    too, and a second leak stores GUARD_FALLBACK. Only the returned text is ever stored.
+    history with the draft and the correction appended (append-only, like the API path).
+    During that run log_attempt is refused (so reveal_solution stays gated), and its reply
+    is always checked; a second leak stores GUARD_FALLBACK. Only the returned text is ever
+    stored.
     """
     # Release the write lock before the check (F5): it may make a model call, and the
     # in-process tools may have left events pending.
@@ -219,7 +225,5 @@ def _guarded_reply(session: Session, convo: Conversation, guard: SolutionGuard, 
         return guard.regeneration_failed(exc)
     if not second:
         return guard.regeneration_failed("empty reply")
-    if convo.attempt_logged:
-        return second
     session.commit()
     return second if guard.review(second) == PASS else GUARD_FALLBACK

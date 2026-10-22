@@ -180,7 +180,11 @@ def _is_number(v: Any) -> bool:
 def _unit_number_problem(name: str, v: Any) -> str | None:
     if not _is_number(v):
         return f"{name} is {json.dumps(v)}, not a number"
-    if not math.isfinite(v):
+    try:
+        finite = math.isfinite(v)
+    except OverflowError:  # a JSON integer too large for a float (e.g. 400 digits)
+        return f"{name} is an integer too large to be a score"
+    if not finite:
         return f"{name} is {v}, not a finite number"
     if not 0.0 <= v <= 1.0:
         return f"{name} is {v}, outside [0, 1]"

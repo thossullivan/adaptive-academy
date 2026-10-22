@@ -95,9 +95,9 @@ def review_artifact(
 
     system, user = build_artifact_prompt(deliverable, graded_content)
     trace_prompt(session, ASSESS_ARTIFACT, topic_id=topic_id)
-    answer, _report = checked_completion(
+    answer = checked_completion(
         session, llm, system=system, user=user, rubric=ARTIFACT_RUBRIC, emit=emit)
-    grade = grade_from_dict(answer)
+    grade = grade_from_dict(answer.data)
 
     if artifact_url:
         deliverable.artifact_url = artifact_url
@@ -118,7 +118,7 @@ def review_artifact(
             concept_id=c.id, kind="artifact_review",
             prompt=f"Ship: {deliverable.text[:80]}", response=content[:2000],
             verdict=grade.verdict, score=score, gaps=grade.gaps,
-            prompt_tag=ASSESS_ARTIFACT.tag))
+            prompt_tag=answer.prompt_tag(ASSESS_ARTIFACT)))
     session.add(AgentEvent(
         topic_id=topic_id, kind="artifact:reviewed",
         detail=f"score={score}, {len(concepts)} concept(s)"))

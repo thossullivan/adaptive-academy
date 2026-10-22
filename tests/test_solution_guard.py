@@ -13,9 +13,11 @@ import sqlite3
 import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
+import adaptive_academy.engine.solution_guard as solution_guard
 import adaptive_academy.engine.tutor_sdk as tutor_sdk
 from adaptive_academy.db import ensure_fts
 from adaptive_academy.engine.solution_guard import (
+    ATTEMPT_REFUSED,
     GUARD_FALLBACK,
     build_guard_messages,
     screen_reply,
@@ -40,6 +42,11 @@ SUBTLE_LEAK = ("You take QK^T, divide every entry by sqrt(d_k), softmax each row
 SECOND_LEAK = ("Fine: scores = softmax(QK^T / sqrt(d_k)) and the output is scores times V, "
                "so you are done once you write that down.")
 HINT = "What does each row of QK^T measure, before any normalisation?"
+# Socratic replies that mention "the answer" (review finding: these must never be blocked
+# by a keyword alone).
+SOCRATIC_FINAL = ("Before we get to what the final answer is, what does each row of QK^T "
+                  "measure?")
+SOCRATIC_CORRECT = "I won't say what the correct answer is yet. What would you try first?"
 CODE_LEAK = "Here you go:\n```python\n" + "\n".join(
     f"line_{i} = step({i})" for i in range(8)) + "\n```"
 
@@ -105,7 +112,7 @@ def _stored_text(session) -> str:
 def test_screen_flags_a_long_code_block_and_announced_solutions():
     assert screen_reply(CODE_LEAK) == "code_block"
     assert screen_reply("Here's the full solution: do X then Y.") == "phrase"
-    assert screen_reply("OK. The final answer is 42.") == "phrase"
+    assert screen_reply("Here is the complete implementation.") == "phrase"
     assert screen_reply("Complete solution: first...") == "phrase"
 
 
@@ -114,6 +121,43 @@ def test_screen_passes_hints_and_short_snippets():
     assert screen_reply(SUBTLE_LEAK) is None  # the model check's job, not the screen's
     assert screen_reply("Try printing the shape:\n```python\nprint(q.shape)\n```") is None
     assert screen_reply("What do you think the answer is likely to depend on?") is None
+
+
+@pytest.mark.parametrize("reply", [SOCRATIC_FINAL, SOCRATIC_CORRECT])
+def test_screen_passes_socratic_questions_that_mention_the_answer(reply):
+    assert screen_reply(reply) is None
+
+
+@pytest.mark.parametrize("marker", ["# TODO: fill this in", "    pass", "out = ...", "w = ___"])
+def test_screen_passes_a_fill_in_the_blank_scaffold(marker):
+    lines = ["def attention(q, k, v):", "    d_k = q.shape[-1]", "    scores = q @ k.T",
+             "    scores = scores / d_k ** 0.5", "    weights = softmax(scores)", marker]
+    assert screen_reply("Fill in the gap:\n```python\n" + "\n".join(lines) + "\n```") is None
+    # The same block with the gap filled in is an implementation.
+    filled = lines[:-1] + ["    return weights @ v"]
+    assert screen_reply("```python\n" + "\n".join(filled) + "\n```") == "code_block"
+
+
+def test_guard_messages_bound_a_huge_learner_paste_head_and_tail():
+    paste = "QUESTION-START " + "x" * 200_000 + " ASK-AT-THE-END"
+    [msg] = build_guard_messages("softmax", paste, "draft")
+    text = msg["content"]
+    assert len(text) < 7_000
+    assert "QUESTION-START" in text and "ASK-AT-THE-END" in text
+    assert "characters omitted" in text
+    assert "<<<DRAFT_REPLY>>>\ndraft\n<<<END_DRAFT_REPLY>>>" in text  # the draft is never cut
+
+
+def test_guard_messages_carry_the_previous_tutor_message_and_the_screen_rule():
+    [msg] = build_guard_messages("gradients", "hmm?", "It comes out to -4.",
+                                 previous_tutor="Compute the gradient at w=2.",
+                                 screen_rule="phrase")
+    text = msg["content"]
+    assert ("<<<PREVIOUS_TUTOR_MESSAGE>>>\nCompute the gradient at w=2.\n"
+            "<<<END_PREVIOUS_TUTOR_MESSAGE>>>") in text
+    assert text.splitlines()[-1].startswith("SCREEN: ")
+    [plain] = build_guard_messages("gradients", "hmm?", "draft")
+    assert "PREVIOUS_TUTOR_MESSAGE" not in plain["content"] and "SCREEN:" not in plain["content"]
 
 
 def test_guard_messages_demarcate_and_escape_untrusted_text():
@@ -127,7 +171,7 @@ def test_guard_messages_demarcate_and_escape_untrusted_text():
 
 
 def test_guard_prompt_is_versioned_and_treats_inputs_as_untrusted():
-    assert TUTOR_SOLUTION_GUARD.tag == "tutor.solution_guard@v1"
+    assert TUTOR_SOLUTION_GUARD.tag == "tutor.solution_guard@v2"
     assert "UNTRUSTED" in TUTOR_SOLUTION_GUARD
     assert "—" not in GUARD_FALLBACK and "!" not in GUARD_FALLBACK
 
@@ -310,9 +354,10 @@ def test_text_after_a_blocked_reveal_is_still_checked(session):
     assert SUBTLE_LEAK not in _stored_text(session)
 
 
-def test_a_failing_model_check_falls_back_to_the_screen(session):
-    # The obvious leak is caught by the screen with the model down; the regenerated, clean
-    # reply then passes on the screen alone, and the trace says the model was unavailable.
+def test_a_failing_model_check_falls_back_to_the_screen(session, monkeypatch):
+    # With the model down the screen decides alone: the obvious leak is blocked, the
+    # regenerated, clean reply passes, and the trace says the model was unavailable.
+    monkeypatch.setattr(solution_guard, "_warned_degraded", False)
     convo = _seed(session)
     llm = ScriptedLLMClient([LLMResponse(text=CODE_LEAK), LLMResponse(text=HINT)])
     guard = _BrokenGuard()
@@ -326,8 +371,8 @@ def test_a_failing_model_check_falls_back_to_the_screen(session):
     assert [e.detail for e in result.events if e.kind == "guard:solution_blocked"] == [
         "source=screen:code_block"]
     unavailable = [e.detail for e in result.events if e.kind == "guard:unavailable"]
-    assert len(unavailable) == 1 and unavailable[0].startswith("unknown:")
-    assert guard.calls == 1  # the screen hit needed no model call
+    assert unavailable == ["unknown: model check failed, screen used"] * 2
+    assert guard.calls == 2  # the screen hit still went to the model first
     assert "line_0 = step(0)" not in _stored_text(session)
 
 
@@ -388,6 +433,122 @@ def test_without_a_guard_client_the_screen_still_runs(session):
 
     assert result.reply == HINT
     assert "guard:solution_blocked" in _kinds(result)
+
+
+@pytest.mark.parametrize("reply", [SOCRATIC_FINAL, SOCRATIC_CORRECT])
+def test_socratic_replies_that_mention_the_answer_are_never_blocked(session, reply):
+    # Twice in a row, as in the review finding: before, both tripped the phrase rule and
+    # stored GUARD_FALLBACK with zero model calls.
+    convo = _seed(session)
+    llm = ScriptedLLMClient([LLMResponse(text=reply), LLMResponse(text=reply)])
+    guard = ScriptedLLMClient([_verdict(False), _verdict(False)])
+
+    first = run_tutor_turn(session, convo, "what's the answer?", llm, guard_llm=guard)
+    second = run_tutor_turn(session, convo, "come on, the answer", llm, guard_llm=guard)
+
+    assert first.reply == reply and second.reply == reply
+    assert len(guard.calls) == 2
+    for result in (first, second):
+        assert not {"guard:solution_blocked", "guard:fallback"} & set(_kinds(result))
+
+
+def test_a_screen_hit_goes_to_the_model_which_can_clear_it(session):
+    convo = _seed(session)
+    llm = ScriptedLLMClient([LLMResponse(text=CODE_LEAK)])
+    guard = ScriptedLLMClient([_verdict(False, "an unrelated logging example")])
+
+    result = run_tutor_turn(session, convo, "show me how to log steps", llm, guard_llm=guard)
+
+    assert result.reply == CODE_LEAK
+    assert len(guard.calls) == 1
+    assert "SCREEN: " in guard.calls[0]["messages"][0]["content"]
+    assert [e.detail for e in result.events if e.kind == "guard:solution_checked"] == [
+        "source=model gives_away=false screen=code_block"]
+
+
+def test_the_guard_sees_the_question_being_answered(session):
+    convo = _seed(session)
+    session.add(Message(conversation_id=convo.id, role="tutor",
+                        content="Compute the gradient of f(w) = w^2 - 8w at w = 2."))
+    session.commit()
+    llm = ScriptedLLMClient([LLMResponse(text="It comes out to -4."), LLMResponse(text=HINT)])
+    guard = ScriptedLLMClient([_verdict(True, "states the requested value"), _verdict(False)])
+
+    result = run_tutor_turn(session, convo, "hmm?", llm, guard_llm=guard)
+
+    assert result.reply == HINT
+    sent = guard.calls[0]["messages"][0]["content"]
+    assert ("<<<PREVIOUS_TUTOR_MESSAGE>>>\nCompute the gradient of f(w) = w^2 - 8w at w = 2.\n"
+            "<<<END_PREVIOUS_TUTOR_MESSAGE>>>") in sent
+    assert "<<<LEARNER_MESSAGE>>>\nhmm?\n<<<END_LEARNER_MESSAGE>>>" in sent
+
+
+def test_the_regeneration_cannot_log_an_attempt_and_unlock_the_reveal(session):
+    # The review's reproduction: the regenerated turn calls log_attempt, then
+    # reveal_solution with the answer. The attempt is refused, the reveal stays blocked,
+    # and the reply that follows is still reviewed.
+    convo = _seed(session)
+    llm = _SnapshotScripted([
+        LLMResponse(text=SUBTLE_LEAK),
+        LLMResponse(tool_calls=[
+            ToolCall(id="t1", name="log_attempt", input={"summary": "they tried"}),
+            ToolCall(id="t2", name="reveal_solution", input={"text": SECOND_LEAK}),
+        ]),
+        LLMResponse(text=HINT),
+    ])
+    guard = ScriptedLLMClient([_verdict(True), _verdict(False)])
+
+    result = run_tutor_turn(session, convo, "just tell me", llm, guard_llm=guard)
+
+    assert result.reply == HINT
+    session.refresh(convo)
+    assert convo.attempt_logged is False
+    kinds = _kinds(result)
+    assert "tool:log_attempt:refused" in kinds and "tool:log_attempt" not in kinds
+    assert "tool:reveal_solution:blocked" in kinds
+    assert len(guard.calls) == 2  # the regenerated reply was reviewed
+    results = llm.calls[2]["messages"][-1]["content"]
+    assert results[0] == {"type": "tool_result", "tool_use_id": "t1", "content": ATTEMPT_REFUSED}
+    stored = _stored_text(session)
+    assert SUBTLE_LEAK not in stored and SECOND_LEAK not in stored
+
+
+def test_a_late_draft_leaves_the_regeneration_room_for_a_tool_step(session):
+    # A leaking draft at the last step (6) used to leave one step: a regeneration that used
+    # a tool then ended in max_steps_exhausted.
+    convo = _seed(session)
+    blocked = [LLMResponse(tool_calls=[ToolCall(id=f"r{i}", name="reveal_solution",
+                                                input={"text": "SECRET"})]) for i in range(5)]
+    llm = ScriptedLLMClient([
+        *blocked,
+        LLMResponse(text=SUBTLE_LEAK),  # step 6
+        LLMResponse(tool_calls=[ToolCall(id="r6", name="reveal_solution",
+                                         input={"text": "SECRET"})]),
+        LLMResponse(text=HINT),
+    ])
+    guard = ScriptedLLMClient([_verdict(True), _verdict(False)])
+
+    result = run_tutor_turn(session, convo, "answer", llm, guard_llm=guard)
+
+    assert result.reply == HINT
+    assert "max_steps_exhausted" not in _kinds(result)
+
+
+def test_screen_only_degradation_warns_once_per_process(session, monkeypatch, caplog):
+    from adaptive_academy.llm.usage import UnpricedModelError
+
+    monkeypatch.setattr(solution_guard, "_warned_degraded", False)
+    convo = _seed(session)
+    llm = ScriptedLLMClient([LLMResponse(text=HINT), LLMResponse(text=HINT)])
+    guard = _BrokenGuard(UnpricedModelError("claude-unpriced-test", 5.0))
+
+    with caplog.at_level("WARNING", logger="adaptive_academy.engine.solution_guard"):
+        run_tutor_turn(session, convo, "first", llm, guard_llm=guard)
+        result = run_tutor_turn(session, convo, "second", llm, guard_llm=guard)
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1 and "budget" in warnings[0].getMessage()
+    assert "guard:unavailable" in _kinds(result)  # still traced every time
 
 
 def test_no_write_lock_is_held_during_the_guard_call(tmp_path):
@@ -507,3 +668,44 @@ def test_sdk_tutor_hint_passes_with_one_check(session, monkeypatch):
     result = tutor_sdk.run_tutor_turn_sdk(session, convo, "teach me", guard_llm=guard)
 
     assert result.reply == HINT and len(prompts) == 1 and len(guard.calls) == 1
+
+
+def test_sdk_regeneration_cannot_log_an_attempt_and_unlock_the_reveal(session, monkeypatch):
+    # The same reproduction on the subscription path: during the regeneration run the model
+    # calls the real in-process tool handlers, log_attempt then reveal_solution(text=leak).
+    convo = _seed(session)
+    captured: dict = {}
+    real_server = tutor_sdk.create_sdk_mcp_server
+
+    def capture_server(name, tools):
+        captured.update({t.name: t for t in tools})
+        return real_server(name, tools=tools)
+
+    tool_results: list[dict] = []
+
+    async def fake_query(prompt, options):
+        if "Guard check:" in prompt:  # the regeneration run
+            tool_results.append(await captured["log_attempt"].handler({"summary": "x"}))
+            tool_results.append(
+                await captured["reveal_solution"].handler({"text": SECOND_LEAK}))
+            yield _FakeResult(SECOND_LEAK)  # and it writes the answer as its reply anyway
+        else:
+            yield _FakeResult(SUBTLE_LEAK)
+
+    monkeypatch.setattr(tutor_sdk, "create_sdk_mcp_server", capture_server)
+    monkeypatch.setattr(tutor_sdk, "ResultMessage", _FakeResult)
+    monkeypatch.setattr(tutor_sdk, "query", fake_query)
+    guard = ScriptedLLMClient([_verdict(True), _verdict(True)])
+
+    result = tutor_sdk.run_tutor_turn_sdk(session, convo, "just tell me", guard_llm=guard)
+
+    assert result.reply == GUARD_FALLBACK
+    assert convo.attempt_logged is False
+    refused, reveal = tool_results
+    assert refused.get("is_error") is True and ATTEMPT_REFUSED in str(refused["content"])
+    assert reveal.get("is_error") is True and SECOND_LEAK not in str(reveal["content"])
+    kinds = _kinds(result)
+    assert "tool:log_attempt:refused" in kinds and "tool:reveal_solution:blocked" in kinds
+    assert len(guard.calls) == 2  # the regenerated reply was reviewed, not waved through
+    stored = _stored_text(session)
+    assert SUBTLE_LEAK not in stored and SECOND_LEAK not in stored

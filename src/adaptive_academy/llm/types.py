@@ -56,6 +56,12 @@ _STRUCTURED_DETAILS = {
 }
 
 
+# Stop reasons a corrective retry can't fix: the same request would truncate or be declined
+# again, so callers fail fast instead of paying for a second call (anthropic_client's
+# complete_json and engine/grade_gate.py).
+NO_RETRY_STOP_REASONS = ("max_tokens", "refusal", "model_context_window_exceeded")
+
+
 class StructuredOutputError(ValueError):
     """A structured completion (`complete_json`) ended without a usable tool call.
 

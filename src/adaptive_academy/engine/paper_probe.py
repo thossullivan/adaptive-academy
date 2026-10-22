@@ -181,7 +181,7 @@ def grade_paper_probe(
 
     _emit(session, pp, "prompt", PAPER_PROBE_OUTCOME.tag)
     user = "<<<ANSWERS>>>\n" + _qa_text(pp, answers) + "\n<<<END_ANSWERS>>>"
-    outcome, _report = checked_completion(
+    outcome = checked_completion(
         session, llm, system=PAPER_PROBE_OUTCOME, user=user, rubric=OUTCOME_RUBRIC,
         emit=lambda kind, detail="": _emit(session, pp, kind, detail))
 
@@ -200,7 +200,7 @@ def grade_paper_probe(
         session.add(result.assessment)
         graded.append(result.assessment)
 
-    pp.outcome = outcome
+    pp.outcome = outcome.data
     pp.status = "graded"
     _emit(session, pp, "paper_probe:graded", f"{len(graded)} concept(s)")
     session.add(pp)
