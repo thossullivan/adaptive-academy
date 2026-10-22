@@ -8,7 +8,8 @@
     missingKey,
     providerName,
     setupWarnings,
-    showSetupNotice
+    showSetupNotice,
+    strictnessNote
   } from '$lib/setup';
   import { cn } from '$lib/utils';
   import Badge from './Badge.svelte';
@@ -17,7 +18,8 @@
 
   // Presentational: the page owns loading (see $lib/setup.svelte.ts). Renders the setup-needed
   // card when the API positively reports that it cannot make LLM calls, a smaller card when a
-  // configured model is experimental or the configuration looks mistaken, and nothing otherwise.
+  // configured model is experimental, the configuration looks mistaken, or grading isn't at
+  // the standard level, and nothing otherwise.
   let { status, class: klass = '' }: { status: SetupStatus | null; class?: string } = $props();
 
   // overflow-wrap:anywhere lets a long token (the env var names) break rather than overflow a
@@ -38,7 +40,11 @@
   const keyVar = $derived(missingKey(status));
   const flagged = $derived(experimentalModels(status));
   const configWarnings = $derived(setupWarnings(status));
+  const gradingNote = $derived(strictnessNote(status));
   const models = $derived(Object.entries(status?.models ?? {}));
+  // The smaller card's kind: an experimental model, a likely mistake, or only the grading
+  // level (a deliberate choice, so an info badge on a plain card rather than a warning).
+  const gradingOnly = $derived(!flagged.length && !configWarnings.length);
 </script>
 
 {#snippet modelList()}
@@ -59,6 +65,11 @@
       {warning}
     </p>
   {/each}
+  {#if gradingNote}
+    <p class="mt-3 max-w-prose text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]" data-testid="grading-strictness">
+      {gradingNote}
+    </p>
+  {/if}
 {/snippet}
 
 {#if showSetupNotice(status)}
@@ -124,12 +135,14 @@
   {:else}
     <Card
       pad
-      data-testid={flagged.length ? 'setup-experimental' : 'setup-check'}
+      data-testid={flagged.length ? 'setup-experimental' : gradingOnly ? 'setup-grading' : 'setup-check'}
       role="status"
-      class={cn(warnCard, klass)}
+      class={cn(gradingOnly ? 'rise text-left' : warnCard, klass)}
     >
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <Badge tone="warn" dot>{flagged.length ? 'Experimental model' : 'Check your setup'}</Badge>
+        <Badge tone={gradingOnly ? 'info' : 'warn'} dot>
+          {flagged.length ? 'Experimental model' : gradingOnly ? 'Grading setting' : 'Check your setup'}
+        </Badge>
         <span class="eyebrow min-w-0 [overflow-wrap:anywhere]">LLM backend · {status?.llm_backend ?? 'anthropic'}</span>
       </div>
       {#if flagged.length}

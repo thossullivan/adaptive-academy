@@ -171,14 +171,22 @@ test.describe('phone', () => {
     await expect(input).toBeVisible();
     await expect(send).toBeVisible();
 
+    const attempt = page.getByRole('button', { name: 'Submit attempt' });
+    await expect(attempt).toBeVisible();
+
     const vp = page.viewportSize()!;
     const inputBox = (await input.boundingBox())!;
-    const sendBox = (await send.boundingBox())!;
     expect(inputBox.width).toBeGreaterThanOrEqual(200);
-    expect(sendBox.x).toBeGreaterThanOrEqual(0);
-    expect(sendBox.y).toBeGreaterThanOrEqual(0);
-    expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(vp.width);
-    expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(vp.height);
+    for (const button of [send, attempt]) {
+      const box = (await button.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(vp.width);
+      expect(box.y + box.height).toBeLessThanOrEqual(vp.height);
+      expect(box.height).toBeGreaterThanOrEqual(44); // a comfortable touch target
+    }
+    // The page never scrolls sideways.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(vp.width);
   });
 });
 

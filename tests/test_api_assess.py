@@ -20,7 +20,7 @@ from adaptive_academy.models import (
     TopicFoundation,
     Track,
 )
-from adaptive_academy.prompts import GRADE
+from adaptive_academy.prompts import grade_prompt
 
 
 def _seed_concept(session):
@@ -80,9 +80,9 @@ def test_assessments_expose_the_grading_prompt_tag(session):
     r = client.post(f"/api/concepts/{cid}/assess",
                     json={"kind": "self_explanation", "response": "attention focuses"})
     assert r.status_code == 200, r.text
-    assert r.json()["prompt_tag"] == GRADE.tag
+    assert r.json()["prompt_tag"] == grade_prompt().tag
     history = client.get(f"/api/concepts/{cid}/assessments").json()
-    assert [a["prompt_tag"] for a in history] == [GRADE.tag, None]
+    assert [a["prompt_tag"] for a in history] == [grade_prompt().tag, None]
     # Read-only: a client-sent tag is not an input of the assess route. The rubric is cached
     # now, so this request makes only the grade call (a rubric answer in its place would fail
     # the grade checks and be regenerated, which changes the tag).
@@ -92,7 +92,7 @@ def test_assessments_expose_the_grading_prompt_tag(session):
         [LLMResponse(text=grade_only)])
     r = client.post(f"/api/concepts/{cid}/assess",
                     json={"kind": "self_explanation", "response": "x", "prompt_tag": "fake@v9"})
-    assert r.json()["prompt_tag"] == GRADE.tag
+    assert r.json()["prompt_tag"] == grade_prompt().tag
     app.dependency_overrides.clear()
 
 

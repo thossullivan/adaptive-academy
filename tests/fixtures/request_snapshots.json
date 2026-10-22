@@ -43,8 +43,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "5ad9b48ae89dc582ec683faa1619ef7a5838b88f8ee79766a3e3eb9a86d5c8f3",
-          "chars": 3007
+          "sha256": "f422e1528a490b1a046296596104f8f341065ef7c01a9dca617abc3a674f8613",
+          "chars": 3807
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -155,8 +155,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "5ad9b48ae89dc582ec683faa1619ef7a5838b88f8ee79766a3e3eb9a86d5c8f3",
-          "chars": 3007
+          "sha256": "f422e1528a490b1a046296596104f8f341065ef7c01a9dca617abc3a674f8613",
+          "chars": 3807
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -484,8 +484,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
+          "sha256": "630c127db007dfc5781d03ee21de68a5eb6cc0259cc10fe0e45531b47a3e5a71",
+          "chars": 2943
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -493,11 +493,6 @@
         }
       ],
       "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
-        },
         {
           "name": "reveal_solution",
           "type": "custom",
@@ -533,8 +528,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
-          "chars": 4301
+          "sha256": "cb8903a9c536f758d5a9adb4815bdff429f7cdec01543d0fc80352e9c72d7aa6",
+          "chars": 4303
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -579,8 +574,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
+          "sha256": "630c127db007dfc5781d03ee21de68a5eb6cc0259cc10fe0e45531b47a3e5a71",
+          "chars": 2943
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -588,11 +583,6 @@
         }
       ],
       "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
-        },
         {
           "name": "reveal_solution",
           "type": "custom",
@@ -630,8 +620,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
-          "chars": 4301
+          "sha256": "cb8903a9c536f758d5a9adb4815bdff429f7cdec01543d0fc80352e9c72d7aa6",
+          "chars": 4303
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -672,14 +662,14 @@
         "auth": "authorization-bearer",
         "drops_x_api_key": true
       },
-      "operation": "complete",
-      "role": "reasoning",
-      "model": "anthropic/claude-sonnet-5.5",
-      "max_tokens": 20000,
+      "operation": "complete_json",
+      "role": "copy",
+      "model": "anthropic/claude-haiku-5.5",
+      "max_tokens": 4000,
       "system": [
         {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
+          "sha256": "cb8903a9c536f758d5a9adb4815bdff429f7cdec01543d0fc80352e9c72d7aa6",
+          "chars": 4303
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -688,10 +678,51 @@
       ],
       "tools": [
         {
-          "name": "log_attempt",
+          "name": "emit_solution_check",
           "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
+          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "cbca367c192dc108778180f74ff177c87c51fdfb07f6916b375eef130ba57dd7",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "7da083717244f9468e6a839f70097cd76aebef4bda43f1bb907b9965e5a25b5d",
+          "chars": 3109
         },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
         {
           "name": "reveal_solution",
           "type": "custom",
@@ -721,60 +752,14 @@
         "auth": "authorization-bearer",
         "drops_x_api_key": true
       },
-      "operation": "complete_json",
-      "role": "copy",
-      "model": "anthropic/claude-haiku-5.5",
-      "max_tokens": 4000,
-      "system": [
-        {
-          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
-          "chars": 4301
-        },
-        {
-          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
-          "chars": 38
-        }
-      ],
-      "tools": [
-        {
-          "name": "emit_solution_check",
-          "type": "custom",
-          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
-        }
-      ],
-      "tool_choice": {
-        "type": "auto",
-        "disable_parallel_tool_use": true
-      },
-      "message_roles": [
-        "user"
-      ],
-      "messages_sha256": "189d34dc0c110dc894ce3a6fbef1780ac20de83a63a1a1b65cfdc32ef59b1759",
-      "other_params": {
-        "extra_body": {
-          "provider": {
-            "data_collection": "deny"
-          }
-        }
-      },
-      "cache_control": [
-        "system[0]"
-      ]
-    },
-    {
-      "endpoint": {
-        "base_url": "https://openrouter.ai/api",
-        "auth": "authorization-bearer",
-        "drops_x_api_key": true
-      },
       "operation": "complete",
       "role": "reasoning",
       "model": "anthropic/claude-sonnet-5.5",
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
+          "sha256": "4b82c583fc64c8471d484927bd667eb6d51e1fd76a0564f3835b032e97bb514e",
+          "chars": 2933
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -782,11 +767,6 @@
         }
       ],
       "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
-        },
         {
           "name": "reveal_solution",
           "type": "custom",
@@ -799,58 +779,7 @@
         "assistant",
         "user"
       ],
-      "messages_sha256": "c874f25833cd78155116149d2a730b0eb6b8b9c0725efb14f4e1295c739771c8",
-      "other_params": {
-        "extra_body": {
-          "provider": {
-            "data_collection": "deny"
-          }
-        }
-      },
-      "cache_control": [
-        "top-level",
-        "system[0]"
-      ]
-    },
-    {
-      "endpoint": {
-        "base_url": "https://openrouter.ai/api",
-        "auth": "authorization-bearer",
-        "drops_x_api_key": true
-      },
-      "operation": "complete",
-      "role": "reasoning",
-      "model": "anthropic/claude-sonnet-5.5",
-      "max_tokens": 20000,
-      "system": [
-        {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
-        },
-        {
-          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
-          "chars": 38
-        }
-      ],
-      "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
-        },
-        {
-          "name": "reveal_solution",
-          "type": "custom",
-          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
-        }
-      ],
-      "tool_choice": null,
-      "message_roles": [
-        "user",
-        "assistant",
-        "user"
-      ],
-      "messages_sha256": "34163a85fd7cdbe27ecfc343098eef1b4e61724836cf5b8502edadfe101ad8ec",
+      "messages_sha256": "d9d93a92666aa19178aacaac033f73c4ed19b16044ef4582f85cd751429aeb1c",
       "other_params": {
         "extra_body": {
           "provider": {
@@ -1083,8 +1012,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
+          "sha256": "630c127db007dfc5781d03ee21de68a5eb6cc0259cc10fe0e45531b47a3e5a71",
+          "chars": 2943
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1092,11 +1021,6 @@
         }
       ],
       "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
-        },
         {
           "name": "reveal_solution",
           "type": "custom",
@@ -1126,8 +1050,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
-          "chars": 4301
+          "sha256": "cb8903a9c536f758d5a9adb4815bdff429f7cdec01543d0fc80352e9c72d7aa6",
+          "chars": 4303
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1166,8 +1090,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
+          "sha256": "630c127db007dfc5781d03ee21de68a5eb6cc0259cc10fe0e45531b47a3e5a71",
+          "chars": 2943
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1175,11 +1099,6 @@
         }
       ],
       "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
-        },
         {
           "name": "reveal_solution",
           "type": "custom",
@@ -1211,8 +1130,8 @@
       "max_tokens": 4000,
       "system": [
         {
-          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
-          "chars": 4301
+          "sha256": "cb8903a9c536f758d5a9adb4815bdff429f7cdec01543d0fc80352e9c72d7aa6",
+          "chars": 4303
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1247,14 +1166,14 @@
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
-      "operation": "complete",
-      "role": "reasoning",
-      "model": "claude-sonnet-5-5",
-      "max_tokens": 20000,
+      "operation": "complete_json",
+      "role": "copy",
+      "model": "claude-haiku-5-5",
+      "max_tokens": 4000,
       "system": [
         {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
+          "sha256": "cb8903a9c536f758d5a9adb4815bdff429f7cdec01543d0fc80352e9c72d7aa6",
+          "chars": 4303
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1263,10 +1182,45 @@
       ],
       "tools": [
         {
-          "name": "log_attempt",
+          "name": "emit_solution_check",
           "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
+          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "cbca367c192dc108778180f74ff177c87c51fdfb07f6916b375eef130ba57dd7",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://api.anthropic.com",
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "7da083717244f9468e6a839f70097cd76aebef4bda43f1bb907b9965e5a25b5d",
+          "chars": 3109
         },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
         {
           "name": "reveal_solution",
           "type": "custom",
@@ -1290,54 +1244,14 @@
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
-      "operation": "complete_json",
-      "role": "copy",
-      "model": "claude-haiku-5-5",
-      "max_tokens": 4000,
-      "system": [
-        {
-          "sha256": "350767d476c75a7a2a36924ab1f62f718b9ce43233a369de22958a12da41ea70",
-          "chars": 4301
-        },
-        {
-          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
-          "chars": 38
-        }
-      ],
-      "tools": [
-        {
-          "name": "emit_solution_check",
-          "type": "custom",
-          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
-        }
-      ],
-      "tool_choice": {
-        "type": "auto",
-        "disable_parallel_tool_use": true
-      },
-      "message_roles": [
-        "user"
-      ],
-      "messages_sha256": "189d34dc0c110dc894ce3a6fbef1780ac20de83a63a1a1b65cfdc32ef59b1759",
-      "other_params": {},
-      "cache_control": [
-        "system[0]"
-      ]
-    },
-    {
-      "endpoint": {
-        "base_url": "https://api.anthropic.com",
-        "auth": "x-api-key",
-        "drops_x_api_key": false
-      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
+          "sha256": "4b82c583fc64c8471d484927bd667eb6d51e1fd76a0564f3835b032e97bb514e",
+          "chars": 2933
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -1345,11 +1259,6 @@
         }
       ],
       "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
-        },
         {
           "name": "reveal_solution",
           "type": "custom",
@@ -1362,52 +1271,7 @@
         "assistant",
         "user"
       ],
-      "messages_sha256": "c874f25833cd78155116149d2a730b0eb6b8b9c0725efb14f4e1295c739771c8",
-      "other_params": {},
-      "cache_control": [
-        "top-level",
-        "system[0]"
-      ]
-    },
-    {
-      "endpoint": {
-        "base_url": "https://api.anthropic.com",
-        "auth": "x-api-key",
-        "drops_x_api_key": false
-      },
-      "operation": "complete",
-      "role": "reasoning",
-      "model": "claude-sonnet-5-5",
-      "max_tokens": 20000,
-      "system": [
-        {
-          "sha256": "b641c142da2fd8a95206054d93e0234b33a8569546856d710b0aaa79e9e1acca",
-          "chars": 2645
-        },
-        {
-          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
-          "chars": 38
-        }
-      ],
-      "tools": [
-        {
-          "name": "log_attempt",
-          "type": "custom",
-          "sha256": "1fed75d9dd5a91f3a7c5609c93baee87a4a6fb75fe6cc310d2aef666847a4033"
-        },
-        {
-          "name": "reveal_solution",
-          "type": "custom",
-          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
-        }
-      ],
-      "tool_choice": null,
-      "message_roles": [
-        "user",
-        "assistant",
-        "user"
-      ],
-      "messages_sha256": "34163a85fd7cdbe27ecfc343098eef1b4e61724836cf5b8502edadfe101ad8ec",
+      "messages_sha256": "d9d93a92666aa19178aacaac033f73c4ed19b16044ef4582f85cd751429aeb1c",
       "other_params": {},
       "cache_control": [
         "top-level",

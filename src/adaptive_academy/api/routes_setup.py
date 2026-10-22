@@ -5,6 +5,7 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from adaptive_academy.engine.assess import current_grading_strictness, grading_strictness_problem
 from adaptive_academy.llm.backends import (
     AGENT_SDK_IN_CONTAINER_DETAIL,
     BACKEND_AGENT_SDK,
@@ -45,8 +46,10 @@ class SetupOut(BaseModel):
     # that can't cap an unpriced model, so that model's calls are refused).
     warnings: list[str] = []
     # Other configuration that is probably a mistake: a mistyped AA_LLM_BACKEND, a model id
-    # that isn't an OpenRouter id on the OpenRouter backend.
+    # that isn't an OpenRouter id on the OpenRouter backend, an unknown AA_GRADING_STRICTNESS.
     setup_warnings: list[str] = []
+    # The level answers are graded at (AA_GRADING_STRICTNESS; an unknown value is standard).
+    grading_strictness: Literal["lenient", "standard", "strict"] = "standard"
 
 
 def _experimental_warning(models: dict[str, str], flagged: list[str]) -> str | None:
@@ -62,7 +65,7 @@ def _experimental_warning(models: dict[str, str], flagged: list[str]) -> str | N
 
 
 def _setup_warnings(backend_name: str, models: dict[str, str]) -> list[str]:
-    out = [w for w in [backend_setting_problem()] if w]
+    out = [w for w in [backend_setting_problem(), grading_strictness_problem()] if w]
     if backend_name == BACKEND_OPENROUTER:
         for role, model in models.items():
             if not is_openrouter_slug(model):
@@ -76,12 +79,15 @@ def _setup_warnings(backend_name: str, models: dict[str, str]) -> list[str]:
 @router.get("", response_model=SetupOut)
 def get_setup() -> SetupOut:
     models = resolved_models()
+    grading: dict = {"grading_strictness": current_grading_strictness()}
     if current_backend_name() == BACKEND_AGENT_SDK:
+        # The grading level applies on every backend, and so does its warning.
+        grading["setup_warnings"] = [w for w in [grading_strictness_problem()] if w]
         if agent_sdk_unavailable():
             # The container has no Claude Code: say so, and don't quietly use an API key.
             return SetupOut(llm_backend="agent_sdk", provider="Claude subscription",
                             llm_ready=False, message=AGENT_SDK_IN_CONTAINER_DETAIL,
-                            models=models)
+                            models=models, **grading)
         return SetupOut(
             llm_backend="agent_sdk",
             provider="Claude subscription",
@@ -91,6 +97,7 @@ def get_setup() -> SetupOut:
             message=("Using the Claude Agent SDK backend (your Claude subscription). "
                      "Claude Code must be installed and logged in on this host."),
             models=models,
+            **grading,
         )
     backend = api_backend()
     flagged = experimental_models()
@@ -103,6 +110,7 @@ def get_setup() -> SetupOut:
         # The daily limit only governs API-key calls, so its warnings belong here.
         "warnings": budget_warnings(),
         "setup_warnings": _setup_warnings(backend.name, models),
+        "grading_strictness": grading["grading_strictness"],
     }
     problem = key_problem(backend)
     if problem is None:

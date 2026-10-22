@@ -108,6 +108,48 @@ describe('SetupNotice', () => {
     expect(body).not.toContain('data-testid="setup-notice"');
   });
 
+  it('names a grading level other than standard in its own card', () => {
+    const { body } = render(SetupNotice, {
+      props: { status: { llm_backend: 'anthropic', llm_ready: true, message: 'ok', grading_strictness: 'strict' } }
+    });
+    expect(body).toContain('data-testid="setup-grading"');
+    expect(body).toContain('data-testid="grading-strictness"');
+    expect(body).toContain('Grading setting');
+    expect(body).toContain('AA_GRADING_STRICTNESS');
+    expect(body).not.toContain('Check your setup');
+    expect(body).not.toContain('data-testid="setup-notice"');
+  });
+
+  it('says nothing about grading at standard', () => {
+    const { body } = render(SetupNotice, {
+      props: { status: { llm_backend: 'anthropic', llm_ready: true, message: 'ok', grading_strictness: 'standard' } }
+    });
+    expect(body).not.toContain('grading-strictness');
+    expect(body).not.toContain('setup-grading');
+  });
+
+  it('adds the grading level to the other cards', () => {
+    const warning = "AA_LLM_BACKEND is set to 'openroutr', which is not a backend this app knows.";
+    const check = render(SetupNotice, {
+      props: {
+        status: {
+          llm_backend: 'anthropic',
+          llm_ready: true,
+          message: 'ok',
+          setup_warnings: [warning],
+          grading_strictness: 'lenient'
+        }
+      }
+    }).body;
+    expect(check).toContain('data-testid="setup-check"');
+    expect(check).toContain('data-testid="grading-strictness"');
+    const blocked = render(SetupNotice, {
+      props: { status: { llm_backend: 'anthropic', llm_ready: false, message: 'No key', grading_strictness: 'lenient' } }
+    }).body;
+    expect(blocked).toContain('data-testid="setup-notice"');
+    expect(blocked).toContain('data-testid="grading-strictness"');
+  });
+
   it('gives the experimental label a screen-reader explanation', () => {
     const { body } = render(SetupNotice, { props: { status: experimental } });
     expect(body).toContain('class="sr-only"');

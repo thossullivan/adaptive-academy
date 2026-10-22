@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -23,8 +24,12 @@ from adaptive_academy.models import (
     SourceDoc,
     TopicFoundation,
 )
-from adaptive_academy.prompts import GRADE, PROBE_TEXT, RUBRIC
+from adaptive_academy.prompts import (
+    DEFAULT_GRADING_STRICTNESS, GRADING_STRICTNESS_LEVELS, PROBE_TEXT, RUBRIC, Prompt,
+    grade_prompt,
+)
 from adaptive_academy.engine.untrusted import escape_markers
+from adaptive_academy.settings import settings
 
 # Deterministic band ceilings (a missing required element or a present misconception means the
 # explanation cannot be graded "solid"). Applied as a CEILING, not a subtraction, so the LLM's
@@ -67,6 +72,34 @@ class AnchorError(Exception):
 
 class AssessKindError(ValueError):
     """An assessment kind assess_concept doesn't grade (route maps to HTTP 400)."""
+
+
+# ── Grading strictness (AA_GRADING_STRICTNESS) ───────────────────────────────
+# Rendered into GRADE (prompts.grade_prompt) and named in its tag. It changes how the grader
+# judges coverage and depth; the ceilings above are the same at every level.
+
+# A value worth repeating back in a warning: a short word, never something pasted (a key).
+_STRICTNESS_NAME_LIKE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _-]{0,19}")
+
+
+def current_grading_strictness() -> str:
+    """The configured level: AA_GRADING_STRICTNESS, case and spaces ignored. Blank or unknown
+    grades at standard (grading_strictness_problem says so)."""
+    raw = (settings.grading_strictness or "").strip().lower()
+    return raw if raw in GRADING_STRICTNESS_LEVELS else DEFAULT_GRADING_STRICTNESS
+
+
+def grading_strictness_problem() -> str | None:
+    """A plain warning when AA_GRADING_STRICTNESS holds a value that isn't a level, else None."""
+    raw = (settings.grading_strictness or "").strip()
+    if not raw or raw.lower() in GRADING_STRICTNESS_LEVELS:
+        return None
+    shown = (f"set to '{raw}'"
+             if _STRICTNESS_NAME_LIKE.fullmatch(raw) and not raw.lower().startswith("sk")
+             else "set to a value")
+    return (f"AA_GRADING_STRICTNESS is {shown}, which is not a grading level, so answers are "
+            "graded at standard. Use lenient, standard, or strict (or leave it unset), then "
+            "restart the API.")
 
 
 def level_from_score(score: float) -> tuple[str, float]:
@@ -251,11 +284,14 @@ class AssessmentResult:
 def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
                        reference: str, response: str, *,
                        required: list[str] | None = None,
-                       misconceptions: list[str] | None = None) -> tuple[str, str]:
+                       misconceptions: list[str] | None = None,
+                       strictness: str | None = None) -> tuple[Prompt, str]:
     """`required`: the REQUIRED ELEMENTS (must_include / source-quiz key points, word and
     formula alike); `misconceptions`: the KNOWN MISCONCEPTIONS (weak_signs). Both are always
     listed, "(none)" when empty, so the grader always answers missing_required /
-    misconceptions_committed against exactly these items (GRADE)."""
+    misconceptions_committed against exactly these items (GRADE). The system prompt is GRADE
+    rendered at `strictness` (a level; None means the configured one), and its `.tag` names
+    the level."""
     lines = [f"CONCEPT: {concept_name}", f"PROBE KIND: {kind}", "", "RUBRIC / ANCHOR:"]
     for c in criteria:
         lines.append(f"- {c}")
@@ -269,14 +305,16 @@ def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
     if reference:
         lines.append(f"REFERENCE ANSWER: {reference}")
     lines += ["", "<<<RESPONSE>>>", escape_markers(response or "(empty)"), "<<<END_RESPONSE>>>"]
-    return GRADE, "\n".join(lines)
+    level = current_grading_strictness() if strictness is None else strictness
+    return grade_prompt(level), "\n".join(lines)
 
 
 @dataclass(frozen=True)
 class GradeRequest:
-    """One grader call as grade_concept sends it: the prompt, and the rubric items in it."""
+    """One grader call as grade_concept sends it: the prompt, and the rubric items in it.
+    `system` is GRADE rendered at one strictness level; its `.tag` is what gets recorded."""
 
-    system: str
+    system: Prompt
     user: str
     required: tuple[str, ...]
     misconceptions: tuple[str, ...]
@@ -284,12 +322,14 @@ class GradeRequest:
 
 def grade_request(concept_name: str, kind: str, criteria: list[str], reference: str,
                   response: str, *, must_include: list[str],
-                  weak_signs: list[str]) -> GradeRequest:
-    """The grade prompt for these rubric items (stripped and deduplicated, _items)."""
+                  weak_signs: list[str], strictness: str | None = None) -> GradeRequest:
+    """The grade prompt for these rubric items (stripped and deduplicated, _items), at
+    `strictness` (None: the configured AA_GRADING_STRICTNESS; the grading eval passes its
+    --strictness)."""
     required, misconceptions = _items(must_include), _items(weak_signs)
     system, user = build_grade_prompt(
         concept_name, kind, criteria, reference, response,
-        required=required, misconceptions=misconceptions)
+        required=required, misconceptions=misconceptions, strictness=strictness)
     return GradeRequest(system, user, tuple(required), tuple(misconceptions))
 
 
@@ -307,7 +347,7 @@ def run_grader(session: Session, llm: LLMClient, request: GradeRequest, *,
     """Make the grader call through its output checks (grade_gate.checked_completion: one
     regeneration at most, GradeCheckError when a FAIL survives) and name the enforced gaps.
     Writes nothing but what `emit` and the gate record."""
-    emit("prompt", GRADE.tag)
+    emit("prompt", request.system.tag)
     answer = checked_completion(
         session, llm, system=request.system, user=request.user, rubric=GRADE_RUBRIC,
         emit=emit, ctx=CheckContext(required=request.required,
@@ -371,8 +411,9 @@ class CheckedGrade:
     confidence_predicted: float | None = None
     baseline_id: int | None = None
     events: list[AgentEvent] = field(default_factory=list)
-    # GRADE's tag, or "GRADE-tag+GRADE_CORRECTION-tag" when the answer was regenerated.
-    prompt_tag: str = GRADE.tag
+    # The rendered GRADE's tag ("assess.grade@v7:standard"), or that tag
+    # "+grade.correction@v1" when the answer was regenerated.
+    prompt_tag: str = ""
 
 
 def grade_concept(
@@ -432,7 +473,7 @@ def grade_concept(
         rules_gaps=run.rules_gaps, topic_id=topic_id,
         rubric_id=rubric_id, anchor_id=anchor_ref_id, item_id=item_id,
         confidence_predicted=confidence_predicted, baseline_id=baseline_id, events=events,
-        prompt_tag=run.answer.prompt_tag(GRADE))
+        prompt_tag=run.answer.prompt_tag(request.system))
 
 
 def record_grade(

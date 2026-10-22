@@ -14,7 +14,7 @@ SDK-backed client (LLM, Researcher, Anchor) then uses the subscription. No per-c
 juggling, no lock, no race.
 
 Scope: the no-tools structured-completion path (rubric/grade/curriculum/anchors). The Tutor's
-tool turns (log_attempt / gated reveal_solution) do not come through here: in agent_sdk mode
+tool turns (the gated reveal_solution) do not come through here: in agent_sdk mode
 the conversations route runs them via `engine/tutor_sdk.py` with in-process SDK tools. The
 tool branch in `complete()` is a fallback for any other tool-using caller — a legible
 AgentSDKError with no key, a bridge to the API-key client with one.
@@ -58,6 +58,20 @@ def flatten_messages(messages: list[dict]) -> str:
                        for m in messages)
 
 
+# Isolation for every Agent SDK call, on top of `tools` (built-in tools) and
+# setting_sources=[] (user/project MCP servers on disk). strict_mcp_config makes the CLI load
+# ONLY the MCP servers passed in `mcp_servers` (none, or the tutor's in-process reveal tool):
+# without it the CLI also attaches the account's claude.ai connectors (Gmail, Drive, Notion,
+# ...) and a first-party server, and the tutor and researcher run with bypassPermissions over
+# untrusted web and vault text. The env flag turns the claude.ai connectors off as well.
+# Verified live (claude-agent-sdk 0.2.103): without these the CLI's init listed a claude.ai
+# connector; with them, no MCP servers.
+SDK_ISOLATION: dict = {
+    "strict_mcp_config": True,
+    "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+}
+
+
 class AgentSDKLLMClient:
     """LLMClient over the Claude Agent SDK (subscription auth). Sync, single-turn."""
 
@@ -67,10 +81,11 @@ class AgentSDKLLMClient:
 
     def _options(self, system: str) -> ClaudeAgentOptions:
         # setting_sources=[] isolates the call from the project's CLAUDE.md/skills so they
-        # don't leak into LLM prompts; max_turns=1 + no tools = a single completion.
+        # don't leak into LLM prompts; tools=[] (no built-in tools at all) + max_turns=1 = a
+        # single completion.
         return ClaudeAgentOptions(
             model=self._model, system_prompt=with_today(system),
-            allowed_tools=[], max_turns=1, setting_sources=[])
+            tools=[], allowed_tools=[], max_turns=1, setting_sources=[], **SDK_ISOLATION)
 
     async def _run(self, system: str, prompt: str) -> tuple[str, str | None]:
         text, stop_reason = "", None

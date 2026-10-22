@@ -5,10 +5,12 @@
   import { topics } from '$lib/topics.svelte';
   import { toasts } from '$lib/toast.svelte';
   import type { Conversation, EventOut, MessageOut, Topic } from '$lib/types';
-  import { Badge, Select, Button } from '$lib/ui';
+  import { Badge, Select } from '$lib/ui';
   import MemoryDisclosure from '$lib/ui/MemoryDisclosure.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
   import { scrollBehavior } from '$lib/utils';
+  import Composer from './Composer.svelte';
+  import { attemptSavedMessage, messageNote, storedAttempt } from './attempt';
 
   const topicId = Number($page.params.id);
   let topic = $state<Topic | null>(null);
@@ -20,9 +22,11 @@
   let input = $state('');
   let busy = $state(false);
   let showEvents = $state(false);
+  let isMac = $state(false);
   let scroller: HTMLDivElement | null = null;
 
   onMount(async () => {
+    isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
     topic = topics.list.find((t) => t.id === topicId) ?? (await api.getTopic(topicId).catch(() => null));
     if (topic && topics.currentId !== topicId) topics.select(topicId);
     if (topic?.concepts.length) {
@@ -65,29 +69,47 @@
     return conversation;
   }
 
-  async function send() {
+  /** Send the draft; `attempt` is the Submit attempt button (checked before the tutor replies). */
+  async function send(attempt = false) {
     previewSeq++; // a preview still in flight must not overwrite the reply's levels
     if (conceptId == null || !input.trim() || busy) return;
     const forConcept = conceptId;
     const content = input;
     input = '';
-    messages = [...messages, { role: 'user', content }];
+    messages = [...messages, { role: 'user', content, is_attempt: attempt }];
     busy = true;
     await tick();
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: scrollBehavior() });
+    let convoId: number | null = null;
     try {
       const convo = await ensureConversation(forConcept);
-      const r = await api.sendMessage(convo.id, content);
-      messages = [...messages, { role: 'tutor', content: r.reply, memory: r.memory ?? [] }];
+      convoId = convo.id;
+      const r = await api.sendMessage(convo.id, content, attempt);
+      const sent = { ...messages[messages.length - 1], attempt_outcome: r.attempt_outcome ?? null };
+      messages = [...messages.slice(0, -1), sent, { role: 'tutor', content: r.reply, memory: r.memory ?? [] }];
       events = r.events;
       levels = { assistance: r.assistance_level, challenge: r.challenge_level, attempt: r.attempt_logged };
       await tick();
       scroller?.scrollTo({ top: scroller.scrollHeight, behavior: scrollBehavior() });
     } catch (e) {
-      // Nothing was sent (e.g. no API key): take the bubble back, keep the draft, say why.
-      messages = messages.slice(0, -1);
-      input = content;
-      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
+      const error = e instanceof Error ? e.message : String(e);
+      // An attempt is stored before the tutor runs, so the reply can fail after it was saved.
+      const id = convoId;
+      // The page's transcript before this send: everything but the optimistic bubble.
+      const priorCount = messages.length - 1;
+      const stored =
+        attempt && id != null ? await storedAttempt(() => api.getConversation(id), content, priorCount) : null;
+      if (stored) {
+        const c = stored.conversation;
+        messages = [...messages.slice(0, -1), stored.message];
+        levels = { assistance: c.assistance_level, challenge: c.challenge_level, attempt: c.attempt_logged };
+        toasts.show(attemptSavedMessage(error, stored.message.attempt_outcome ?? null), 'error', 12000);
+      } else {
+        // Nothing was sent (e.g. no API key): take the bubble back, keep the draft, say why.
+        messages = messages.slice(0, -1);
+        input = content;
+        toasts.show(error, 'error', 9000);
+      }
     } finally {
       busy = false;
     }
@@ -139,22 +161,26 @@
         <div class="mt-12 text-center">
           <h2 class="text-2xl text-fg">{conceptName || 'Pick a concept to begin'}</h2>
           <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-            The tutor adapts to your knowledge estimate and won't hand you answers — log an attempt and it'll open up
-            the worked solution.
+            The tutor adapts to your knowledge estimate and won't hand you answers. Write your attempt and press Submit
+            attempt, and it can show you the worked solution.
           </p>
         </div>
       {/if}
       {#each messages as m, i (i)}
+        {@const note = messageNote(m)}
         <div class="flex {m.role === 'user' ? 'justify-end' : 'justify-start'}">
-          <div class="flex max-w-[80%] flex-col">
+          <div class="flex max-w-[80%] flex-col {m.role === 'user' ? 'items-end' : ''}">
             <div
               class="whitespace-pre-wrap rounded-[var(--radius-lg)] px-4 py-3 text-sm leading-relaxed {m.role ===
               'user'
                 ? 'rounded-br-sm bg-surface-3 text-fg'
                 : 'rounded-bl-sm border border-border bg-surface text-fg-dim'}"
             >
-              {#if m.role === 'tutor'}<div class="eyebrow mb-1.5 !text-[0.55rem] text-accent">tutor</div>{:else}<span class="sr-only">You: </span>{/if}{m.content}
+              {#if m.role === 'tutor'}<div class="eyebrow mb-1.5 !text-[0.55rem] text-accent">tutor</div>{:else if m.is_attempt}<div class="eyebrow mb-1.5 !text-[0.55rem] text-muted" aria-hidden="true">your attempt</div><span class="sr-only">Your attempt: </span>{:else}<span class="sr-only">You: </span>{/if}{m.content}
             </div>
+            {#if note}
+              <p class="mt-1.5 text-right text-xs leading-relaxed text-muted" data-testid="attempt-note">{note}</p>
+            {/if}
             {#if m.role === 'tutor'}
               <MemoryDisclosure hits={m.memory ?? []} />
             {/if}
@@ -176,29 +202,7 @@
 
   <!-- Composer -->
   <div class="border-t border-border bg-[color-mix(in_oklab,var(--surface)_40%,transparent)] px-6 py-4 backdrop-blur md:px-10">
-    <form
-      class="mx-auto flex max-w-3xl items-end gap-2"
-      onsubmit={(e) => {
-        e.preventDefault();
-        send();
-      }}
-    >
-      <textarea
-        bind:value={input}
-        rows="1"
-        aria-label="Message the tutor"
-        placeholder="Ask the tutor… (it won't just hand you the answer)"
-        disabled={busy || conceptId == null}
-        onkeydown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            send();
-          }
-        }}
-        class="max-h-40 min-h-[2.75rem] flex-1 resize-none rounded-[var(--radius-md)] border border-control-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint transition-colors hover:border-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)] disabled:opacity-50"
-      ></textarea>
-      <Button type="submit" size="lg" disabled={busy || conceptId == null || !input.trim()}>Send</Button>
-    </form>
+    <Composer bind:value={input} disabled={busy || conceptId == null} {isMac} onsend={() => send()} onattempt={() => send(true)} />
     {#if events.length}
       <div class="mx-auto mt-2 max-w-3xl">
         <button type="button" class="eyebrow transition-colors hover:text-fg-dim" aria-expanded={showEvents} onclick={() => (showEvents = !showEvents)}>

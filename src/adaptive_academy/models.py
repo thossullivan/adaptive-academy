@@ -73,8 +73,27 @@ class Message(SQLModel, table=True):
     conversation_id: int = Field(foreign_key="conversation.id")
     role: str  # "user" | "tutor"
     content: str
+    # True when the learner sent it with Submit attempt (engine/attempt.py). NULL for every
+    # other message, including those from before the Attempt button.
+    is_attempt: Optional[bool] = None
     created_at: datetime = Field(default_factory=_now)
     conversation: Optional[Conversation] = Relationship(back_populates="messages")
+
+
+class Attempt(SQLModel, table=True):
+    """One message the learner submitted as an attempt, and whether the check accepted it.
+
+    Written by engine/attempt.py before the tutor runs. An accepted row is what opens the
+    conversation's reveal gate (Conversation.attempt_logged); a rejected one is kept too, so
+    the learner's history is honest. An attempt the check could not judge writes no row.
+    """
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    conversation_id: int = Field(foreign_key="conversation.id")
+    concept_id: int = Field(foreign_key="concept.id")
+    message_id: int = Field(foreign_key="message.id")
+    accepted: bool
+    created_at: datetime = Field(default_factory=_now)
 
 
 class RoleplaySession(SQLModel, table=True):
@@ -326,10 +345,11 @@ class Assessment(SQLModel, table=True):
     baseline_assessment_id: Optional[int] = Field(default=None, foreign_key="assessment.id")
     delta: Optional[float] = None
     # The `Prompt.tag` ("name@vN") of the prompt whose model call produced this grade, so
-    # grades can be compared across prompt versions. When the grader's first answer failed its
-    # output checks and was regenerated (engine/grade_gate.py), both tags joined by "+":
-    # "assess.grade@v3+grade.correction@v1". NULL = unknown: rows written before the column
-    # existed, or not produced by a model call.
+    # grades can be compared across prompt versions. GRADE from v7 on also names its
+    # AA_GRADING_STRICTNESS level: "assess.grade@v7:strict". When the grader's first answer
+    # failed its output checks and was regenerated (engine/grade_gate.py), both tags joined by
+    # "+": "assess.grade@v7:strict+grade.correction@v1". NULL = unknown: rows written before
+    # the column existed, or not produced by a model call.
     prompt_tag: Optional[str] = None
     created_at: datetime = Field(default_factory=_now)
 

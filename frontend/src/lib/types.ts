@@ -29,7 +29,17 @@ export interface MemoryHit {
   score: number;
   source_ref: string;
 }
-export interface MessageOut { role: 'user' | 'tutor'; content: string; memory?: MemoryHit[]; }
+/** What happened to a message sent with Submit attempt (engine/attempt.py). */
+export type AttemptOutcome = 'accepted' | 'rejected' | 'unverified' | 'already_logged';
+export interface MessageOut {
+  role: 'user' | 'tutor'; content: string; memory?: MemoryHit[];
+  /** Sent with Submit attempt. */
+  is_attempt?: boolean;
+  /** The stored verdict on a submitted attempt (GET only): null when there is none. */
+  attempt_accepted?: boolean | null;
+  /** Set on the page from the send's reply; the API does not store it on the message. */
+  attempt_outcome?: AttemptOutcome | null;
+}
 export interface Conversation {
   id: number; concept_id: number; attempt_logged: boolean;
   assistance_level: string; challenge_level: string; messages: MessageOut[];
@@ -38,6 +48,8 @@ export interface Conversation {
 export type ConversationPreview = Omit<Conversation, 'id' | 'messages'>;
 export interface SendMessageOut {
   reply: string; attempt_logged: boolean;
+  /** Only for a message sent with Submit attempt; null otherwise. */
+  attempt_outcome: AttemptOutcome | null;
   assistance_level: string; challenge_level: string; events: EventOut[]; memory: MemoryHit[];
 }
 export type SendResult = SendMessageOut;
@@ -71,7 +83,10 @@ export interface SetupStatus {
   /** Config problems that change behaviour without blocking it (e.g. a daily limit that
    *  can't cap an unpriced model, so that model's calls are refused). */
   warnings?: string[];
+  /** The level answers are graded at (AA_GRADING_STRICTNESS); absent from an older API. */
+  grading_strictness?: GradingStrictness;
 }
+export type GradingStrictness = 'lenient' | 'standard' | 'strict';
 export interface CreateTopicBody { title: string; goal: string; prior_knowledge?: string; time_budget?: string; }
 export interface Item { id: number; text: string; type: string; status: string; position: number; is_remediation?: boolean; }
 export interface Remediation { items: Item[]; events: EventOut[]; }
@@ -377,7 +392,7 @@ export interface QualityGuard {
   fallbacks: number;
   unavailable: number;
   unavailable_share: number | null;
-  /** Attempt checks on log_attempt that could not run (no attempt recorded). */
+  /** Checks on submitted attempts that could not run (no attempt recorded). */
   attempt_unavailable: number;
 }
 export interface QualityWindow {

@@ -16,9 +16,6 @@ Items marked **good first issue** are self-contained and a good way into the cod
   until the first graded assessment. Start ungraded concepts at a neutral level instead.
 - **Reach roleplay and paper probe from a topic.** They are only reachable from a program
   milestone today, so a single topic (and the demo) can't use them.
-- **Check that an attempt is a real attempt.** Today the tutor counts any message that looks
-  like a try ("I think it's X") as an attempt, which opens the full solution. A check on the
-  attempt's substance would make the gate harder to talk past.
 - **Each learner's own time zone.** "Today" comes from the server's clock. Using the browser's
   time zone would give the right date on a shared or remote server.
 - **Published container image.** The release workflow builds `ghcr.io/thossullivan/adaptive-academy`

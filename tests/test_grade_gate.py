@@ -36,7 +36,7 @@ from adaptive_academy.models import (
     RoleplaySession, RoleplayTurn, Rubric, Topic, Track,
 )
 from adaptive_academy.prompts import (
-    ASSESS_ARTIFACT, GRADE, GRADE_CORRECTION, PF_CONSOLIDATE, TEACH, Prompt,
+    ASSESS_ARTIFACT, grade_prompt, GRADE_CORRECTION, PF_CONSOLIDATE, TEACH, Prompt,
 )
 
 _NONE_NAMED = {"missing_required": [], "misconceptions_committed": []}  # GRADE v6 fields
@@ -172,21 +172,21 @@ class Grader:
 
 
 GRADERS = {
-    "assess": Grader(_run_assess, [(GOOD_GRADE, BAD_GRADE, "G1")], 1, 0.7, GRADE),
+    "assess": Grader(_run_assess, [(GOOD_GRADE, BAD_GRADE, "G1")], 1, 0.7, grade_prompt()),
     "teach": Grader(_run_teach, [(GOOD_TEACH, BAD_TEACH, "F1")], 1, 0.75, TEACH),
     "consolidate": Grader(_run_consolidate, [(GOOD_PF, BAD_PF, "P1")], 1, 0.7,
                           PF_CONSOLIDATE),
     "artifact": Grader(_run_artifact, [(GOOD_GRADE, BAD_GRADE_MECH, "G5")], 1, 0.7,
                        ASSESS_ARTIFACT),
-    "decay": Grader(_run_decay, [(GOOD_GRADE, BAD_GRADE_MECH, "G5")], 1, 0.7, GRADE),
+    "decay": Grader(_run_decay, [(GOOD_GRADE, BAD_GRADE_MECH, "G5")], 1, 0.7, grade_prompt()),
     # Multi-step graders: step i < 2 grades concept c1 / c2 (one row each); step 2 is the
     # debrief, which writes no row.
     "roleplay": Grader(_run_roleplay, [(GOOD_GRADE, BAD_GRADE, "G1"),
                                        (GOOD_GRADE, BAD_GRADE_MECH, "G5"),
-                                       (GOOD_OUTCOME, BAD_OUTCOME, "J1")], 2, 0.7, GRADE),
+                                       (GOOD_OUTCOME, BAD_OUTCOME, "J1")], 2, 0.7, grade_prompt()),
     "paper_probe": Grader(_run_paper_probe, [(GOOD_GRADE, BAD_GRADE, "G1"),
                                              (GOOD_GRADE, BAD_GRADE, "G1"),
-                                             (GOOD_OUTCOME, BAD_OUTCOME, "J1")], 2, 0.7, GRADE),
+                                             (GOOD_OUTCOME, BAD_OUTCOME, "J1")], 2, 0.7, grade_prompt()),
 }
 STEP_CASES = [(name, i) for name, g in GRADERS.items() for i in range(len(g.steps))]
 
@@ -443,7 +443,7 @@ def test_other_stop_reasons_are_checked_normally(session):
     w = _world(session)
     llm = _script([LLMResponse(text=GOOD_GRADE, stop_reason="end_turn")])
     _run_assess(session, w, llm)
-    assert session.exec(select(Assessment)).one().prompt_tag == GRADE.tag
+    assert session.exec(select(Assessment)).one().prompt_tag == grade_prompt().tag
 
 
 def test_route_reports_refusal_not_invalid_output(session):

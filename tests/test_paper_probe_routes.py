@@ -6,7 +6,7 @@ from adaptive_academy.api.app import create_app
 from adaptive_academy.api.deps import get_llm, get_session
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse
-from adaptive_academy.prompts import GRADE
+from adaptive_academy.prompts import grade_prompt
 from adaptive_academy.models import (
     Concept, KnowledgeEstimate, Milestone, Program, ProgramTopicLink, Rubric, Topic, Track,
 )
@@ -107,7 +107,7 @@ def test_full_flow_paste_answer_submit(session):
     assert graded["outcome"]["result"] == "sharp"
     assert graded["scorecard"][0]["concept"] == "Self-attention"
     assert graded["scorecard"][0]["score"] == 0.8
-    assert graded["scorecard"][0]["prompt_tag"] == GRADE.tag
+    assert graded["scorecard"][0]["prompt_tag"] == grade_prompt().tag
 
 
 def test_answer_rejected_when_not_answering(session):

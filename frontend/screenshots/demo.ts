@@ -20,7 +20,7 @@ type ConversationOut = {
   attempt_logged: boolean;
   assistance_level: string;
   challenge_level: string;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: string; is_attempt: boolean }[];
 };
 
 export type Demo = { id: number; causal: { id: number; name: string } };
@@ -58,14 +58,15 @@ export async function settle(page: Page) {
 
 /**
  * Open the Tutor on the demo's causal-self-attention conversation and replay it.
- * `send` types and sends one learner message; the default fills it in one step.
+ * `send` types and sends one learner message (with Submit attempt when `attempt`); the
+ * default fills it in one step.
  */
 export async function replayTutor(
   page: Page,
   demo: Demo,
-  send: (text: string) => Promise<void> = async (text) => {
+  send: (text: string, attempt: boolean) => Promise<void> = async (text, attempt) => {
     await page.getByPlaceholder(/Ask the tutor/).fill(text);
-    await page.getByRole('button', { name: 'Send' }).click();
+    await page.getByRole('button', { name: attempt ? 'Submit attempt' : 'Send' }).click();
   }
 ) {
   let conversation: ConversationOut | null = null;
@@ -78,11 +79,10 @@ export async function replayTutor(
   expect(conversation, 'the demo has a causal-self-attention tutor conversation').toBeTruthy();
   const convo = conversation!;
   const replies = convo.messages.filter((m) => m.role === 'tutor');
-  // The demo logs the attempt on the learner message that starts "Attempt:" (see demo.py), so
-  // the header reads "no attempt yet" until the reply to that message, as it did live.
+  // The demo's learner submitted one message as an attempt (is_attempt, see demo.py), so the
+  // header reads "no attempt yet" until the reply to that message, as it did live.
   const learner = convo.messages.filter((m) => m.role === 'user');
-  const attemptAfter = (i: number) =>
-    convo.attempt_logged && learner.slice(0, i + 1).some((m) => m.content.startsWith('Attempt:'));
+  const attemptAfter = (i: number) => convo.attempt_logged && learner.slice(0, i + 1).some((m) => m.is_attempt);
   await page.route('**/api/conversations', (route) =>
     route.request().method() === 'POST' ? route.fulfill({ json: { ...convo, messages: [] } }) : route.fallback()
   );
@@ -93,6 +93,7 @@ export async function replayTutor(
       json: {
         reply: replies[i].content,
         attempt_logged: attemptAfter(i),
+        attempt_outcome: learner[i].is_attempt ? 'accepted' : null,
         assistance_level: convo.assistance_level,
         challenge_level: convo.challenge_level,
         events: [],
@@ -105,7 +106,7 @@ export async function replayTutor(
   const composer = page.getByPlaceholder(/Ask the tutor/);
   for (const m of learner) {
     const sent = replied;
-    await send(m.content);
+    await send(m.content, m.is_attempt);
     await expect.poll(() => replied).toBe(sent + 1);
     await expect(composer).toBeEnabled();
   }

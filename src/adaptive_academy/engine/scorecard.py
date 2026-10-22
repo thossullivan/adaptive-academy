@@ -51,7 +51,7 @@ Tutor guard (guard:* AgentEvents, engine/solution_guard.py):
   unavailable_share guard:unavailable over checks: the model check failed and the keyword
                     screen decided alone. Only reply checks emit guard:unavailable (one per
                     guard:solution_checked at most), so this stays within 0 to 1.
-  attempt_unavailable  guard:attempt_unavailable: the attempt check on log_attempt could
+  attempt_unavailable  guard:attempt_unavailable: the check on a submitted attempt could
                     not run, so an attempt was not recorded (fail closed). Counted on its
                     own, with no share: it has nothing to do with replies checked.
 

@@ -63,8 +63,10 @@ a link or some text to be reviewed. Steps the Assessor added to fill gaps are ma
 **Tutor.** A tutor that works through one concept with you by asking questions. Pick the
 concept at the top. The header shows how much help it's giving (**assistance**), how hard it's
 pushing (**challenge**), and whether you've made an attempt yet (**no attempt yet** /
-**attempt logged**). The page always opens a new session, so in the demo it starts empty.
-Sending a message needs a key. Nothing is saved until you send something.
+**attempt logged**). The message box has two buttons: **Send** (or Enter) to ask or talk,
+and **Submit attempt** (or Ctrl+Enter, Cmd+Enter on a Mac) when the message is your attempt.
+The page always opens a new session, so in the demo it starts empty. Sending a message needs
+a key. Nothing is saved until you send something.
 
 **Assess.** Tests where you have to produce the answer yourself: **Self-explanation**,
 **Calibration** (say how sure you are first), **Artifact review**, and **Source quiz**. Each
@@ -136,12 +138,19 @@ Open **Today** and work from top to bottom:
 
 ### Why the tutor holds back the answer
 
-The tutor has two tools, `log_attempt` and `reveal_solution`. A full worked solution can only
-come through `reveal_solution`, and the code blocks it until you've made an attempt in that
-conversation (`reveal_gate` in `src/adaptive_academy/engine/tools.py`). Because this is in the
-code and not just the prompt, it holds no matter how you ask. Before you try, you get
-questions and hints. Once you've written a real attempt, the header changes to
-**attempt logged** and the tutor can show the full solution.
+A full worked solution can only come through the tutor's `reveal_solution` tool, and the
+code blocks it until you've made an attempt in that conversation (`reveal_gate` in
+`src/adaptive_academy/engine/tools.py`). Because this is in the code and not just the prompt,
+it holds no matter how you ask. Before you try, you get questions and hints.
+
+You decide what counts as your attempt, not the tutor. Write it and press **Submit attempt**.
+Before the tutor replies, the app checks that the message has some substance: your
+reasoning, a step, or code, right or wrong (`engine/attempt.py`). If it does, the header
+changes to **attempt logged** and the tutor can show the full solution. A bare guess ("is it
+42?"), a request, or a question is not logged. You get a short note under your message
+asking for your reasoning or a first step, and you can submit again. Every submitted attempt
+is kept, logged or not. If you write an attempt with **Send**, the tutor will suggest the
+button.
 
 The tutor could still write the answer in an ordinary reply, so every reply before an
 attempt is checked too (`engine/solution_guard.py`). A second, cheap model call reads the
@@ -151,8 +160,8 @@ also gives it away, you get a fixed prompt to share your first step instead.
 
 The research behind the app says that trying to answer before you're shown how (even if you
 get it wrong) leads to deeper learning than reading the answer first. After each turn,
-**what the agent did** under the message box lists the tool calls, including any
-`tool:reveal_solution:blocked`.
+**what the agent did** under the message box lists what happened, including the attempt
+check (`attempt:accepted` or `attempt:rejected`) and any `tool:reveal_solution:blocked`.
 
 ## 5. How a concept earns "solid"
 
@@ -173,6 +182,9 @@ must cover and the common misconceptions. The grader reads your answer, judges e
 by meaning (any wording or notation counts), and names the ones you missed and any
 misconception you actually committed (quoting one to reject it doesn't count). The code then
 caps the score: at most 0.70 if a key idea is missing, at most 0.50 for a misconception.
+To make the grader more forgiving or stricter about what counts as covering an idea, set
+`AA_GRADING_STRICTNESS` to `lenient` or `strict` ([setup](SETUP.md#grading-strictness)). The
+caps stay the same at every level.
 
 The grade is the estimate the Assessor saves when it grades one of these: a self-explanation,
 calibration, or source quiz, a decay check, a roleplay, or a paper probe. A new concept gets a

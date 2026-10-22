@@ -11,7 +11,9 @@
   // Map an event kind to a tone color.
   function tone(kind: string): string {
     if (kind.includes('error') || kind.includes('blocked')) return 'var(--danger)';
-    if (kind.includes('allowed') || kind.includes('graded') || kind.includes('done')) return 'var(--success)';
+    if (kind.includes('allowed') || kind.includes('graded') || kind.includes('done') || kind === 'attempt:accepted')
+      return 'var(--success)';
+    if (kind === 'attempt:rejected' || kind === 'attempt:unverified') return 'var(--warn)';
     if (kind.startsWith('tool:') || kind.includes('llm')) return 'var(--accent)';
     if (kind.includes('subagent') || kind.includes('research')) return 'var(--info)';
     return 'var(--muted)';

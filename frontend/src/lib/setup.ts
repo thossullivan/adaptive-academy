@@ -1,4 +1,4 @@
-import type { SetupStatus } from './types';
+import type { GradingStrictness, SetupStatus } from './types';
 
 /** Block LLM-backed actions only when the API positively reports it can't run them.
  *  Unknown (still loading, or an older API without /api/setup) never blocks. */
@@ -42,8 +42,35 @@ export function setupWarnings(status: SetupStatus | null): string[] {
   return status?.setup_warnings ?? [];
 }
 
+/** The level answers are graded at; standard when the API doesn't say. */
+export function gradingStrictness(status: SetupStatus | null): GradingStrictness {
+  return status?.grading_strictness ?? 'standard';
+}
+
+const STRICTNESS_NOTES: Record<Exclude<GradingStrictness, 'standard'>, string> = {
+  lenient:
+    'Grading is set to lenient (AA_GRADING_STRICTNESS). The grader gives credit for a key idea ' +
+    'you show briefly or informally. The score limits for a missing idea or a misconception are ' +
+    'the same at every level.',
+  strict:
+    'Grading is set to strict (AA_GRADING_STRICTNESS). The grader gives credit for a key idea ' +
+    'only when you state it or show it clearly, and expects you to explain how it works, not ' +
+    'just name it. The score limits for a missing idea or a misconception are the same at every level.'
+};
+
+/** A plain sentence about the grading level, or null at standard (nothing to say). */
+export function strictnessNote(status: SetupStatus | null): string | null {
+  const level = gradingStrictness(status);
+  return level === 'standard' ? null : STRICTNESS_NOTES[level];
+}
+
 /** The setup card shows when LLM calls are blocked, when a configured model is experimental,
- *  or when the configuration looks mistaken. */
+ *  when the configuration looks mistaken, or when grading isn't at the standard level. */
 export function showSetupNotice(status: SetupStatus | null): boolean {
-  return llmBlocked(status) || experimentalModels(status).length > 0 || setupWarnings(status).length > 0;
+  return (
+    llmBlocked(status) ||
+    experimentalModels(status).length > 0 ||
+    setupWarnings(status).length > 0 ||
+    strictnessNote(status) !== null
+  );
 }

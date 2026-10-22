@@ -19,6 +19,8 @@ services:
       # Optional daily spending limit (USD); blank = no limit. "Today" is the container's
       # day, which is UTC unless TZ is set.
       AA_DAILY_BUDGET_USD: ${AA_DAILY_BUDGET_USD:-}
+      # Optional grading strictness: lenient, standard or strict; blank = standard.
+      AA_GRADING_STRICTNESS: ${AA_GRADING_STRICTNESS:-}
       # Optional IANA time zone from .env (e.g. America/Los_Angeles) for "today" in the
       # spending limit and in the date the agents are told; blank = UTC. The base image
       # ships tzdata, so any zone name works.

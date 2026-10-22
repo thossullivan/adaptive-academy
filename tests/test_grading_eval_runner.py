@@ -391,3 +391,102 @@ def test_rows_from_another_run_on_the_same_file_are_not_counted(tmp_path):
     rows, last = run_eval._usage_since(engine, 0, feature="eval_grading:mine")
     assert [r.feature for r in rows] == ["eval_grading:mine"] * 2
     assert last == 3
+
+
+# ── Grading strictness ───────────────────────────────────────────────────────
+
+def _report_meta(tmp_path) -> dict:
+    (report_path,) = (tmp_path / "out").glob("*.json")
+    return json.loads(report_path.read_text())["meta"]
+
+
+def test_the_report_and_header_record_the_configured_strictness(tmp_path, small_cases,
+                                                                 monkeypatch):
+    from adaptive_academy.prompts import grade_prompt
+    from adaptive_academy.settings import settings
+
+    monkeypatch.setattr(settings, "grading_strictness", "lenient")
+    llm = _BilledClient(_responses())
+    lines: list[str] = []
+    assert _run(_args(tmp_path, small_cases, "--live"), llm=llm,
+                out=lines.append) == run_eval.EXIT_OK
+    meta = _report_meta(tmp_path)
+    assert meta["strictness"] == "lenient"
+    assert meta["strictness_source"] == "AA_GRADING_STRICTNESS"
+    assert meta["prompt_tag"] == "assess.grade@v7:lenient"
+    assert "Grading strictness: lenient (AA_GRADING_STRICTNESS)" in "\n".join(lines)
+    assert llm.calls[0]["system"] == grade_prompt("lenient")
+
+
+def test_the_strictness_option_overrides_the_setting_for_the_run(tmp_path, small_cases,
+                                                                 monkeypatch):
+    from adaptive_academy.prompts import grade_prompt
+    from adaptive_academy.settings import settings
+
+    monkeypatch.setattr(settings, "grading_strictness", "lenient")
+    llm = _BilledClient(_responses())
+    lines: list[str] = []
+    args = _args(tmp_path, small_cases, "--live", "--strictness", "strict")
+    assert _run(args, llm=llm, out=lines.append) == run_eval.EXIT_OK
+    meta = _report_meta(tmp_path)
+    assert meta["strictness"] == "strict" and meta["strictness_source"] == "--strictness"
+    assert meta["prompt_tag"] == "assess.grade@v7:strict"
+    assert "Grading strictness: strict (--strictness)" in "\n".join(lines)
+    # Every call, the regeneration included, sent GRADE at the requested level.
+    cases = load_cases(small_cases)
+    req = grade_request(cases[0].concept, cases[0].kind, list(cases[0].criteria),
+                        cases[0].reference, cases[0].answer,
+                        must_include=list(cases[0].required),
+                        weak_signs=list(cases[0].misconceptions), strictness="strict")
+    assert llm.calls[0]["system"] == req.system
+    assert all(c["system"] == grade_prompt("strict") for c in llm.calls)
+    # The app's own setting is untouched.
+    assert settings.grading_strictness == "lenient"
+
+
+def test_the_estimate_prints_the_strictness_too(tmp_path, small_cases):
+    lines: list[str] = []
+    args = _args(tmp_path, small_cases, "--strictness", "strict")
+    assert _run(args, llm=ScriptedLLMClient([]), out=lines.append) == run_eval.EXIT_REFUSED
+    assert "Grading strictness: strict (--strictness)" in "\n".join(lines)
+
+
+def test_the_runners_levels_are_the_apps():
+    from adaptive_academy.prompts import GRADING_STRICTNESS_LEVELS
+
+    assert run_eval.STRICTNESS_LEVELS == GRADING_STRICTNESS_LEVELS
+
+
+def test_an_unknown_setting_is_named_in_the_header(tmp_path, small_cases, monkeypatch):
+    from adaptive_academy.settings import settings
+
+    monkeypatch.setattr(settings, "grading_strictness", "harsh")
+    lines: list[str] = []
+    _run(_args(tmp_path, small_cases), llm=ScriptedLLMClient([]), out=lines.append)
+    text = "\n".join(lines)
+    assert "Grading strictness: standard (AA_GRADING_STRICTNESS)" in text
+    assert "'harsh'" in text
+
+
+def test_an_unknown_strictness_option_is_refused_by_the_parser():
+    with pytest.raises(SystemExit):
+        run_eval.parse_args(["--strictness", "harsh"])
+
+
+
+def test_a_second_run_on_the_same_scratch_file_is_not_refused(tmp_path):
+    # Regression: the column check imported the app before isolation, so every run after
+    # the first (when the scratch file existed) was refused as "already imported".
+    import subprocess as sp
+
+    db = tmp_path / "usage.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE llmusage (id INTEGER PRIMARY KEY)")
+    proc = sp.run([sys.executable, "-c",
+                   "import sys; from evals.grading import run_eval as r; "
+                   "from pathlib import Path; "
+                   f"print(r.check_scratch_db(Path({str(db)!r}))); "
+                   "print('adaptive_academy' in sys.modules)"],
+                  capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.split() == ["None", "False"]

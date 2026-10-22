@@ -28,7 +28,7 @@ from adaptive_academy.models import (
     AgentEvent, Assessment, Concept, KnowledgeEstimate, ReferenceAnchor, Rubric, SourceDoc,
     Topic, Track,
 )
-from adaptive_academy.prompts import GRADE, GRADE_CORRECTION
+from adaptive_academy.prompts import grade_prompt, GRADE_CORRECTION
 
 GOLDEN = Path(__file__).parent / "golden" / "rubric_items"
 
@@ -167,7 +167,7 @@ def test_unknown_item_is_regenerated_with_its_rule_named(session, field, rule):
     bad = _grade(0.7, gaps=["g"], **{field: ["momentum"]})
     a, llm = _assess(session, concept, "x", bad, _grade(0.9))
     assert a.score == 0.9
-    assert a.prompt_tag == f"{GRADE.tag}+{GRADE_CORRECTION.tag}"
+    assert a.prompt_tag == f"{grade_prompt().tag}+{GRADE_CORRECTION.tag}"
     correction = llm.calls[1]["messages"][-1]["content"]
     assert f"- {rule}:" in correction and "momentum" in correction
 

@@ -45,24 +45,21 @@ def test_reveal_blocked_before_attempt(session):
     assert any("reveal_solution:blocked" in e.kind for e in result.events)
 
 
-def test_attempt_then_reveal_allowed(session):
+def test_submitted_attempt_then_reveal_allowed(session):
     convo = _seed(session)
     llm = ScriptedLLMClient([
-        LLMResponse(tool_calls=[ToolCall(id="t1", name="log_attempt",
-                                         input={"summary": "tried QK^T"})]),
         LLMResponse(tool_calls=[ToolCall(id="t2", name="reveal_solution",
                                          input={"text": "FULL ANSWER 42"})]),
-        LLMResponse(text="Great — the full picture: FULL ANSWER 42"),
     ])
-    # The solution guard's attempt check confirms the learner's message is an attempt.
+    # The learner pressed Submit attempt; the guard's attempt check confirms it is one.
     guard = ScriptedLLMClient([LLMResponse(text=json.dumps(
         {"gives_away_solution": False, "learner_attempted": True, "reason": "reasoned"}))])
     result = run_tutor_turn(session, convo, "I think attention is softmax(QK^T)V", llm,
-                            guard_llm=guard)
+                            guard_llm=guard, attempt=True)
 
     assert convo.attempt_logged is True
     assert "FULL ANSWER 42" in result.reply
-    assert any(e.kind == "tool:log_attempt" for e in result.events)
+    assert any(e.kind == "attempt:accepted" for e in result.events)
 
 
 def test_plain_reply_persists_messages(session):
@@ -83,8 +80,8 @@ def test_max_steps_exhaustion_falls_back(session):
     convo = _seed(session)
     # Model calls a tool on every step and never returns text -> loop exhausts.
     llm = ScriptedLLMClient([
-        LLMResponse(tool_calls=[ToolCall(id=f"t{i}", name="log_attempt",
-                                         input={"summary": "x"})])
+        LLMResponse(tool_calls=[ToolCall(id=f"t{i}", name="reveal_solution",
+                                         input={"text": "x"})])
         for i in range(_MAX_STEPS)
     ])
     result = run_tutor_turn(session, convo, "...", llm)

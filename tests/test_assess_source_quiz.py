@@ -6,7 +6,7 @@ from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
     Concept, KnowledgeEstimate, ReferenceAnchor, SourceDoc, Topic, Track,
 )
-from adaptive_academy.prompts import GRADE
+from adaptive_academy.prompts import grade_prompt
 
 
 def _seed(session):
@@ -43,7 +43,7 @@ def test_source_quiz_grades_against_anchor(session):
     assert res.assessment.rubric_id is None
     assert res.assessment.prompt == anchor.question
     assert len(llm.calls) == 1  # NO rubric call — only the grade call
-    assert res.assessment.prompt_tag == GRADE.tag
+    assert res.assessment.prompt_tag == grade_prompt().tag
 
 
 def test_source_quiz_omitted_key_point_named_by_the_grader_is_capped(session):

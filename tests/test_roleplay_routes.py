@@ -6,7 +6,7 @@ from adaptive_academy.api.app import create_app
 from adaptive_academy.api.deps import get_llm, get_session
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse
-from adaptive_academy.prompts import GRADE
+from adaptive_academy.prompts import grade_prompt
 from adaptive_academy.models import (
     Concept, KnowledgeEstimate, Milestone, Program, ProgramTopicLink, Rubric, Track, Topic,
 )
@@ -91,7 +91,7 @@ def test_full_roleplay_flow(session):
     assert body["status"] == "graded"
     assert body["outcome"]["result"] == "demo booked"
     assert body["scorecard"][0]["concept"] == "SPIN"
-    assert body["scorecard"][0]["prompt_tag"] == GRADE.tag
+    assert body["scorecard"][0]["prompt_tag"] == grade_prompt().tag
 
 
 def test_turn_route_reports_an_unrecorded_turn_legibly(session):
