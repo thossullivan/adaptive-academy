@@ -1,0 +1,22 @@
+{
+  "note": "Live run: concept 'Gradient of the cost'. The learner's formula is correct (ASCII, w for theta, n for m, the MSE convention without 1/2); the rubric's must_include was written as Unicode formulas. Literal matching once reported all five as omitted and capped the score. Now every item goes to the grader as a REQUIRED ELEMENT; the grader judges them by meaning, names none missing, and nothing is capped.",
+  "response": "For least squares the gradient is (2/n) X^T (Xw - y)",
+  "must_include": [
+    "Xᵀ(Xθ − y)",
+    "(1/m)Xᵀ(Xθ − y)",
+    "residual r = Xθ − y",
+    "∇J(θ)",
+    "½‖Xθ − y‖²"
+  ],
+  "weak_signs": [],
+  "grader": {
+    "score": 0.9,
+    "mechanism_present": true,
+    "verdict": "Correct gradient in other notation and the MSE convention.",
+    "gaps": [],
+    "missing_required": [],
+    "misconceptions_committed": []
+  },
+  "final_score": 0.9,
+  "gaps": []
+}

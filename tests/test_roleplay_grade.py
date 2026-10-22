@@ -10,6 +10,7 @@ from adaptive_academy.models import (
     ProgramTopicLink, RoleplaySession, RoleplayTurn, Assessment,
 )
 from adaptive_academy.engine.roleplay import grade_roleplay
+from adaptive_academy.prompts import GRADE, ROLEPLAY_GRADE
 from adaptive_academy.engine.gates import evaluate_concept, evaluate_milestone_readonly
 
 
@@ -55,7 +56,7 @@ def test_grade_writes_one_assessment_per_concept_and_outcome(session):
     p, m, c, rp = _ended_session(session)
     # 1 grade call (GRADE, via assess_concept) + 1 outcome call (ROLEPLAY_GRADE).
     grade_json = json.dumps({"score": 0.8, "verdict": "solid", "mechanism_present": True,
-                             "gaps": []})
+                             "gaps": [], "missing_required": [], "misconceptions_committed": []})
     outcome_json = json.dumps({"result": "demo booked", "summary": "Good implication q."})
     llm = ScriptedLLMClient([LLMResponse(text=grade_json), LLMResponse(text=outcome_json)])
     out = grade_roleplay(session, rp, llm=llm)
@@ -67,6 +68,9 @@ def test_grade_writes_one_assessment_per_concept_and_outcome(session):
     assert rp.outcome["result"] == "demo booked"
     rows = session.exec(select(Assessment).where(Assessment.roleplay_session_id == rp.id)).all()
     assert len(rows) == 1
+    # The per-concept grade came from assess_concept's GRADE; ROLEPLAY_GRADE only wrote the
+    # session outcome, so it must not be the tag on the graded row.
+    assert rows[0].prompt_tag == GRADE.tag != ROLEPLAY_GRADE.tag
 
 
 def test_roleplay_at_threshold_counts_as_artifact_ok():
@@ -81,10 +85,25 @@ def test_roleplay_below_threshold_does_not_count_as_artifact_ok():
     assert ev.artifact_ok is False
 
 
+def test_roleplay_concept_grade_enforces_what_the_grader_names_missing(session):
+    # Per-concept roleplay grades go through assess_concept, so the rubric's must_include is
+    # a REQUIRED ELEMENT and a missing one caps the concept's grade at 0.70.
+    p, m, c, rp = _ended_session(session)
+    grade_json = json.dumps({"score": 0.9, "verdict": "solid", "mechanism_present": True,
+                             "gaps": [], "missing_required": ["implication"],
+                             "misconceptions_committed": []})
+    outcome_json = json.dumps({"result": "demo booked", "summary": "Good implication q."})
+    llm = ScriptedLLMClient([LLMResponse(text=grade_json), LLMResponse(text=outcome_json)])
+    (a,) = grade_roleplay(session, rp, llm=llm)
+    assert a.score == 0.7
+    assert a.gaps == ["omitted required element: implication"]
+    assert "REQUIRED ELEMENTS:\n- implication" in llm.calls[0]["messages"][0]["content"]
+
+
 def test_graded_roleplay_reaches_milestone_gate_artifact_axis(session):
     p, m, c, rp = _ended_session(session)
     grade_json = json.dumps({"score": 0.8, "verdict": "solid", "mechanism_present": True,
-                             "gaps": []})
+                             "gaps": [], "missing_required": [], "misconceptions_committed": []})
     outcome_json = json.dumps({"result": "demo booked", "summary": "Good implication q."})
     llm = ScriptedLLMClient([LLMResponse(text=grade_json), LLMResponse(text=outcome_json)])
     grade_roleplay(session, rp, llm=llm)

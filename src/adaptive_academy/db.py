@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Iterator
 import sqlite3
+from pathlib import Path
 
 from sqlalchemy import Engine, event
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -66,6 +67,36 @@ def _set_sqlite_pragma(dbapi_connection, _):
     cursor.execute("PRAGMA journal_mode=WAL")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
+
+
+# The migrations shipped with this version of the app (repo root in dev, /app in the image).
+ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
+
+
+def db_revision_problem(db_engine: Engine | None = None,
+                        script_dir: Path = ALEMBIC_DIR) -> str | None:
+    """A plain warning when the database's migration revision isn't this version's newest
+    (a host db the migrations weren't run on: new columns are missing, so usage records fail
+    to write), else None. Never raises: a check that can't run says nothing. A database with
+    no migration record at all (made by create_all, never migrated) is not flagged."""
+    try:
+        from alembic.runtime.migration import MigrationContext
+        from alembic.script import ScriptDirectory
+
+        if not script_dir.is_dir():
+            return None
+        heads = set(ScriptDirectory(str(script_dir)).get_heads())
+        with (db_engine or engine).connect() as connection:
+            current = set(MigrationContext.configure(connection).get_current_heads())
+    except Exception:  # noqa: BLE001 - a startup diagnostic must never stop the app
+        logger.debug("migration revision check skipped", exc_info=True)
+        return None
+    if not current or current == heads:
+        return None
+    return (f"The database is at migration {', '.join(sorted(current))} but this version of "
+            f"the app expects {', '.join(sorted(heads))}. Usage records and the daily "
+            "spending limit won't work until you run `uv run alembic upgrade head` and "
+            "restart the API.")
 
 
 def create_db_and_tables() -> None:

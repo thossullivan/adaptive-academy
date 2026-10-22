@@ -2,8 +2,9 @@ import json
 
 from sqlmodel import Session, select
 
-from adaptive_academy.engine.assess import assess_concept
+from adaptive_academy.engine.assess import CheckedGrade, grade_concept, record_grade
 from adaptive_academy.engine.gates import milestone_load_bearing
+from adaptive_academy.engine.grade_gate import checked_completion
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import (
     ALREADY_COVERED_MARKER,
@@ -14,6 +15,7 @@ from adaptive_academy.engine.memory import (
     remove_source,
     topic_id_for_concept,
 )
+from adaptive_academy.engine.output_checks import OUTCOME_RUBRIC
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
@@ -160,12 +162,31 @@ def grade_paper_probe(
     llm: LLMClient,
     retriever: Retriever | None = None,
 ) -> list[Assessment]:
-    """Blind grade: reuse assess_concept per exercised load-bearing concept, then an outcome."""
+    """Blind grade: reuse the assess grader per exercised load-bearing concept, then an outcome.
+
+    Fails closed: every concept grade and the debrief go through their output checks BEFORE
+    any stored evidence is touched, so a grade rejected by the checks (GradeCheckError) leaves
+    the prior grade, the estimates and the probe status exactly as they were."""
     milestone = session.get(Milestone, pp.milestone_id)
     concepts = milestone_load_bearing(session, milestone)
     answers = _answers(session, pp)
 
-    # Idempotent re-grade: clear any prior evidence for this probe so retries never double-count.
+    checked: list[CheckedGrade] = []
+    for c in concepts:
+        text = _qa_text(pp, answers, c.id)
+        if not text:
+            continue  # the paper's questions never exercised this concept — no evidence
+        checked.append(grade_concept(session, c, "paper_probe", text, llm=llm))
+        session.commit()  # trace events only; releases the write lock before the next call (F5)
+
+    _emit(session, pp, "prompt", PAPER_PROBE_OUTCOME.tag)
+    user = "<<<ANSWERS>>>\n" + _qa_text(pp, answers) + "\n<<<END_ANSWERS>>>"
+    outcome = checked_completion(
+        session, llm, system=PAPER_PROBE_OUTCOME, user=user, rubric=OUTCOME_RUBRIC,
+        emit=lambda kind, detail="": _emit(session, pp, kind, detail))
+
+    # Idempotent re-grade: clear any prior evidence for this probe so retries never
+    # double-count. Only now that every grade passed its checks.
     for old in session.exec(
             select(Assessment).where(Assessment.paper_probe_id == pp.id)).all():
         remove_source(session, f"assessment:{old.id}#q")
@@ -173,27 +194,13 @@ def grade_paper_probe(
         session.delete(old)
 
     graded: list[Assessment] = []
-    for c in concepts:
-        text = _qa_text(pp, answers, c.id)
-        if not text:
-            continue  # the paper's questions never exercised this concept — no evidence
-        result = assess_concept(
-            session,
-            c,
-            "paper_probe",
-            text,
-            llm=llm,
-            retriever=retriever,
-        )
+    for g in checked:
+        result = record_grade(session, g, retriever=retriever)
         result.assessment.paper_probe_id = pp.id
         session.add(result.assessment)
         graded.append(result.assessment)
 
-    _emit(session, pp, "prompt", PAPER_PROBE_OUTCOME.tag)
-    user = "<<<ANSWERS>>>\n" + _qa_text(pp, answers) + "\n<<<END_ANSWERS>>>"
-    resp = llm.complete(system=PAPER_PROBE_OUTCOME,
-                        messages=[{"role": "user", "content": user}], tools=[])
-    pp.outcome = json.loads(extract_json(resp.text))
+    pp.outcome = outcome.data
     pp.status = "graded"
     _emit(session, pp, "paper_probe:graded", f"{len(graded)} concept(s)")
     session.add(pp)

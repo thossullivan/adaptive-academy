@@ -7,8 +7,9 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 
-# Current Claude 5 family. Override per install with AA_MODEL_REASONING / AA_MODEL_COPY when
-# Anthropic retires a model, instead of waiting for a code release.
+# Current Claude 5 family: the Anthropic backend's defaults (llm/backends.py holds each
+# backend's own). Override per install with AA_MODEL_REASONING / AA_MODEL_COPY when Anthropic
+# retires a model, instead of waiting for a code release.
 DEFAULT_MODEL_REASONING = "claude-sonnet-5-5"
 DEFAULT_MODEL_COPY = "claude-haiku-5-5"
 
@@ -27,14 +28,15 @@ class Settings(BaseSettings):
     # points this at the baked-in SvelteKit build; absent in host dev, so no-op there.
     frontend_dist: str = "frontend/build"
     # Model ids by role (env AA_MODEL_REASONING / AA_MODEL_COPY), resolved per call by
-    # llm.registry.get_model. Blank means "use the default". The fields are not named
+    # llm.registry.get_model. Blank (the default) means "the backend's default model": the
+    # Anthropic and OpenRouter backends name the same model differently. The fields are not named
     # model_* because `model_copy` would shadow pydantic's BaseModel.model_copy().
     # The alias is the only env / .env name read (an alias bypasses env_prefix). Neither the
     # bare field name nor populate_by_name is used: the first lets a stray REASONING_MODEL in
     # the shell beat .env, the second makes AA_REASONING_MODEL work too. Code and tests can
     # still pass `reasoning_model=` to the constructor (see settings_customise_sources).
-    reasoning_model: str = Field(DEFAULT_MODEL_REASONING, validation_alias="AA_MODEL_REASONING")
-    copy_model: str = Field(DEFAULT_MODEL_COPY, validation_alias="AA_MODEL_COPY")
+    reasoning_model: str = Field("", validation_alias="AA_MODEL_REASONING")
+    copy_model: str = Field("", validation_alias="AA_MODEL_COPY")
 
     @field_validator("reasoning_model", "copy_model", mode="before")
     @classmethod

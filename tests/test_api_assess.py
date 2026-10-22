@@ -10,6 +10,7 @@ from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
     AgentEvent,
+    Assessment,
     Concept,
     KnowledgeEstimate,
     Milestone,
@@ -19,6 +20,7 @@ from adaptive_academy.models import (
     TopicFoundation,
     Track,
 )
+from adaptive_academy.prompts import GRADE
 
 
 def _seed_concept(session):
@@ -41,7 +43,8 @@ def _seed_concept(session):
 def _llm():
     rubric = json.dumps({"criteria": ["c"], "must_include": ["softmax"],
                          "strong_signs": [], "weak_signs": [], "source_refs": []})
-    grade = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"]})
+    grade = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"],
+                        "missing_required": ["softmax"], "misconceptions_committed": []})
     return ScriptedLLMClient([LLMResponse(text=rubric), LLMResponse(text=grade)])
 
 
@@ -65,11 +68,40 @@ def test_assess_then_history(session):
     app.dependency_overrides.clear()
 
 
+def test_assessments_expose_the_grading_prompt_tag(session):
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_llm] = lambda: _llm()
+    cid = _seed_concept(session)
+    # A row from before the column existed (or written without a model): tag unknown.
+    session.add(Assessment(concept_id=cid, kind="self_explanation", prompt="p", score=0.5))
+    session.commit()
+    client = TestClient(app)
+
+    r = client.post(f"/api/concepts/{cid}/assess",
+                    json={"kind": "self_explanation", "response": "attention focuses"})
+    assert r.status_code == 200, r.text
+    assert r.json()["prompt_tag"] == GRADE.tag
+    history = client.get(f"/api/concepts/{cid}/assessments").json()
+    assert [a["prompt_tag"] for a in history] == [GRADE.tag, None]
+    # Read-only: a client-sent tag is not an input of the assess route. The rubric is cached
+    # now, so this request makes only the grade call (a rubric answer in its place would fail
+    # the grade checks and be regenerated, which changes the tag).
+    grade_only = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"],
+                             "missing_required": [], "misconceptions_committed": []})
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient(
+        [LLMResponse(text=grade_only)])
+    r = client.post(f"/api/concepts/{cid}/assess",
+                    json={"kind": "self_explanation", "response": "x", "prompt_tag": "fake@v9"})
+    assert r.json()["prompt_tag"] == GRADE.tag
+    app.dependency_overrides.clear()
+
+
 def test_artifact_review_probe_is_the_shipped_signal_not_a_grade(session):
     # An artifact review lights "shipped"; if it also wrote the estimate, one high-scoring
     # review would be both the grade and its own corroboration ("solid" from one action).
     app.dependency_overrides[get_session] = lambda: session
-    grade = json.dumps({"score": 0.9, "verdict": "good", "gaps": [], "mechanism_present": True})
+    grade = json.dumps({"score": 0.9, "verdict": "good", "gaps": [], "mechanism_present": True,
+                        "missing_required": [], "misconceptions_committed": []})
     app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient([LLMResponse(text=grade)])
     cid = _seed_concept(session)
     client = TestClient(app)

@@ -1,0 +1,9 @@
+{
+  "score": 0.7,
+  "verdict": "Mostly right.",
+  "gaps": [
+    "skips the scaling"
+  ],
+  "missing_required": [],
+  "misconceptions_committed": []
+}

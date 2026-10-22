@@ -1,0 +1,10 @@
+{
+  "score": 0.7,
+  "mechanism_present": true,
+  "verdict": "Mostly right.",
+  "gaps": [
+    "skips the scaling"
+  ],
+  "missing_required": "scaling by sqrt(d_k)",
+  "misconceptions_committed": null
+}

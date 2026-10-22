@@ -95,6 +95,8 @@ def _grade_response(*, score: float = 0.8, verdict: str = "solid") -> LLMRespons
                 "verdict": verdict,
                 "gaps": [],
                 "mechanism_present": True,
+                "missing_required": [],
+                "misconceptions_committed": [],
             }
         )
     )

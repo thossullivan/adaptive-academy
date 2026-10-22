@@ -20,6 +20,7 @@ from adaptive_academy.models import (
     Topic,
     Track,
 )
+from adaptive_academy.prompts import GRADE, PF_CONSOLIDATE, TEACH
 
 
 class FixedLLM:
@@ -42,7 +43,8 @@ class RouterLLM:
                                "weak_signs": [], "source_refs": []})
         elif "skeptical grader" in s:
             text = json.dumps({"score": 0.5, "verdict": "partial recall", "gaps": [],
-                               "confidence_actual": 0.5})
+                               "confidence_actual": 0.5,
+                               "missing_required": [], "misconceptions_committed": []})
         else:
             text = "{}"
         return LLMResponse(text=text, tool_calls=[])
@@ -103,6 +105,8 @@ def test_grade_decay_check_computes_decay_and_reschedules(session):
     session.refresh(prompt)
     assert prompt.last_result == "decayed"
     assert result.assessment.kind == "recall"
+    # Recall is graded by assess_concept's GRADE, not the DECAY_RECALL probe text.
+    assert result.assessment.prompt_tag == GRADE.tag
 
 
 # ─── Productive Failure ──────────────────────────────────────────────────────
@@ -129,6 +133,8 @@ def test_consolidate_persists_productive_failure_assessment(session):
     assert result.assessment.kind == "productive_failure"
     assert result.assessment.prompt == "the problem"
     assert result.assessment.response == "my attempt"
+    # The consolidation prompt graded the attempt (PF_GENERATE only wrote the problem).
+    assert result.assessment.prompt_tag == PF_CONSOLIDATE.tag
 
 
 # ─── Teach-It ────────────────────────────────────────────────────────────────
@@ -147,4 +153,5 @@ def test_grade_teaching_persists_and_has_taught(session):
     result = grade_teaching(session, concept, "Here is how attention works…", llm=fake)
     assert result.score == 0.75 and result.gaps == ["edge cases"]
     assert result.assessment.kind == "teach"
+    assert result.assessment.prompt_tag == TEACH.tag
     assert has_taught(session, concept.id) is True

@@ -18,6 +18,11 @@ test('usage page shows recorded spend, breakdowns, and the unset limit', async (
   await expect(byFeature.getByText('Research')).toBeVisible();
   await expect(byFeature.getByText('Curriculum')).toBeVisible();
   await expect(byFeature.getByText('price unknown')).toBeVisible(); // the assess row
+  if (!isPhone()) {
+    // Prompt-cache read share per feature (hidden at phone width, like the token column).
+    await expect(byFeature.getByText('64% cached')).toBeVisible(); // tutor: 36k of 56k
+    await expect(byFeature.getByText('0% cached').first()).toBeVisible();
+  }
 
   const byModel = page.getByTestId('usage-by-model');
   await expect(byModel.getByText('claude-sonnet-4-6')).toBeVisible();

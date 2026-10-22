@@ -256,6 +256,7 @@ class AssessmentOut(BaseModel):
     confidence_actual: Optional[float] = None
     delta: Optional[float] = None
     estimate_level: Optional[str] = None
+    prompt_tag: Optional[str] = None  # grading prompt version; None = unknown (older row)
 
 
 class RubricOut(BaseModel):
@@ -572,6 +573,7 @@ class ScorecardRow(BaseModel):
     score: float
     verdict: str
     gaps: list[str]
+    prompt_tag: Optional[str] = None
 
 
 class RoleplaySessionOut(BaseModel):

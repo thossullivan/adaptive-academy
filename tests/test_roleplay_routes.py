@@ -6,6 +6,7 @@ from adaptive_academy.api.app import create_app
 from adaptive_academy.api.deps import get_llm, get_session
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse
+from adaptive_academy.prompts import GRADE
 from adaptive_academy.models import (
     Concept, KnowledgeEstimate, Milestone, Program, ProgramTopicLink, Rubric, Track, Topic,
 )
@@ -72,7 +73,8 @@ def test_full_roleplay_flow(session):
     pid, mid = _seed_materialized(session)
     brief = {"persona": "VP", "goal": "resist", "situation": "call",
              "hidden_objections": [], "win_conditions": [], "difficulty": "low"}
-    grade = {"score": 0.8, "verdict": "solid", "mechanism_present": True, "gaps": []}
+    grade = {"score": 0.8, "verdict": "solid", "mechanism_present": True, "gaps": [],
+             "missing_required": [], "misconceptions_committed": []}
     outcome = {"result": "demo booked", "summary": "ok"}
     client = _client(session, [LLMResponse(text=json.dumps(brief)),      # director
                                LLMResponse(text="Who is this? [[END]]"),  # persona turn (ends)
@@ -89,6 +91,7 @@ def test_full_roleplay_flow(session):
     assert body["status"] == "graded"
     assert body["outcome"]["result"] == "demo booked"
     assert body["scorecard"][0]["concept"] == "SPIN"
+    assert body["scorecard"][0]["prompt_tag"] == GRADE.tag
 
 
 def test_turn_route_reports_an_unrecorded_turn_legibly(session):

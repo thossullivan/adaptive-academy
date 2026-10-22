@@ -1,0 +1,10 @@
+{
+  "score": 0.9,
+  "mechanism_present": false,
+  "verdict": "Fluent but no causal chain.",
+  "gaps": [
+    "no mechanism"
+  ],
+  "missing_required": [],
+  "misconceptions_committed": []
+}

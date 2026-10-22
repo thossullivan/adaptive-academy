@@ -38,6 +38,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     AA_UID=1000 \
     AA_GID=1000 \
     AA_FRONTEND_DIST=/app/frontend/build \
-    AA_DATABASE_URL=sqlite:////data/adaptive_academy.db
+    AA_DATABASE_URL=sqlite:////data/adaptive_academy.db \
+    AA_IN_CONTAINER=1
 EXPOSE 8000
 ENTRYPOINT ["/entrypoint.sh"]

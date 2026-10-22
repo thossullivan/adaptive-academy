@@ -34,8 +34,22 @@ def test_uses_complete_json_when_client_supports_it():
     assert f.called == ({"type": "object"}, "emit")  # forwarded schema + tool name
 
 
+PHASES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "overview": {"type": "string"},
+        "phases": {"type": "array", "items": {
+            "type": "object", "properties": {"title": {"type": "string"}},
+            "required": ["title"]}},
+    },
+    "required": ["overview", "phases"],
+}
+
+
 def test_falls_back_to_text_parse_without_structured_support():
+    # The text answer is checked against the schema too (tests/test_structured_schema_check.py),
+    # so the schema here is a real one: a bare {"type": "object"} can't be sent or checked.
     f = TextOnlyFake({"overview": "y", "phases": [{"title": "P1"}]})
     out = structured_json(
-        f, "sys", [{"role": "user", "content": "u"}], schema={"type": "object"}, tool_name="emit")
+        f, "sys", [{"role": "user", "content": "u"}], schema=PHASES_SCHEMA, tool_name="emit")
     assert out["overview"] == "y" and out["phases"][0]["title"] == "P1"

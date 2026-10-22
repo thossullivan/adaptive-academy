@@ -12,10 +12,20 @@ def _no_model_env(monkeypatch):
     monkeypatch.delenv("AA_MODEL_COPY", raising=False)
 
 
-def test_defaults_are_the_current_claude_5_family():
+# Unset settings stay blank: blank means "the backend's default" (llm/backends.py), which
+# get_model resolves, because the Anthropic and OpenRouter backends name the same model
+# differently.
+UNSET = ""
+
+
+def test_defaults_are_the_current_claude_5_family(monkeypatch):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
     s = Settings(_env_file=None)
-    assert s.reasoning_model == "claude-sonnet-5-5"
-    assert s.copy_model == "claude-haiku-5-5"
+    assert (s.reasoning_model, s.copy_model) == (UNSET, UNSET)
+    monkeypatch.setattr(settings, "reasoning_model", s.reasoning_model)
+    monkeypatch.setattr(settings, "copy_model", s.copy_model)
+    assert get_model("reasoning") == "claude-sonnet-5-5"
+    assert get_model("copy") == "claude-haiku-5-5"
 
 
 def test_env_overrides_each_role(monkeypatch):
@@ -32,8 +42,8 @@ def test_blank_env_falls_back_to_default(monkeypatch, blank):
     monkeypatch.setenv("AA_MODEL_REASONING", blank)
     monkeypatch.setenv("AA_MODEL_COPY", blank)
     s = Settings(_env_file=None)
-    assert s.reasoning_model == "claude-sonnet-5-5"
-    assert s.copy_model == "claude-haiku-5-5"
+    assert s.reasoning_model == UNSET
+    assert s.copy_model == UNSET
 
 
 def test_dotenv_file_overrides(tmp_path):
@@ -41,7 +51,7 @@ def test_dotenv_file_overrides(tmp_path):
     env.write_text("AA_MODEL_REASONING=claude-opus-5-5\nAA_MODEL_COPY=\n")
     s = Settings(_env_file=env)
     assert s.reasoning_model == "claude-opus-5-5"
-    assert s.copy_model == "claude-haiku-5-5"  # blank in .env → default
+    assert s.copy_model == UNSET  # blank in .env → default
 
 
 @pytest.mark.parametrize("name", ["REASONING_MODEL", "reasoning_model"])
@@ -49,13 +59,13 @@ def test_unprefixed_reasoning_env_name_is_ignored(monkeypatch, name):
     # Only AA_MODEL_REASONING configures the model; a stray REASONING_MODEL in the shell
     # must not silently win over .env.
     monkeypatch.setenv(name, "claude-opus-5-5")
-    assert Settings(_env_file=None).reasoning_model == "claude-sonnet-5-5"
+    assert Settings(_env_file=None).reasoning_model == UNSET
 
 
 @pytest.mark.parametrize("name", ["COPY_MODEL", "copy_model"])
 def test_unprefixed_copy_env_name_is_ignored(monkeypatch, name):
     monkeypatch.setenv(name, "claude-opus-5-5")
-    assert Settings(_env_file=None).copy_model == "claude-haiku-5-5"
+    assert Settings(_env_file=None).copy_model == UNSET
 
 
 def test_unprefixed_name_in_dotenv_is_ignored(tmp_path):
@@ -63,8 +73,8 @@ def test_unprefixed_name_in_dotenv_is_ignored(tmp_path):
     env.write_text("REASONING_MODEL=claude-opus-5-5\nCOPY_MODEL=claude-opus-5-5\n"
                    "AA_REASONING_MODEL=claude-opus-5-5\n")
     s = Settings(_env_file=env)
-    assert s.reasoning_model == "claude-sonnet-5-5"
-    assert s.copy_model == "claude-haiku-5-5"
+    assert s.reasoning_model == UNSET
+    assert s.copy_model == UNSET
 
 
 def test_prefixed_env_beats_unprefixed(monkeypatch, tmp_path):

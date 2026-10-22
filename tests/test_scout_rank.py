@@ -54,12 +54,15 @@ def _rank_payload(*, title_prefix="Topic", invalid_title="Ungrounded") -> str:
         }
         for index in range(2)
     ]
+    # Fits SCOUT_SCHEMA (an empty list would not: minItems 1 makes the whole answer a schema
+    # mismatch, llm/schema_check.py) but cites a candidate that doesn't exist, so rank()
+    # itself has to drop it.
     items.append(
         {
             "title": invalid_title,
             "rationale": "No evidence",
             "candidate_kind": "orphan_term",
-            "evidence_indexes": [],
+            "evidence_indexes": [99],
             "score": 1.0,
         }
     )

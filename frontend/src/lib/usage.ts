@@ -24,6 +24,15 @@ export function totalTokens(t: UsageTotals): number {
   return t.input_tokens + t.output_tokens + t.cache_creation_input_tokens + t.cache_read_input_tokens;
 }
 
+/** "64% cached": the share of input tokens read from the prompt cache; null when unknown.
+ * Floored, so "100% cached" means all of it and any read at all shows at least "<1%". */
+export function cacheShareLabel(share: number | null | undefined): string | null {
+  if (share == null) return null;
+  if (share > 0 && share < 0.01) return '<1% cached';
+  // The epsilon absorbs float error (0.29 * 100 is 28.999…), far below a real 1% step.
+  return `${Math.floor(share * 100 + 1e-9)}% cached`;
+}
+
 /** A group's cost — or "price unknown" when none of its calls had a known model price. */
 export function costLabel(t: UsageTotals): string {
   if (t.calls > 0 && t.unpriced_calls === t.calls) return 'price unknown';

@@ -1,0 +1,72 @@
+{
+  "_source": "documented",
+  "_note": "Web search turn paused by the server-side loop: text, server_tool_use + web_search_tool_result, then a trailing server_tool_use not yet run; stop pause_turn.",
+  "id": "msg_01ResearchPauseTurn0000009",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "EqQBCkgIBxABGAIqQKz3+v9Jk1mN0pQ2rS4tU6vW8xY0zA1bC2dE3fG4hH5iI6jJ7kK8lL9mM0nN1oO2pP3qQ4rR5sS6tT7uU8vV9wW0xX1yY2zZ3/4aA5bB6cC7dD8eE9fF0gG1hH2iI3jJ4kK5lL6mM7nN8oO9pP=="
+    },
+    {
+      "type": "text",
+      "text": "I'll search for sources on step-size stability."
+    },
+    {
+      "type": "server_tool_use",
+      "id": "srvtoolu_01Search1Aa2Bb3Cc4Dd5",
+      "name": "web_search",
+      "input": {
+        "query": "gradient descent step size stability 2/L"
+      }
+    },
+    {
+      "type": "web_search_tool_result",
+      "tool_use_id": "srvtoolu_01Search1Aa2Bb3Cc4Dd5",
+      "content": [
+        {
+          "type": "web_search_result",
+          "url": "https://www.cs.cornell.edu/courses/cs4780/2023fa/lectures/gd.html",
+          "title": "Gradient Descent — CS4780 Lecture Notes",
+          "encrypted_content": "EqgfCioIARgBIiQ3YTAwMjY1Mi1mZjM5LTQ1NGUtODgxNC0xZjYxNzFkYjgyN2IaDHB+o/Wd2T7xYz9KjSIwAbc==",
+          "page_age": "September 3, 2023"
+        },
+        {
+          "type": "web_search_result",
+          "url": "https://arxiv.org/abs/1609.04747",
+          "title": "An overview of gradient descent optimization algorithms",
+          "encrypted_content": "Eo0CCioIARgBIiQ1ZWM3ZjQyNC0wYzE0LTQ5YjAtYTk1Ny0wNjM2YjI3N2E0ZjQaDK1+n/Qc3S8wXa0LiTIxBcd=",
+          "page_age": null
+        }
+      ]
+    },
+    {
+      "type": "server_tool_use",
+      "id": "srvtoolu_01Search2Ee6Ff7Gg8Hh9",
+      "name": "web_search",
+      "input": {
+        "query": "learning rate too large divergence lecture notes"
+      }
+    }
+  ],
+  "stop_reason": "pause_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 2210,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 1980,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 412,
+    "service_tier": "standard",
+    "server_tool_use": {
+      "web_search_requests": 1
+    }
+  }
+}

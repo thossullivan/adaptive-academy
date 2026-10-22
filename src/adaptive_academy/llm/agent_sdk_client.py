@@ -30,6 +30,7 @@ from claude_agent_sdk import (
 )
 
 from adaptive_academy.llm.registry import get_model
+from adaptive_academy.llm.today import with_today
 from adaptive_academy.llm.types import AgentSDKError, LLMResponse
 from adaptive_academy.llm.usage import BACKEND_AGENT_SDK, record_usage
 
@@ -68,18 +69,21 @@ class AgentSDKLLMClient:
         # setting_sources=[] isolates the call from the project's CLAUDE.md/skills so they
         # don't leak into LLM prompts; max_turns=1 + no tools = a single completion.
         return ClaudeAgentOptions(
-            model=self._model, system_prompt=system,
+            model=self._model, system_prompt=with_today(system),
             allowed_tools=[], max_turns=1, setting_sources=[])
 
-    async def _run(self, system: str, prompt: str) -> str:
-        text = ""
+    async def _run(self, system: str, prompt: str) -> tuple[str, str | None]:
+        text, stop_reason = "", None
         async for msg in query(prompt=prompt, options=self._options(system)):
             if isinstance(msg, ResultMessage):
                 record_sdk_result(msg, model=self._model, role=self._role, operation="complete")
                 if getattr(msg, "is_error", False):
                     raise AgentSDKError(getattr(msg, "result", "") or "agent SDK error")
                 text = getattr(msg, "result", "") or ""
-        return text
+                # The model's stop reason ("end_turn", "max_tokens", "refusal", ...), so
+                # callers' stop-reason checks work on this backend too. Older SDKs omit it.
+                stop_reason = getattr(msg, "stop_reason", None) or None
+        return text, stop_reason
 
     def complete(self, system, messages, tools) -> LLMResponse:
         if tools:
@@ -94,5 +98,5 @@ class AgentSDKLLMClient:
             return AnthropicLLMClient(role=self._role).complete(system, messages, tools)
         # The key is already absent process-wide (create_app dropped it), so the subprocess
         # uses subscription auth — no per-call strip, no lock, parallel-safe.
-        text = asyncio.run(self._run(system, flatten_messages(messages)))
-        return LLMResponse(text=text, tool_calls=[])
+        text, stop_reason = asyncio.run(self._run(system, flatten_messages(messages)))
+        return LLMResponse(text=text, tool_calls=[], stop_reason=stop_reason)

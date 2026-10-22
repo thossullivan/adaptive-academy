@@ -278,7 +278,7 @@ RUBRIC_TERMS: dict[str, list[str]] = {
     "backprop": ["topological order", "accumulate"],
     "bpe": ["most frequent pair", "merge"],
     "embed": ["lookup", "one-hot"],
-    "attn": ["softmax", "√d_k"],
+    "attn": ["softmax", "scale"],
     "causal": ["mask", "before softmax"],
     "pos": ["permutation", "relative position"],
     "resid": ["gradient path", "normalize"],
@@ -290,7 +290,7 @@ ANCHORS = [
      "For random q and k with unit-variance components, q·k has variance d_k, so logits grow "
      "with dimension and push the softmax into saturation where gradients vanish; dividing by "
      "√d_k restores unit variance.",
-     ["dot-product variance grows with d_k", "softmax saturation", "small gradients"]),
+     ["variance grows with dimension", "softmax saturation", "small gradients"]),
     (1, "bpe", "Why does BPE start from characters (or bytes) and merge frequent pairs instead "
                "of starting from whole words?",
      "Starting from characters guarantees every word can be encoded, and merging frequent "
@@ -392,7 +392,8 @@ PROBES: list[_Probe] = [
     _Probe(_ago(6, 4), "self_explanation", "attn", 0.42,
            "Attention compares each token with every other token and takes a weighted average.",
            "Describes what, not why: no softmax normalization argument and no scaling.",
-           ["omitted required element: √d_k", "no mechanism for the weights summing to 1"],
+           ["no mechanism for the weights summing to 1",
+            "omitted required element: softmax", "omitted required element: scale"],
            item=(2, 0)),
     _Probe(_ago(5, 2), "self_explanation", "pos", 0.58,
            "Without positions attention can't tell word order; sinusoids add a position "
@@ -413,8 +414,8 @@ PROBES: list[_Probe] = [
            "renormalizing.",
            "Struggled productively toward the right idea; not there yet.", baseline=18),
     _Probe(_ago(1, 4), "self_explanation", "attn", 0.66,
-           "Weights are softmax(QKᵀ/√d_k): dividing by √d_k keeps the logits' variance near 1 "
-           "so the softmax doesn't saturate; each row sums to 1.",
+           "Weights are softmax(QKᵀ/√d_k): dividing by √d_k scales the logits' variance back "
+           "to about 1 so the softmax doesn't saturate; each row sums to 1.",
            "Much improved: scaling argument now present.", ["variance derivation is brief"],
            baseline=17),
     _Probe(_ago(0, 20), "recall", "bpe", 0.79,
@@ -422,6 +423,11 @@ PROBES: list[_Probe] = [
            "ever out of vocabulary.",
            "Held cold, and now includes the open-vocabulary reason.", baseline=9),
 ]
+
+# Which prompt grades each probe kind in the real app (every other kind goes through
+# assess_concept's GRADE), so the demo rows carry the prompt_tag a real grade would.
+_GRADED_BY = {"teach": TEACH, "productive_failure": PF_CONSOLIDATE,
+              "artifact_review": ASSESS_ARTIFACT}
 
 # (concept key, front, back, status, reps, interval days, due offset in days from now)
 CARDS = [
@@ -679,6 +685,9 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
             baseline_assessment_id=baseline.id if baseline else None,
             delta=round(probe.score - baseline.score, 4) if baseline else None,
             item_id=items[probe.item[0]][probe.item[1]].id if probe.item else None,
+            # The current tag of the prompt that grades this kind in the real app, the same
+            # one the trace below stamps for this row.
+            prompt_tag=_GRADED_BY.get(probe.kind, GRADE).tag,
         )
         session.add(a)
         session.flush()

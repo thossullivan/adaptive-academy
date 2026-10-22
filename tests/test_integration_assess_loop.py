@@ -37,7 +37,8 @@ def test_weak_assessment_raises_tutor_assistance(session):
     # A weak, anchored assessment: rubric requires "softmax"; learner omits it; LLM low score.
     rubric = json.dumps({"criteria": ["c"], "must_include": ["softmax"],
                          "strong_signs": [], "weak_signs": [], "source_refs": []})
-    grade = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"]})
+    grade = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"],
+                        "missing_required": [], "misconceptions_committed": []})
     app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient(
         [LLMResponse(text=rubric), LLMResponse(text=grade)])
     a = client.post(f"/api/concepts/{concept.id}/assess",

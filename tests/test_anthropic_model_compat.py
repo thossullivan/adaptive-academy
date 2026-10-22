@@ -31,6 +31,7 @@ from sqlmodel import select
 from adaptive_academy.engine.curriculum import CURRICULUM_SCHEMA
 from adaptive_academy.engine.program_research import PROGRAM_SCHEMA
 from adaptive_academy.engine.revision import REVISION_SCHEMA
+from adaptive_academy.engine.solution_guard import GUARD_SCHEMA
 from adaptive_academy.llm import usage
 from adaptive_academy.llm.researcher_types import SearchBrief
 from adaptive_academy.llm.strict_schema import to_strict_schema
@@ -43,6 +44,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "adaptive_academy"
 # below fails if a caller is added without being audited here.
 REAL_SCHEMAS = {
     "CURRICULUM_SCHEMA": CURRICULUM_SCHEMA,
+    "GUARD_SCHEMA": GUARD_SCHEMA,
     "PROGRAM_SCHEMA": PROGRAM_SCHEMA,
     "REVISION_SCHEMA": REVISION_SCHEMA,
     "SCOUT_SCHEMA": SCOUT_SCHEMA,
@@ -150,8 +152,10 @@ def test_complete_json_sends_auto_and_strict_tool_with_instruction(session, api_
     # `minimum` is not in the strict subset; it must not be sent as a keyword.
     assert "minimum" not in tool["input_schema"]["properties"]["n"]
     # The model is told, in the request, to answer by calling the tool.
-    assert kw["system"].startswith("SYS")
-    assert "emit" in kw["system"][len("SYS"):]
+    # (system is a list of text blocks: the cached stable part, then today's date.)
+    stable = kw["system"][0]["text"]
+    assert stable.startswith("SYS")
+    assert "emit" in stable[len("SYS"):]
     # The caller's schema is not mutated by the strict transform.
     assert "additionalProperties" not in SCHEMA
     assert SCHEMA["properties"]["n"]["minimum"] == 0
@@ -215,7 +219,7 @@ def test_complete_json_retry_respects_the_daily_budget(session, api_key, monkeyp
 
     checks: list = []
     monkeypatch.setattr("adaptive_academy.llm.anthropic_client.check_budget",
-                        lambda model=None: checks.append(model))
+                        lambda model=None, **_kw: checks.append(model))
     calls: list = []
     _fake_anthropic(monkeypatch, "anthropic_client",
                     [_resp(_text("prose")), _resp(_tool_use("emit", {"answer": "a"}))], calls)
@@ -414,7 +418,7 @@ def test_researcher_continues_a_paused_turn_until_it_finishes(session, api_key, 
 
     checks: list = []
     monkeypatch.setattr("adaptive_academy.llm.anthropic_researcher.check_budget",
-                        lambda model=None: checks.append(model))
+                        lambda model=None, **_kw: checks.append(model))
     payload = '[{"title": "T", "url": "https://example.org/final"}]'
     first = _resp(_thinking(), _text("Searching."), _search_block("srvtoolu_1"),
                   stop_reason="pause_turn",

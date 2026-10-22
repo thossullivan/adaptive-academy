@@ -152,6 +152,47 @@ def test_tutor_route_records_usage_with_feature_label(client, session, api_key, 
     assert all(row.backend == "anthropic" for row in rows)
 
 
+def test_solution_guard_call_is_recorded_on_the_copy_role_under_tutor(
+        client, session, api_key, monkeypatch):
+    # A pre-attempt tutor reply is checked by the solution guard: its own model call, on the
+    # copy role (Haiku), recorded like any other call and attributed to the tutor feature.
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", None)
+    monkeypatch.setattr(usage.settings, "reasoning_model", "")
+    monkeypatch.setattr(usage.settings, "copy_model", "")
+    calls: list = []
+
+    class _Messages:
+        def create(self, **kw):
+            calls.append(kw)
+            if kw.get("tool_choice"):  # the guard's structured check
+                block = SimpleNamespace(type="tool_use", id="toolu_g", name=kw["tools"][0]["name"],
+                                        input={"gives_away_solution": False, "reason": "a hint"})
+            else:
+                block = SimpleNamespace(type="text", text="What have you tried?")
+            return SimpleNamespace(
+                content=[block], stop_reason="end_turn",
+                usage=SimpleNamespace(input_tokens=500, output_tokens=40,
+                                      cache_creation_input_tokens=0,
+                                      cache_read_input_tokens=0, server_tool_use=None),
+            )
+
+    class _FakeAnthropic:
+        def __init__(self, *a, **kw):
+            self.messages = _Messages()
+
+    monkeypatch.setattr("adaptive_academy.llm.anthropic_client.Anthropic", _FakeAnthropic)
+    cid = _seed_conversation(client, session)
+    r = client.post(f"/api/conversations/{cid}/messages", json={"content": "softmax?"})
+    assert r.status_code == 200, r.text
+    assert ("guard:solution_checked", "source=model gives_away=false") in [
+        (e["kind"], e["detail"]) for e in r.json()["events"]]
+    session.expire_all()
+    rows = {(row.role, row.operation, row.model, row.feature)
+            for row in session.exec(select(LLMUsage)).all()}
+    assert rows == {("reasoning", "complete", "claude-sonnet-5-5", "tutor"),
+                    ("copy", "complete_json", "claude-haiku-5-5", "tutor")}
+
+
 def test_over_budget_is_a_legible_429(client, session, api_key, monkeypatch):
     monkeypatch.setattr(usage.settings, "daily_budget_usd", 1.0)
     _row(session, cost=1.25, when=NOW)
@@ -180,3 +221,33 @@ def test_unpriced_model_under_a_limit_is_a_legible_429(client, session, api_key,
     assert "claude-unpriced-test" in detail and "no known price" in detail
     assert "AA_DAILY_BUDGET_USD" in detail
     assert calls == []
+
+
+def test_openrouter_usage_prefers_reported_cost_and_flags_experimental_models(
+        client, session, monkeypatch):
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", 1.0)
+    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+    # A Claude call where OpenRouter's charge (with its fee) differs from list price, and a
+    # call on a model with no list price at all.
+    session.add(LLMUsage(created_at=NOW, backend="openrouter",
+                         model="anthropic/claude-sonnet-5.5", role="reasoning",
+                         operation="complete", cost_usd=0.10, reported_cost_usd=0.12))
+    session.add(LLMUsage(created_at=NOW, backend="openrouter", model="deepseek/deepseek-v4",
+                         role="reasoning", operation="complete", cost_usd=None,
+                         reported_cost_usd=0.03))
+    session.commit()
+    _row(session, cost=0.50, when=NOW)  # an earlier Anthropic-backend call today
+
+    body = client.get("/api/usage").json()
+    assert body["backend"] == "openrouter"
+    today = body["totals"]["today"]
+    assert today["cost_usd"] == pytest.approx(0.65)
+    assert today["api_cost_usd"] == pytest.approx(0.65)  # both backends are key-billed
+    assert today["unpriced_calls"] == 0
+    assert body["budget"]["spent_today_usd"] == pytest.approx(0.65)
+    assert usage.spent_today_usd() == pytest.approx(0.65)
+    by_model = {m["model"]: m for m in body["by_model"]}
+    assert by_model["anthropic/claude-sonnet-5.5"]["cost_usd"] == pytest.approx(0.12)
+    assert by_model["anthropic/claude-sonnet-5.5"]["experimental"] is False
+    assert by_model["deepseek/deepseek-v4"]["experimental"] is True
+    assert by_model["claude-sonnet-4-6"]["experimental"] is False

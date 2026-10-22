@@ -1,0 +1,1 @@
+{"score": 0.7, "mechanism_present": true, "verdict": "The learner explains

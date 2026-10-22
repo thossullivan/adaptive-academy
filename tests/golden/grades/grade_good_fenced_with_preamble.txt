@@ -1,0 +1,4 @@
+Here is my grade:
+```json
+{"score": 0.7, "mechanism_present": true, "verdict": "Correct mechanism, imprecise on masking.", "gaps": ["masking left vague"], "missing_required": [], "misconceptions_committed": []}
+```

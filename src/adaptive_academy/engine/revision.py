@@ -14,6 +14,7 @@ from adaptive_academy.engine import graph
 from adaptive_academy.engine.aliases import group_level
 from adaptive_academy.engine.fanout import fan_out_with_retry
 from adaptive_academy.engine.gates import evaluate_concept, milestone_load_bearing
+from adaptive_academy.jsonout import require_list, require_object, str_items
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
 from adaptive_academy.llm.structured import structured_json
 from adaptive_academy.llm.types import LLMClient
@@ -352,13 +353,21 @@ def _run_revision_locked(
         session.commit()
         raise ValueError("program has an open revision; resolve it first")
 
+    # Defence behind the schema check (llm/schema_check.py): an answer that isn't an object
+    # or whose `changes` isn't a list is a StructuredOutputError; a change that isn't an
+    # object is discarded with the invalid ones.
+    data = require_object(data, "map revision")
+    raw_changes = require_list(data, "changes", "map revision")
     revision = MapRevision(program_id=program.id, map_health=str(data.get("map_health", "")))
     session.add(revision)
     session.flush()  # id without committing
 
     changes: list[MapChange] = []
     dropped = 0
-    for ch in data.get("changes", []) or []:
+    for ch in raw_changes:
+        if not isinstance(ch, dict):
+            dropped += 1
+            continue
         kind = str(ch.get("kind", ""))
         payload = ch.get("payload") if isinstance(ch.get("payload"), dict) else {}
         reason = validate_change(session, program, kind, payload)
@@ -367,7 +376,7 @@ def _run_revision_locked(
             continue
         change = MapChange(revision_id=revision.id, kind=kind, payload=payload,
                            why=str(ch.get("why", "")),
-                           source_urls=list(ch.get("source_urls", []) or []))
+                           source_urls=str_items(ch.get("source_urls")))
         session.add(change)
         changes.append(change)
     if dropped:
@@ -415,8 +424,10 @@ def apply_change(session: Session, program: Program, change: MapChange) -> None:
                       depends_on=[after] if after is not None else [])
         session.add(m)
         session.flush()
-        for t in payload.get("topics", []) or []:
-            if t.get("title"):
+        topics = payload.get("topics") or []
+        for t in topics if isinstance(topics, list) else []:
+            # A stored payload comes from the model; skip a topic that isn't an object.
+            if isinstance(t, dict) and t.get("title"):
                 session.add(ProgramTopicLink(
                     milestone_id=m.id, status="stub", proposed_title=str(t["title"]),
                     why=str(t.get("why", "")), added_by="revision"))

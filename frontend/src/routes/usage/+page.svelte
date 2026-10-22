@@ -4,6 +4,7 @@
   import type { UsageReport, UsageTotals } from '$lib/types';
   import {
     budgetFraction,
+    cacheShareLabel,
     costLabel,
     featureLabel,
     formatTokens,
@@ -12,7 +13,7 @@
   } from '$lib/usage';
   import { setup } from '$lib/setup.svelte';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Stat } from '$lib/ui';
+  import { Card, ExperimentalTag, Stat } from '$lib/ui';
 
   let report = $state<UsageReport | null>(null);
   let error = $state<string | null>(null);
@@ -43,6 +44,7 @@
 
   const fraction = $derived(report ? budgetFraction(report.budget) : null);
   const subscription = $derived(report?.backend === 'agent_sdk');
+  const openrouter = $derived(report?.backend === 'openrouter');
 
   // Bars in a breakdown are relative to its most expensive row.
   function share(rows: UsageTotals[], row: UsageTotals): number {
@@ -63,7 +65,7 @@
 <Page
   eyebrow="Ledger"
   title="Usage & cost"
-  lead="Every model call the agents make, counted on this machine: tokens, web searches, and what they cost at Anthropic's list prices."
+  lead="Every model call the agents make, counted on this machine: tokens, web searches, and what they cost."
 >
   {#if loading}
     <p class="py-10 text-center text-sm text-faint" role="status">Tallying the ledger…</p>
@@ -75,6 +77,11 @@
         <p class="rounded-[var(--radius)] border border-border bg-surface-2 px-4 py-3 text-sm text-fg-dim">
           Calls run on your <span class="text-fg">Claude subscription</span> (Agent SDK backend).
           Dollar figures are the SDK's list-price estimate, not a charge to an API key.
+        </p>
+      {:else if openrouter}
+        <p class="rounded-[var(--radius)] border border-border bg-surface-2 px-4 py-3 text-sm text-fg-dim" data-testid="usage-openrouter">
+          Calls run through <span class="text-fg">OpenRouter</span>. Dollar figures are what OpenRouter reported
+          charging for each call, fees included, and they count toward the daily limit.
         </p>
       {/if}
 
@@ -147,10 +154,18 @@
           {:else}
             <ul class="flex flex-col gap-3" data-testid="usage-by-feature">
               {#each report.by_feature as row (row.feature ?? '—')}
+                {@const cached = cacheShareLabel(row.cache_read_share)}
                 <li class="min-w-0">
                   <div class="flex items-baseline gap-3 text-sm">
                     <span class="min-w-0 flex-1 truncate text-fg-dim" title={featureLabel(row.feature)}>{featureLabel(row.feature)}</span>
                     <span class="eyebrow hidden text-faint sm:inline">{formatTokens(totalTokens(row))} tok</span>
+                    {#if cached}
+                      <span
+                        class="eyebrow hidden text-faint sm:inline"
+                        title="Share of input tokens read from the prompt cache"
+                        data-testid="cache-share">{cached}</span
+                      >
+                    {/if}
                     <span class="eyebrow text-faint">{row.calls}×</span>
                     <span class="nums w-24 text-right text-fg">{costLabel(row)}</span>
                   </div>
@@ -171,7 +186,10 @@
               {#each report.by_model as row (row.model)}
                 <li class="min-w-0">
                   <div class="flex items-baseline gap-3 text-sm">
-                    <span class="min-w-0 flex-1 truncate font-mono text-xs text-fg-dim" title={row.model}>{row.model}</span>
+                    <span class="flex min-w-0 flex-1 items-center gap-2">
+                      <span class="min-w-0 truncate font-mono text-xs text-fg-dim" title={row.model}>{row.model}</span>
+                      {#if row.experimental}<ExperimentalTag />{/if}
+                    </span>
                     <span class="eyebrow hidden text-faint sm:inline">{formatTokens(totalTokens(row))} tok</span>
                     <span class="eyebrow text-faint">{row.calls}×</span>
                     <span class="nums w-24 text-right text-fg">{costLabel(row)}</span>
@@ -187,11 +205,12 @@
       </div>
 
       <p class="text-xs leading-relaxed text-faint">
-        Prices from
+        {#if openrouter}OpenRouter calls use the cost OpenRouter reports. Otherwise prices{:else}Prices{/if} from
         <a class="underline decoration-border hover:text-fg" href={report.pricing_source} target="_blank" rel="noreferrer">Anthropic's pricing page<span class="sr-only"> (opens in a new tab)</span></a>,
         read {report.pricing_as_of}, for {report.priced_models.join(', ')}. Other models record
         tokens with "price unknown". These records stay in your local database; each model call
-        itself is still sent to Anthropic.
+        itself is still sent to {openrouter ? "OpenRouter and the model's provider" : 'Anthropic'}.
+        {#if report.by_model.some((m) => m.experimental)}Models marked Experimental are not Claude models.{/if}
       </p>
     </div>
   {/if}

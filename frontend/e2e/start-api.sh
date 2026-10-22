@@ -14,7 +14,7 @@ rm -f "$tmp/$db" "$tmp/$db-wal" "$tmp/$db-shm"
 
 # Settings fall back to the repo .env for any AA_ variable left unset, so pin every one
 # explicitly; otherwise a developer's real vault or embedding cache would leak into the run.
-unset ANTHROPIC_API_KEY AA_LLM_BACKEND
+unset ANTHROPIC_API_KEY OPENROUTER_API_KEY AA_LLM_BACKEND
 export AA_DATABASE_URL="sqlite:///$tmp/$db"
 export AA_RETRIEVER=fts
 export AA_FRONTEND_DIST="$tmp/no-frontend-build"

@@ -7,6 +7,10 @@ the Assessor path). This tolerates a leading preamble and prose on either side, 
 to the original so a genuinely malformed payload still raises a real parse error.
 """
 
+from typing import Any
+
+from adaptive_academy.llm.types import StructuredOutputError
+
 
 def extract_json(text: str) -> str:
     """Pull the JSON object/array out of model output that may be fenced and/or prose-wrapped."""
@@ -32,3 +36,62 @@ def extract_json(text: str) -> str:
                 s = s[a : b + 1]
 
     return s.strip()
+
+
+# Shape guards for parsed model JSON. A model without strict tool use, or any text-parsed
+# answer, can put a string where an object belongs (the live failure: a curriculum phase as
+# a string). Parsers skip such entries; an answer with nothing usable is a
+# StructuredOutputError (a legible 502), never an AttributeError (a bare 500).
+
+
+def str_items(value: Any) -> list[str]:
+    """The string entries of a JSON array; anything that isn't a list gives []."""
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+# Keys a model uses when it wraps a name or a point in an object instead of a bare string.
+NAME_KEYS = ("name", "concept", "title", "label", "text", "point")
+POINT_KEYS = ("point", "text", "key_point", "name", "concept", "title", "label")
+
+
+def text_items(value: Any, keys: tuple[str, ...] = NAME_KEYS) -> list[str]:
+    """Like str_items, but an object entry contributes its first non-empty string field from
+    `keys` ({"name": "Chain rule"} -> "Chain rule") instead of being dropped. Names use
+    NAME_KEYS; anchor key points use POINT_KEYS, so {"concept": ..., "point": ...} keeps the
+    point."""
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for v in value:
+        if isinstance(v, str):
+            out.append(v)
+        elif isinstance(v, dict):
+            text = next((v[k] for k in keys if isinstance(v.get(k), str) and v[k].strip()),
+                        None)
+            if text is not None:
+                out.append(text)
+    return out
+
+
+def require_object(data: Any, what: str) -> dict:
+    """`data` if it is a JSON object, else StructuredOutputError("malformed")."""
+    if not isinstance(data, dict):
+        raise StructuredOutputError(
+            "malformed", f"{what}: expected a JSON object, got {type(data).__name__}")
+    return data
+
+
+def require_list(data: dict, key: str, what: str) -> list:
+    """`data[key]` as a list ([] when absent or null), else StructuredOutputError."""
+    value = data.get(key) or []
+    if not isinstance(value, list):
+        raise StructuredOutputError(
+            "malformed", f"{what}: {key!r} should be a list, got {type(value).__name__}")
+    return value
+
+
+def dropped_summary(paths: list[str], shown: int = 5) -> str:
+    """An AgentEvent detail for the entries a parser skipped, by JSON path."""
+    noun = "entry" if len(paths) == 1 else "entries"
+    more = " …" if len(paths) > shown else ""
+    return f"WARN {len(paths)} malformed {noun} skipped: {', '.join(paths[:shown])}{more}"

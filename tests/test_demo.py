@@ -36,8 +36,9 @@ from adaptive_academy.models import (
     TopicIntent,
     Track,
 )
+from adaptive_academy.prompts import ASSESS_ARTIFACT, GRADE, PF_CONSOLIDATE, TEACH
 
-NOW = datetime(2026, 10, 19, 15, 30, 0)
+NOW =datetime(2026, 10, 19, 15, 30, 0)
 
 
 def _rows(session: Session, model) -> list:
@@ -129,6 +130,14 @@ def test_build_demo_has_data_for_every_page(session):
     assert any(a.delta is not None and a.baseline_assessment_id for a in assessments)
     assert any(a.confidence_predicted is not None for a in assessments)
     assert _rows(session, Rubric) and _rows(session, ReferenceAnchor)
+    # Each row carries the current tag of the prompt that grades its kind, as the real writers
+    # would, and that tag is in the demo's own trace.
+    grading_prompt = {"teach": TEACH, "productive_failure": PF_CONSOLIDATE,
+                      "artifact_review": ASSESS_ARTIFACT}
+    for a in assessments:
+        assert a.prompt_tag == grading_prompt.get(a.kind, GRADE).tag, a.kind
+    traced = {e.detail for e in _rows(session, AgentEvent) if e.kind == "prompt"}
+    assert {a.prompt_tag for a in assessments} <= traced
 
     # Tutor: conversations where the learner logged an attempt (they feed the trace and the
     # memory index).
@@ -182,6 +191,27 @@ def test_build_demo_is_deterministic(session):
     with Session(other) as s2:
         build_demo(s2, now=NOW)
         assert snapshot(s2) == snapshot(session)
+
+
+def test_demo_enforced_gaps_are_ones_the_grader_could_produce():
+    # An enforced gap names a rubric item exactly as sent (the grader's missing_required /
+    # misconceptions_committed, output_checks G13/G14) and carries its ceiling
+    # (assess.penalize_score), so a seeded one must too, or the demo shows data the app can
+    # never produce.
+    from adaptive_academy import demo
+    from adaptive_academy.engine.assess import penalize_score
+
+    key_points = {}
+    for *_, concept, _q, _ref, points in demo.ANCHORS:
+        key_points.setdefault(concept, []).extend(points)
+    for p in demo.PROBES:
+        items = key_points.get(p.concept, []) if p.kind == "source_quiz" \
+            else demo.RUBRIC_TERMS.get(p.concept, [])
+        omitted = [g.split(": ", 1)[1] for g in p.gaps
+                   if g.startswith("omitted required element: ")]
+        assert all(o in items for o in omitted), (p.concept, omitted)
+        assert not any(g.startswith("contains likely misconception: ") for g in p.gaps)
+        assert penalize_score(p.score, p.gaps) == p.score, (p.concept, p.score)
 
 
 def test_startup_graph_backfill_leaves_demo_edges_alone(session):

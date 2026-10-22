@@ -1,0 +1,10 @@
+{
+  "score": 0.5,
+  "mechanism_present": true,
+  "verdict": "Says what attention does, not why it works.",
+  "gaps": [
+    "no account of why QK^T measures similarity"
+  ],
+  "missing_required": [],
+  "misconceptions_committed": []
+}

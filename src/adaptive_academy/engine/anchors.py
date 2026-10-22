@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
-from adaptive_academy.jsonout import extract_json
+from adaptive_academy.jsonout import POINT_KEYS, extract_json, require_object, text_items
 from adaptive_academy.llm.anchor_types import AnchorBrief, AnchorClient, RawAnchor
 from adaptive_academy.models import (
     AgentEvent,
@@ -51,13 +51,18 @@ def dedupe_anchors(pairs: list[tuple[int, RawAnchor]]) -> list[tuple[int, RawAnc
 
 
 def parse_anchors_json(text: str) -> list[RawAnchor]:
-    data = json.loads(extract_json(text))
+    # Text-parsed, so nothing guarantees the shape: an answer that isn't an object is a
+    # StructuredOutputError (a legible 502); an anchor that isn't an object is skipped.
+    data = require_object(json.loads(extract_json(text)), "anchors")
+    raw = data.get("anchors") or []
     out: list[RawAnchor] = []
-    for a in (data.get("anchors", []) or []):
+    for a in raw if isinstance(raw, list) else []:
+        if not isinstance(a, dict):
+            continue
         out.append(RawAnchor(
             question=str(a.get("question", "")),
             reference_answer=str(a.get("reference_answer", "")),
-            key_points=list(a.get("key_points", []) or []),
+            key_points=text_items(a.get("key_points"), POINT_KEYS),
             concept_name=str(a.get("concept", a.get("concept_name", "")) or ""),
         ))
     return out

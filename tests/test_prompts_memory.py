@@ -25,7 +25,7 @@ def test_memory_prompt_versions_and_delimiter_sentences():
     assert prompts.PF_GENERATE.tag == "practice.pf_generate@v3"
     assert prompts.ROLEPLAY_DIRECTOR.tag == "roleplay.director@v2"
     assert prompts.PAPER_PROBE_DIRECTOR.tag == "paper_probe.director@v2"
-    assert prompts.RESEARCH_FOUNDATION.tag == "research.foundation@v3"
+    assert prompts.RESEARCH_FOUNDATION.tag == "research.foundation@v4"
 
     assert prompts.MEMORY_BLOCK_INTRO in prompts.TUTOR_BASE
     assert prompts.MEMORY_BLOCK_INTRO in prompts.PF_GENERATE
