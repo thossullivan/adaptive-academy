@@ -1,8 +1,10 @@
 import asyncio
 import ipaddress
 import os
+import re
 import shlex
 import sys
+import warnings
 from typing import NoReturn
 
 import pytest
@@ -70,11 +72,26 @@ _NETWORK_PROGRAMS = frozenset({
     "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp", "gh", "docker",
 })
 _GIT_REMOTE_COMMANDS = frozenset({"clone", "fetch", "pull", "push", "ls-remote", "submodule"})
+# `git remote` is local (-v, add, rename) except these, which contact the remote.
+_GIT_REMOTE_NETWORK_SUBCOMMANDS = frozenset({"update", "show", "prune", "set-head"})
 _GIT_VALUE_OPTIONS = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace",
                                 "--exec-path", "--config-env"})
+_PIP_PROGRAM = re.compile(r"pip(\d[\d.]*)?")  # pip, pip3, pip3.12
 _PIP_NETWORK_COMMANDS = frozenset({"install", "download", "wheel"})
 _SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
+_SHELL_VALUE_OPTIONS = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
 _SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
+# Commands that run another command: (program) -> options that take a value. The wrapped
+# command starts after the wrapper's options (and, for timeout, its duration).
+_WRAPPERS = {
+    "exec": frozenset({"-a"}),
+    "command": frozenset(),
+    "nohup": frozenset(),
+    "env": frozenset({"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}),
+    "timeout": frozenset({"-s", "--signal", "-k", "--kill-after"}),
+    "xargs": frozenset({"-a", "-d", "-E", "-e", "-I", "-i", "-L", "-l", "-n", "-P", "-s"}),
+}
 _SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn",
                            "os.system"})
 _AUDIT_PREFIXES = ("socket.", "subprocess.", "os.")  # cheap pre-filter: hooks see every event
@@ -150,8 +167,67 @@ def _env_flag(env: object, name: str) -> bool:
     return str(source.get(name, "")).strip().lower() not in ("", "0", "false", "no")
 
 
-def _shell_network_command(command: object) -> str | None:
-    """The first network-capable command in a `sh -c` / os.system string, if any."""
+def _with_assignments(env: object, assignments: list[str]) -> object:
+    """The child's env after `VAR=val` words (a shell prefix or `env VAR=val`)."""
+    if not assignments:
+        return env
+    merged = dict(env if hasattr(env, "items") else os.environ)
+    merged.update(a.split("=", 1) for a in assignments)
+    return merged
+
+
+def _unwrap(argv: list[str], env: object) -> tuple[list[str], object]:
+    """Strip leading `VAR=val` words and wrapper commands (exec, env, command, nohup,
+    timeout N, xargs) down to the program that actually runs, tracking the env they set."""
+    while argv:
+        assignments = []
+        while argv and _ASSIGNMENT.match(argv[0]):
+            assignments.append(argv.pop(0))
+        env = _with_assignments(env, assignments)
+        if not argv or _program(argv[0]) not in _WRAPPERS:
+            return argv, env
+        wrapper, words = _program(argv[0]), argv[1:]
+        if wrapper == "command" and {"-v", "-V"} & set(words):
+            return [], env  # `command -v curl` looks curl up, it doesn't run it
+        while words and words[0].startswith("-"):
+            option = words.pop(0)
+            if wrapper == "env" and option in ("-", "-i", "--ignore-environment"):
+                env = {}
+            elif option in _WRAPPERS[wrapper] and words:
+                words.pop(0)  # the option's value
+        if wrapper == "env":
+            assignments = []
+            while words and _ASSIGNMENT.match(words[0]):
+                assignments.append(words.pop(0))
+            env = _with_assignments(env, assignments)
+        elif wrapper == "timeout" and words:
+            words.pop(0)  # the duration
+        argv = words
+    return argv, env
+
+
+def _shell_command_string(rest: list[str]) -> str | None:
+    """The string a shell runs with -c (`-c`, `-lc`, `-e -c`, ...); None for a script."""
+    has_c, words = False, iter(rest)
+    for word in words:
+        if word == "--":
+            break
+        if word in _SHELL_VALUE_OPTIONS:
+            next(words, None)
+        elif word.startswith("-") and not word.startswith("--") and len(word) > 1:
+            has_c = has_c or "c" in word[1:]
+        elif not word.startswith(("--", "+")):
+            return word if has_c else None
+    return next(words, None) if has_c else None
+
+
+def _shell_network_command(command: object, env: object) -> str | None:
+    """The first network-capable command in a `sh -c` / os.system string, if any.
+
+    Only simple commands joined by spaced operators (`a && b`, `a; b`, `a | b`) are seen.
+    Command substitution (`$(curl x)`, backticks), subshells and groups (`(curl x)`,
+    `{ curl x; }`), unspaced operators (`a&&curl x`), functions, aliases and scripts the
+    string sources are out of reach: they would need a shell parser."""
     try:
         words = shlex.split(os.fsdecode(command))
     except ValueError:
@@ -161,20 +237,22 @@ def _shell_network_command(command: object) -> str | None:
         if word not in _SHELL_SEPARATORS:
             argv.append(word)
         elif argv:
-            if reason := _network_command(argv, None):
+            if reason := _network_command(argv, env):
                 return reason
             argv = []
     return None
 
 
 def _network_command(argv: list, env: object) -> str | None:
-    """Why spawning argv would reach the network, or None for a local command."""
+    """Why spawning argv would reach the network, or None for a local command. `env` is the
+    child's environment (None: inherits this process's)."""
+    argv, env = _unwrap([os.fsdecode(a) for a in argv], env)
     if not argv:
         return None
-    program = _program(argv[0])
-    rest = [os.fsdecode(a) for a in argv[1:]]
-    if program in _SHELLS and len(rest) >= 2 and rest[0] == "-c":
-        return _shell_network_command(rest[1])
+    program, rest = _program(argv[0]), argv[1:]
+    if program in _SHELLS:
+        command = _shell_command_string(rest)
+        return _shell_network_command(command, env) if command is not None else None
     if program in _NETWORK_PROGRAMS:
         return program
     if program == "git":
@@ -186,11 +264,14 @@ def _network_command(argv: list, env: object) -> str | None:
             elif not word.startswith("-"):
                 subcommand = word
                 break
+        if subcommand == "remote":
+            action = next((w for w in words if not w.startswith("-")), "")
+            return f"git remote {action}" if action in _GIT_REMOTE_NETWORK_SUBCOMMANDS else None
         return f"git {subcommand}" if subcommand in _GIT_REMOTE_COMMANDS else None
     if program in ("uv", "uvx"):
         offline = "--offline" in rest or _env_flag(env, "UV_OFFLINE")
         return None if offline else f"{program} without --offline"
-    is_pip = program in ("pip", "pip3") or (
+    is_pip = _PIP_PROGRAM.fullmatch(program) is not None or (
         program.startswith("python") and "-m" in rest
         and rest[rest.index("-m") + 1:rest.index("-m") + 2] == ["pip"])
     if is_pip and _PIP_NETWORK_COMMANDS & set(rest):
@@ -199,7 +280,11 @@ def _network_command(argv: list, env: object) -> str | None:
 
 
 def _spawn_argv(event: str, args: tuple) -> tuple[list, object] | None:
-    """(argv, env) from a process-spawn audit event."""
+    """(argv, env) from a process-spawn audit event.
+
+    Out of reach (CI is Linux): on Windows, Popen's audit argv is one command-line string,
+    so only its first word is classified; on POSIX, os.spawn* is fork + exec, so its
+    "os.exec" block fires in the forked child, where the error cannot reach the caller."""
     if event == "subprocess.Popen":
         executable, argv, _cwd, env = args
         argv = list(argv) if isinstance(argv, list | tuple) else [argv]
@@ -241,7 +326,7 @@ def _network_audit_hook(event: str, args: tuple) -> None:
             _GUARD.block(_target(address[0], address[1] if len(address) > 1 else None))
     elif event in _SPAWN_EVENTS:
         if event == "os.system":
-            reason = _shell_network_command(args[0])
+            reason = _shell_network_command(args[0], None)
         else:
             argv, env = _spawn_argv(event, args) or ([], None)
             reason = _network_command(argv, env)
@@ -253,7 +338,15 @@ sys.addaudithook(_network_audit_hook)  # audit hooks cannot be removed; the guar
 
 
 def _uvloop_policy_active() -> bool:
-    return type(asyncio.get_event_loop_policy()).__module__.split(".")[0] == "uvloop"
+    # Loop policies are deprecated in 3.14 and removed in 3.16; without them uvloop can only
+    # arrive through a loop factory, which `_no_real_network` blocks.
+    get_policy = getattr(asyncio, "get_event_loop_policy", None)
+    if get_policy is None:
+        return False
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        policy = get_policy()
+    return type(policy).__module__.split(".")[0] == "uvloop"
 
 
 def _blocked_message(nodeid: str, targets: list[str]) -> str:
