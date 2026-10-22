@@ -321,6 +321,10 @@ class Assessment(SQLModel, table=True):
     paper_probe_id: Optional[int] = Field(default=None, foreign_key="paperprobe.id")
     baseline_assessment_id: Optional[int] = Field(default=None, foreign_key="assessment.id")
     delta: Optional[float] = None
+    # The `Prompt.tag` ("name@vN") of the prompt whose model call produced this grade, so
+    # grades can be compared across prompt versions. NULL = unknown: rows written before the
+    # column existed, or not produced by a model call.
+    prompt_tag: Optional[str] = None
     created_at: datetime = Field(default_factory=_now)
 
 

@@ -32,7 +32,7 @@ def get_setup() -> SetupOut:
             llm_backend="agent_sdk",
             llm_ready=True,
             # Not probed: a host where Claude Code is not logged in still reports ready, and
-            # each LLM call then returns a legible "Agent SDK request failed" error.
+            # each LLM call then returns a legible 502 with category "agent_sdk".
             message=("Using the Claude Agent SDK backend (your Claude subscription). "
                      "Claude Code must be installed and logged in on this host."),
             models=models,

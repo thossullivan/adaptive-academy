@@ -423,6 +423,11 @@ PROBES: list[_Probe] = [
            "Held cold, and now includes the open-vocabulary reason.", baseline=9),
 ]
 
+# Which prompt grades each probe kind in the real app (every other kind goes through
+# assess_concept's GRADE), so the demo rows carry the prompt_tag a real grade would.
+_GRADED_BY = {"teach": TEACH, "productive_failure": PF_CONSOLIDATE,
+              "artifact_review": ASSESS_ARTIFACT}
+
 # (concept key, front, back, status, reps, interval days, due offset in days from now)
 CARDS = [
     ("chain", "What does the chain rule let backward() compute at each node?",
@@ -679,6 +684,9 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
             baseline_assessment_id=baseline.id if baseline else None,
             delta=round(probe.score - baseline.score, 4) if baseline else None,
             item_id=items[probe.item[0]][probe.item[1]].id if probe.item else None,
+            # The current tag of the prompt that grades this kind in the real app, the same
+            # one the trace below stamps for this row.
+            prompt_tag=_GRADED_BY.get(probe.kind, GRADE).tag,
         )
         session.add(a)
         session.flush()

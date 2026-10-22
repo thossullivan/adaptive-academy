@@ -10,6 +10,7 @@ from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
     AgentEvent,
+    Assessment,
     Concept,
     KnowledgeEstimate,
     Milestone,
@@ -19,6 +20,7 @@ from adaptive_academy.models import (
     TopicFoundation,
     Track,
 )
+from adaptive_academy.prompts import GRADE
 
 
 def _seed_concept(session):
@@ -62,6 +64,28 @@ def test_assess_then_history(session):
     assert h.status_code == 200 and len(h.json()) == 1
     assert client.post("/api/concepts/9999/assess",
                        json={"kind": "self_explanation"}).status_code == 404
+    app.dependency_overrides.clear()
+
+
+def test_assessments_expose_the_grading_prompt_tag(session):
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_llm] = lambda: _llm()
+    cid = _seed_concept(session)
+    # A row from before the column existed (or written without a model): tag unknown.
+    session.add(Assessment(concept_id=cid, kind="self_explanation", prompt="p", score=0.5))
+    session.commit()
+    client = TestClient(app)
+
+    r = client.post(f"/api/concepts/{cid}/assess",
+                    json={"kind": "self_explanation", "response": "attention focuses"})
+    assert r.status_code == 200, r.text
+    assert r.json()["prompt_tag"] == GRADE.tag
+    history = client.get(f"/api/concepts/{cid}/assessments").json()
+    assert [a["prompt_tag"] for a in history] == [GRADE.tag, None]
+    # Read-only: a client-sent tag is not an input of the assess route.
+    r = client.post(f"/api/concepts/{cid}/assess",
+                    json={"kind": "self_explanation", "response": "x", "prompt_tag": "fake@v9"})
+    assert r.json()["prompt_tag"] == GRADE.tag
     app.dependency_overrides.clear()
 
 

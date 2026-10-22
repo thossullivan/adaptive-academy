@@ -317,7 +317,8 @@ def assess_concept(
         verdict=grade.verdict, score=final_score, gaps=gaps,
         confidence_predicted=confidence_predicted, confidence_actual=confidence_actual,
         rubric_id=rubric_id, anchor_id=anchor_ref_id,
-        baseline_assessment_id=baseline_id, delta=delta)
+        baseline_assessment_id=baseline_id, delta=delta,
+        prompt_tag=GRADE.tag)  # the grading prompt, as traced above (not RUBRIC)
     session.add(assessment)
     session.flush()
     index_assessment(session, assessment, topic_id=topic_id, retriever=retriever)

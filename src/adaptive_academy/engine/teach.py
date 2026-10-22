@@ -72,6 +72,7 @@ def grade_teaching(
         verdict=feedback,
         score=score,
         gaps=gaps,
+        prompt_tag=TEACH.tag,
     )
     session.add(assessment)
     session.flush()

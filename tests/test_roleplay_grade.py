@@ -10,6 +10,7 @@ from adaptive_academy.models import (
     ProgramTopicLink, RoleplaySession, RoleplayTurn, Assessment,
 )
 from adaptive_academy.engine.roleplay import grade_roleplay
+from adaptive_academy.prompts import GRADE, ROLEPLAY_GRADE
 from adaptive_academy.engine.gates import evaluate_concept, evaluate_milestone_readonly
 
 
@@ -67,6 +68,9 @@ def test_grade_writes_one_assessment_per_concept_and_outcome(session):
     assert rp.outcome["result"] == "demo booked"
     rows = session.exec(select(Assessment).where(Assessment.roleplay_session_id == rp.id)).all()
     assert len(rows) == 1
+    # The per-concept grade came from assess_concept's GRADE; ROLEPLAY_GRADE only wrote the
+    # session outcome, so it must not be the tag on the graded row.
+    assert rows[0].prompt_tag == GRADE.tag != ROLEPLAY_GRADE.tag
 
 
 def test_roleplay_at_threshold_counts_as_artifact_ok():

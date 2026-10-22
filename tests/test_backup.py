@@ -20,6 +20,7 @@ from adaptive_academy.models import AgentEvent, Assessment, Concept, Topic, Trac
 
 REVISION = "test0revision"
 WHEN = datetime(2026, 10, 19, 12, 30, 45, 123456, tzinfo=timezone.utc)
+PROMPT_TAG = "assess.grade@v3"
 
 
 def _sqlite_header_journal_byte(path: Path) -> int:
@@ -70,6 +71,7 @@ def live_db(tmp_path):
                 prompt="Why do eigenvectors matter?",
                 score=0.75,
                 gaps=["orthogonality"],
+                prompt_tag=PROMPT_TAG,
                 created_at=WHEN,
             )
         )
@@ -190,6 +192,7 @@ def test_export_rows_round_trip_with_iso_datetimes_and_json_columns(live_db, tmp
     [assessment] = doc["tables"]["assessment"]
     assert assessment["gaps"] == ["orthogonality"]  # JSON column stays structured
     assert assessment["score"] == 0.75
+    assert assessment["prompt_tag"] == PROMPT_TAG
     [agent_event] = doc["tables"]["agentevent"]
     assert agent_event["detail"] == "ünïcode ✓"
     datetime.fromisoformat(agent_event["created_at"])
@@ -208,6 +211,37 @@ def test_export_of_db_missing_a_newer_table_still_lists_it_empty(tmp_path):
     assert doc["schema_revision"] is None
     assert doc["tables"]["topic"] == [{"id": 1, "title": "Old"}]
     assert doc["tables"]["concept"] == []
+
+
+def test_export_of_db_before_the_prompt_tag_column_omits_it(tmp_path):
+    # A db at a revision before assessment.prompt_tag: its rows export without the key (not
+    # with an invented value), and the export still succeeds.
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE assessment (id INTEGER PRIMARY KEY, kind VARCHAR NOT NULL, "
+                 "score FLOAT NOT NULL)")
+    conn.execute("INSERT INTO assessment (kind, score) VALUES ('self_explanation', 0.5)")
+    conn.commit()
+    conn.close()
+
+    doc = _export(f"sqlite:///{path}", tmp_path / "old.json")
+
+    assert doc["tables"]["assessment"] == [{"id": 1, "kind": "self_explanation", "score": 0.5}]
+
+
+def test_restore_keeps_the_prompt_tag(live_db, tmp_path):
+    _, url = live_db
+    snap = backup.snapshot(tmp_path / "snap.db", database_url=url)
+    target = tmp_path / "restored" / "adaptive_academy.db"
+    target.parent.mkdir()
+
+    backup.restore(snap, database_url=f"sqlite:///{target}", backup_dir=tmp_path / "bk")
+
+    conn = sqlite3.connect(target)
+    try:
+        assert conn.execute("SELECT prompt_tag FROM assessment").fetchall() == [(PROMPT_TAG,)]
+    finally:
+        conn.close()
 
 
 # --- restore ------------------------------------------------------------------------------

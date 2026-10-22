@@ -10,6 +10,7 @@ from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
     AgentEvent, Assessment, Concept, KnowledgeEstimate, Topic, TopicFoundation, Track,
 )
+from adaptive_academy.prompts import GRADE
 
 
 def _concept(session, level="high"):
@@ -99,3 +100,33 @@ def test_delta_vs_baseline(session: Session):
                    baseline_id=a1.id)
     a2 = session.exec(select(Assessment).where(Assessment.score == 0.8)).one()
     assert abs(a2.delta - 0.5) < 1e-6
+
+
+def test_assessment_records_the_grading_prompt_tag(session: Session):
+    _, concept = _concept(session)
+    result = assess_concept(session, concept, "self_explanation", "softmax over QK^T",
+                            llm=_llm([], grade_score=0.8))
+    # The tag of the prompt that produced the grade (not the rubric prompt that ran first),
+    # and the same tag the trace says ran.
+    assert result.assessment.prompt_tag == GRADE.tag
+    traced = session.exec(select(AgentEvent.detail).where(AgentEvent.kind == "prompt")).all()
+    assert traced == [GRADE.tag]
+
+
+def test_artifact_review_through_assess_concept_records_the_grade_tag(session: Session):
+    _, concept = _concept(session)
+    grade = json.dumps({"score": 0.9, "verdict": "v", "gaps": [], "mechanism_present": True})
+    result = assess_concept(session, concept, "artifact_review", "my repo",
+                            llm=ScriptedLLMClient([LLMResponse(text=grade)]))
+    # assess_concept grades every kind with GRADE (the ship review's ASSESS_ARTIFACT is a
+    # different path, engine/artifact.py).
+    assert result.assessment.prompt_tag == GRADE.tag
+
+
+def test_assessment_written_without_a_model_has_no_prompt_tag(session: Session):
+    _, concept = _concept(session)
+    a = Assessment(concept_id=concept.id, kind="self_explanation", prompt="p", score=0.3)
+    session.add(a)
+    session.commit()
+    session.refresh(a)
+    assert a.prompt_tag is None

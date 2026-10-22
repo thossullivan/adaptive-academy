@@ -108,7 +108,8 @@ def review_artifact(
         session.add(Assessment(
             concept_id=c.id, kind="artifact_review",
             prompt=f"Ship: {deliverable.text[:80]}", response=content[:2000],
-            verdict=grade.verdict, score=score, gaps=grade.gaps))
+            verdict=grade.verdict, score=score, gaps=grade.gaps,
+            prompt_tag=ASSESS_ARTIFACT.tag))
     session.add(AgentEvent(
         topic_id=topic_id, kind="artifact:reviewed",
         detail=f"score={score}, {len(concepts)} concept(s)"))

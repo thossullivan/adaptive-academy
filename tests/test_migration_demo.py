@@ -39,7 +39,7 @@ def test_demo_flag_migration_upgrades_populated_database_and_downgrades(tmp_path
                                 "VALUES (1, 1, 'Core', '')"))
     engine.dispose()
 
-    upgraded = _alembic(url, "upgrade", "head")
+    upgraded = _alembic(url, "upgrade", DEMO_REVISION)
     assert upgraded.returncode == 0, upgraded.stderr
     engine = create_engine(url)
     columns = {c["name"]: c for c in inspect(engine).get_columns("topic")}

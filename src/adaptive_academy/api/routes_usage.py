@@ -34,6 +34,9 @@ class UsageWindowsOut(BaseModel):
 
 class FeatureUsageOut(UsageTotalsOut):
     feature: str | None
+    # Input tokens read from the prompt cache, as a share of all input tokens (0..1); None
+    # when the feature sent none.
+    cache_read_share: float | None
 
 
 class ModelUsageOut(UsageTotalsOut):

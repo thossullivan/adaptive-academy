@@ -82,5 +82,5 @@ def test_migration_applies_to_populated_referenced_tables(tmp_path):
 
     assert "archived" in milestone_cols
     assert "added_by" in link_cols
-    assert version == "a7d3c5e9f2b1"  # head as of the demo-topic migration
+    assert version == "b4e8d2f6a3c9"  # head as of the assessment prompt_tag migration
     assert milestone_count == 1 and link_count == 1

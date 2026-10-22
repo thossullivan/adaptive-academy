@@ -1,6 +1,7 @@
 import type {
   Anchor,
   AnchorGen,
+  ApiErrorBody,
   AssessBody,
   Assessment,
   Challenge,
@@ -61,7 +62,7 @@ async function j<T>(r: Response): Promise<T> {
   if (!r.ok) {
     // Prefer the API's own `detail` (e.g. the missing-key 503 says how to fix it); fall back
     // to the status line for non-JSON bodies.
-    const body = await r.json().catch(() => null);
+    const body: ApiErrorBody | null = await r.json().catch(() => null);
     const detail = typeof body?.detail === 'string' ? body.detail : null;
     throw new Error(detail ?? `${r.status} ${r.statusText}`);
   }

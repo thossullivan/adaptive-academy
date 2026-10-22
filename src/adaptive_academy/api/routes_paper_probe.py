@@ -43,7 +43,8 @@ def _scorecard(session: Session, pid: int) -> list[ScorecardRow] | None:
     for a in rows:
         c = session.get(Concept, a.concept_id)
         out.append(ScorecardRow(concept_id=a.concept_id, concept=c.name if c else "",
-                                score=a.score, verdict=a.verdict, gaps=list(a.gaps)))
+                                score=a.score, verdict=a.verdict, gaps=list(a.gaps),
+                                prompt_tag=a.prompt_tag))
     return out
 
 

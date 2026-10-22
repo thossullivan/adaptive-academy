@@ -30,7 +30,8 @@ def _assessment_out(a: Assessment, level: str | None = None) -> AssessmentOut:
     return AssessmentOut(
         id=a.id, kind=a.kind, prompt=a.prompt, response=a.response, verdict=a.verdict,
         score=a.score, gaps=a.gaps, confidence_predicted=a.confidence_predicted,
-        confidence_actual=a.confidence_actual, delta=a.delta, estimate_level=level)
+        confidence_actual=a.confidence_actual, delta=a.delta, estimate_level=level,
+        prompt_tag=a.prompt_tag)
 
 
 def _program_id_for_concept(session: Session, concept: Concept) -> int | None:

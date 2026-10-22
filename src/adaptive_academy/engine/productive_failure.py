@@ -200,6 +200,7 @@ def consolidate(
         verdict=feedback,
         score=score,
         gaps=[],
+        prompt_tag=PF_CONSOLIDATE.tag,  # the grade's prompt; PF_GENERATE only wrote the problem
     )
     session.add(assessment)
     session.flush()

@@ -29,6 +29,7 @@ from adaptive_academy.engine.tutor import TurnResult, _FALLBACK
 from adaptive_academy.llm.agent_sdk_client import record_sdk_result
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.retriever_types import Hit, Retriever
+from adaptive_academy.llm.today import with_today
 from adaptive_academy.llm.types import AgentSDKError
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
 from adaptive_academy.prompts import build_tutor_system_prompt
@@ -136,7 +137,7 @@ def run_tutor_turn_sdk(
         async for msg in query(
             prompt=prompt,
             options=ClaudeAgentOptions(
-                model=model, system_prompt=system,
+                model=model, system_prompt=with_today(system),
                 mcp_servers={"tutor": server},
                 allowed_tools=["mcp__tutor__log_attempt", "mcp__tutor__reveal_solution"],
                 permission_mode="bypassPermissions", max_turns=_MAX_TURNS,
