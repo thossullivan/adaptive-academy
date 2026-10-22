@@ -76,7 +76,8 @@ say "installing frontend dependencies (npm ci)"
 say "setup complete"
 if grep -Eq '^ANTHROPIC_API_KEY=(sk-ant-xxxxx)?[[:space:]]*$' .env; then
 	echo "Next: set ANTHROPIC_API_KEY in .env (get a key at https://console.anthropic.com/),"
-	echo "      then run \`just dev\` and open http://localhost:5173"
+	echo "      or use OpenRouter: AA_LLM_BACKEND=openrouter and OPENROUTER_API_KEY."
+	echo "      Then run \`just dev\` and open http://localhost:5173"
 else
 	echo "Next: run \`just dev\` and open http://localhost:5173"
 fi

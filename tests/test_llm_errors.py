@@ -135,7 +135,7 @@ def test_model_unavailable_keeps_naming_the_model_and_setting():
 
 def test_budget_and_missing_key_keep_their_specific_text():
     assert "$5.20 spent today" in describe_llm_error(BudgetExceededError(5.2, 5.0)).detail
-    assert "No ANTHROPIC_API_KEY configured" in describe_llm_error(MissingAPIKeyError()).detail
+    assert "No ANTHROPIC_API_KEY is set" in describe_llm_error(MissingAPIKeyError()).detail
 
 
 # --- through the API -------------------------------------------------------------------
@@ -265,7 +265,7 @@ def test_openrouter_details_name_openrouter_and_its_key(on_openrouter):
     assert rate.startswith("OpenRouter is limiting")
     missing = describe_llm_error(MissingAPIKeyError(env_var="OPENROUTER_API_KEY"))
     assert (missing.category, missing.status_code) == ("auth", 503)
-    assert "No OPENROUTER_API_KEY configured" in missing.detail
+    assert "No OPENROUTER_API_KEY is set" in missing.detail
 
 
 def test_openrouter_unknown_slug_names_the_slug_and_the_setting(on_openrouter, monkeypatch):

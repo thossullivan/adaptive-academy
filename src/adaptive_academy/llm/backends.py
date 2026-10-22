@@ -144,6 +144,13 @@ def in_container() -> bool:
     return os.getenv("AA_IN_CONTAINER", "").strip() == "1"
 
 
+def restart_hint() -> str:
+    """How to restart so a changed .env takes effect, for where the app is running."""
+    if in_container():
+        return "restart the container (`just up` applies the change)"
+    return "restart the API (`just dev` or `just api`)"
+
+
 AGENT_SDK_IN_CONTAINER_DETAIL = (
     "AA_LLM_BACKEND=agent_sdk needs Claude Code signed in on the host, and this container "
     "doesn't have it, so no model calls can run. Unset AA_LLM_BACKEND to use "

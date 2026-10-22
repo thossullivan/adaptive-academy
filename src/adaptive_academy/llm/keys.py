@@ -14,14 +14,14 @@ from adaptive_academy.llm.backends import (
     ANTHROPIC,
     Backend,
     agent_sdk_unavailable,
+    restart_hint,
 )
 
 
 def missing_key_detail(env_var: str) -> str:
-    return (
-        f"No {env_var} configured — copy .env.example to .env, set the key, "
-        "and restart the API (`just api`)."
-    )
+    """The plain fix for a missing key, with the restart step for where the app runs."""
+    return (f"No {env_var} is set. Copy .env.example to .env if you haven't, set the key "
+            f"in .env, then {restart_hint()}.")
 
 
 MISSING_KEY_DETAIL = missing_key_detail(ANTHROPIC.key_env)
@@ -59,7 +59,7 @@ def key_problem(backend: Backend) -> str | None:
         if key.startswith(prefix):
             return (f"{backend.key_env} holds {'an' if service[0] in 'AEIOU' else 'a'} "
                     f"{service} key (it starts with {prefix}). Put your {backend.provider} "
-                    f"key in {backend.key_env} in .env and restart the API (`just api`).")
+                    f"key in {backend.key_env} in .env, then {restart_hint()}.")
     return None
 
 

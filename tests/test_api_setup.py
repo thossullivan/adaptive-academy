@@ -137,7 +137,7 @@ def test_llm_route_without_key_is_legible_503(client, session, monkeypatch, no_n
                     json={"kind": "self_explanation", "response": "..."})
     assert r.status_code == 503
     detail = r.json()["detail"]
-    assert "No ANTHROPIC_API_KEY configured" in detail
+    assert "No ANTHROPIC_API_KEY is set" in detail
     assert ".env.example" in detail
     assert "just api" in detail
 
@@ -151,7 +151,7 @@ def test_research_route_without_key_is_legible_503(client, session, monkeypatch,
     session.commit()
     r = client.post(f"/api/topics/{topic.id}/research")
     assert r.status_code == 503
-    assert "No ANTHROPIC_API_KEY configured" in r.json()["detail"]
+    assert "No ANTHROPIC_API_KEY is set" in r.json()["detail"]
 
 
 def test_anthropic_clients_raise_typed_error_without_key(monkeypatch, no_network):
@@ -307,5 +307,5 @@ def test_llm_route_on_openrouter_without_key_is_legible_503(client, session, mon
     r = client.post(f"/api/concepts/{cid}/assess",
                     json={"kind": "self_explanation", "response": "..."})
     assert r.status_code == 503
-    assert "No OPENROUTER_API_KEY configured" in r.json()["detail"]
+    assert "No OPENROUTER_API_KEY is set" in r.json()["detail"]
     assert r.json()["category"] == "auth"
