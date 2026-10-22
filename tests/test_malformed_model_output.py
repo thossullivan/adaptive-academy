@@ -283,3 +283,12 @@ def test_curriculum_run_skips_the_live_shape_and_traces_it(session):
     assert [p.title for p in result.track.phases] == ["P1"]
     [detail] = [e.detail for e in result.events if e.kind == "curriculum:malformed"]
     assert detail == "WARN 1 malformed entry skipped: $.phases[1]"
+
+
+def test_anchor_key_point_objects_keep_the_point_not_the_concept():
+    from adaptive_academy.engine.anchors import parse_anchors_json
+
+    [a] = parse_anchors_json(json.dumps({"anchors": [{
+        "question": "q", "reference_answer": "r", "concept": "Softmax",
+        "key_points": [{"concept": "Softmax", "point": "subtract the max"}, "overflow"]}]}))
+    assert a.key_points == ["subtract the max", "overflow"]

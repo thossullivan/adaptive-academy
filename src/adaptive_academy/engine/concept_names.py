@@ -117,10 +117,31 @@ _SPACED_OPERATOR = re.compile(r"\s*([/=<>^≤≥≠≈−×·*])\s*")
 _WORD = re.compile(r"[^\W_]+")
 # "Gauss - Newton", "Gauss - Newton method" — not Title Case "Momentum - Faster Convergence"
 _SPACED_COMPOUND = re.compile(r"^([A-Z]\w*) - ([A-Z]\w*)(?=$|\s+[a-z])")
-# Repair only (the check stays strict, so the model is still asked to fix the name): a named
-# compound that ends the name or is followed by one more word, anywhere in it ("Kullback -
-# Leibler Divergence", "Damped Gauss - Newton method"). Longer tails are claims, not names.
-_REPAIR_COMPOUND = re.compile(r"\b([A-Z]\w*) - ([A-Z]\w*)(?=$|\s+\S+$)")
+# Repair only (the check stays strict, so the model is still asked to fix the name): join a
+# " - " compound when it is the whole name ("Gauss - Newton") or is followed by one noun that
+# names a kind of object ("Kullback - Leibler Divergence", "Damped Gauss - Newton method").
+# Any other tail ("Momentum - Faster Convergence", "Regularization - Prevents Overfitting",
+# "Learning Rate - Important") reads as a subtitle or claim, and the head before the dash is
+# kept instead. "Generalized Gauss - Newton" therefore repairs to "Generalized Gauss": rare,
+# since repair runs only after the correction retry also failed.
+_REPAIR_COMPOUND = re.compile(r"\b([A-Z]\w*) - ([A-Z]\w*)(?=\s+(\S+)$)")
+_WHOLE_COMPOUND = re.compile(r"^([A-Z]\w*) - ([A-Z]\w*)$")
+_NAMED_OBJECT_NOUNS = frozenset({
+    "algorithm", "bound", "criterion", "distance", "distribution", "divergence", "equation",
+    "estimator", "inequality", "kernel", "law", "lemma", "loss", "method", "metric", "model",
+    "network", "norm", "principle", "problem", "process", "rule", "search", "space",
+    "statistic", "test", "theorem", "transform",
+})
+
+
+def _repair_join(text: str) -> str:
+    """`text` with an eponym-shaped " - " compound joined (see _REPAIR_COMPOUND)."""
+    if _WHOLE_COMPOUND.match(text):
+        return _WHOLE_COMPOUND.sub(r"\1-\2", text)
+    m = _REPAIR_COMPOUND.search(text)
+    if m and m.group(3).casefold() in _NAMED_OBJECT_NOUNS:
+        return text[:m.start()] + f"{m.group(1)}-{m.group(2)}" + text[m.end():]
+    return text
 _FUNCTION_NAME = re.compile(r"^[^\W\d_]+(?=\()")
 
 
@@ -381,7 +402,7 @@ def repair_name(name: Any, *, fallback: str) -> str:
     if not isinstance(name, str):
         return fallback
     text = _join_compounds(" ".join(name.split()))
-    joined = _REPAIR_COMPOUND.sub(r"\1-\2", text)
+    joined = _repair_join(text)
     if joined != text and not name_problems(joined):
         return joined  # "Kullback - Leibler Divergence" -> "Kullback-Leibler Divergence"
     segments = [s for s in _SEPARATOR.split(text) if s and _WORD.search(s)]

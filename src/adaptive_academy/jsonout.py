@@ -50,12 +50,15 @@ def str_items(value: Any) -> list[str]:
 
 
 # Keys a model uses when it wraps a name or a point in an object instead of a bare string.
-_TEXT_KEYS = ("name", "concept", "title", "text", "point", "label")
+NAME_KEYS = ("name", "concept", "title", "label", "text", "point")
+POINT_KEYS = ("point", "text", "key_point", "name", "concept", "title", "label")
 
 
-def text_items(value: Any) -> list[str]:
-    """Like str_items, but an object entry contributes its name-like string field
-    ({"name": "Chain rule"} -> "Chain rule") instead of being dropped."""
+def text_items(value: Any, keys: tuple[str, ...] = NAME_KEYS) -> list[str]:
+    """Like str_items, but an object entry contributes its first non-empty string field from
+    `keys` ({"name": "Chain rule"} -> "Chain rule") instead of being dropped. Names use
+    NAME_KEYS; anchor key points use POINT_KEYS, so {"concept": ..., "point": ...} keeps the
+    point."""
     if not isinstance(value, list):
         return []
     out: list[str] = []
@@ -63,7 +66,7 @@ def text_items(value: Any) -> list[str]:
         if isinstance(v, str):
             out.append(v)
         elif isinstance(v, dict):
-            text = next((v[k] for k in _TEXT_KEYS if isinstance(v.get(k), str) and v[k].strip()),
+            text = next((v[k] for k in keys if isinstance(v.get(k), str) and v[k].strip()),
                         None)
             if text is not None:
                 out.append(text)

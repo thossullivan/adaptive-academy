@@ -264,7 +264,6 @@ def test_summary_lists_input_and_output():
     ("Kullback - Leibler Divergence", "Kullback-Leibler Divergence"),
     ("Cauchy - Schwarz Inequality", "Cauchy-Schwarz Inequality"),
     ("Levenberg - Marquardt Algorithm", "Levenberg-Marquardt Algorithm"),
-    ("Generalized Gauss - Newton", "Generalized Gauss-Newton"),
     ("Damped Gauss - Newton method", "Damped Gauss-Newton method"),
 ])
 def test_repair_keeps_named_compounds_whole(name, expected):
@@ -277,3 +276,16 @@ def test_repair_keeps_named_compounds_whole(name, expected):
                                   "Learning Rate - Too High Diverges"])
 def test_repair_still_drops_long_dash_claims(name):
     assert "-" not in repair_name(name, fallback="Concept 1").split()[0][1:]
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("Momentum - Faster Convergence", "Momentum"),
+    ("Regularization - Prevents Overfitting", "Regularization"),
+    ("Dropout - Reduces Overfitting", "Dropout"),
+    ("Attention - Key Idea", "Attention"),
+    ("Batch Norm - Stabilizes training", "Batch Norm"),
+    ("Learning Rate - Important", "Learning Rate"),
+])
+def test_repair_does_not_glue_a_subtitle_or_claim_into_a_compound(name, expected):
+    # Final review: only eponym-shaped compounds are joined by repair.
+    assert repair_name(name, fallback="Concept 1") == expected

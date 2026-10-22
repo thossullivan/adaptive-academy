@@ -190,7 +190,8 @@ def test_absent_rubric_fields_are_regenerated(session):
         {"score": 0.9, "mechanism_present": True, "verdict": "v", "gaps": []}))
     a, llm = _assess(session, concept, "x", old_shape, _grade(0.9))
     correction = llm.calls[1]["messages"][-1]["content"]
-    assert "- G11:" in correction and "- G12:" in correction
+    # Only the field for a non-empty list is required: no misconceptions were sent.
+    assert "- G11:" in correction and "- G12:" not in correction
     assert a.score == 0.9
 
 
@@ -259,3 +260,25 @@ def test_golden_rubric_items(session, path):
 
 def test_golden_rubric_items_exist():
     assert list(GOLDEN.glob("*.json"))
+
+
+@pytest.mark.parametrize(("sent", "named"), [
+    ("numerical stability.", "numerical stability"),
+    ("Xᵀ(Xθ − y)", "Xᵀ(Xθ - y)"),
+    ("chain rule", '"chain rule"'),
+    ("- learning rate", "learning rate"),
+    ("Chain rule", "• chain rule;"),
+])
+def test_a_tidied_copy_of_an_item_still_matches(sent, named):
+    from adaptive_academy.engine.output_checks import match_items
+
+    found, unknown = match_items([named], [sent])
+    assert found == [sent] and unknown == []
+
+
+def test_absent_fields_are_fine_when_nothing_was_sent():
+    from adaptive_academy.engine.output_checks import GRADE_RUBRIC, CheckContext, check_output
+
+    _, report = check_output(GRADE_RUBRIC, '{"score": 0.5, "verdict": "ok", "gaps": ["x"], '
+                                           '"mechanism_present": true}', CheckContext())
+    assert "G11" not in report.failed_ids and "G12" not in report.failed_ids

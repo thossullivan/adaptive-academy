@@ -239,3 +239,23 @@ def test_curriculum_route_dsml_twice_is_a_legible_502(session, deepseek):
     r = _route_client(session, wire).post(f"/api/topics/{topic.id}/curriculum")
     assert r.status_code == 502, r.text
     assert r.json()["category"] == "invalid_output"
+
+
+def test_two_complete_objects_in_separate_blocks_take_the_first_valid_one(session, deepseek):
+    # Final review: joining the blocks gave "{...}{...}" and cost a retry.
+    wire = Wire(_message(_text(GOOD), _text(GOOD)))
+    assert _complete(wire) == GOOD
+    assert len(wire.requests) == 1
+
+
+def test_a_stray_brace_in_prose_before_the_answer_block_costs_no_retry(session, deepseek):
+    wire = Wire(_message(_text("Using {braces} first."), _text(GOOD)))
+    assert _complete(wire) == GOOD
+    assert len(wire.requests) == 1
+
+
+def test_a_tool_use_answer_is_used_when_the_model_ignores_json_mode(session, deepseek):
+    tool_use = {"type": "tool_use", "id": "toolu_1", "name": "emit_track", "input": GOOD}
+    wire = Wire(_message(tool_use))
+    assert _complete(wire) == GOOD
+    assert len(wire.requests) == 1

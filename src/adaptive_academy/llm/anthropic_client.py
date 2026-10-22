@@ -321,8 +321,17 @@ class AnthropicLLMClient:
             stop_reason = getattr(resp, "stop_reason", None)
             if stop_reason in NO_RETRY_STOP_REASONS:
                 raise StructuredOutputError(stop_reason)
-            text = "".join(b.text for b in resp.content if b.type == "text")
-            data = _json_object(text)
+            texts = [b.text for b in resp.content if b.type == "text"]
+            text = "".join(texts)
+            # Each text block on its own first (two complete objects, or a stray brace in
+            # prose, would spoil the joined text), then the joined text (an object split
+            # across blocks), then a tool_use block's input if the model used a tool anyway.
+            data = next((d for d in map(_json_object, texts) if d is not None), None)
+            if data is None:
+                data = _json_object(text)
+            if data is None:
+                data = next((b.input for b in resp.content
+                             if b.type == "tool_use" and isinstance(b.input, dict)), None)
             if data is None:
                 failure = "not_json"
                 begins = (f"it begins {text.strip()[:60]!r}" if text.strip()

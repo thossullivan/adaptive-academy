@@ -75,6 +75,8 @@ model output).
 
 import json
 import math
+import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -238,10 +240,18 @@ def _on_band(score: float, bands: tuple[float, ...]) -> bool:
     return any(abs(score - b) < 1e-6 for b in bands)
 
 
+_DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2212"), "-")
+_EDGE = " \t\"'\u201c\u201d\u2018\u2019`.,;:"
+_BULLET = re.compile(r"^(?:[-*\u2022]\s+)+")
+
+
 def item_key(item: str) -> str:
-    """How a named rubric item is compared with the items sent: trimmed, inner whitespace
-    collapsed, casefolded."""
-    return " ".join(item.split()).casefold()
+    """How a named rubric item is compared with the items sent, forgiving the ways a grader
+    "tidies" a copied item: NFKC, Unicode dashes and minus as "-", surrounding quotes, a
+    leading bullet and trailing punctuation dropped, whitespace collapsed, casefolded."""
+    text = unicodedata.normalize("NFKC", item).translate(_DASHES)
+    text = _BULLET.sub("", text.strip()).strip(_EDGE)
+    return " ".join(text.split()).casefold()
 
 
 def match_items(entries: list[str],
@@ -357,9 +367,11 @@ def _g10(d, _ctx):
     return None
 
 
-def _required_string_list(key: str):
-    def check(d, _ctx):
+def _required_string_list(key: str, sent: Callable[[CheckContext], tuple[str, ...]]):
+    def check(d, ctx: CheckContext):
         if key not in d:
+            if not sent(ctx):
+                return None  # nothing was sent for this list, so absence hides no cap
             return f"{key} is missing (use [] when there is nothing to list)"
         if d[key] is None:
             return f"{key} is null, not a list of strings"
@@ -410,9 +422,9 @@ G8 = Rule("G8", WARN, "score is a grade band midpoint", _band_check(GRADE_BANDS)
 G9 = Rule("G9", WARN, "score respects the ceiling its rubric fields imply", _g9)
 G10 = Rule("G10", WARN, "a below-top-band score names a gap", _g10)
 G11 = Rule("G11", FAIL, "missing_required is a list of strings",
-           _required_string_list(_MISSING))
+           _required_string_list(_MISSING, lambda ctx: ctx.required))
 G12 = Rule("G12", FAIL, "misconceptions_committed is a list of strings",
-           _required_string_list(_COMMITTED))
+           _required_string_list(_COMMITTED, lambda ctx: ctx.misconceptions))
 G13 = Rule("G13", FAIL, "missing_required names only REQUIRED ELEMENTS sent",
            _only_sent_items(_MISSING, "REQUIRED ELEMENTS", lambda ctx: ctx.required))
 G14 = Rule("G14", FAIL, "misconceptions_committed names only KNOWN MISCONCEPTIONS sent",

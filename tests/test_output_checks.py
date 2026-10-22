@@ -128,12 +128,14 @@ RULE_TABLE = [
     (oc.G10, {"score": 0.5, "gaps": [" "]}, _CTX, True),
     (oc.G11, {"missing_required": []}, _CTX, False),
     (oc.G11, {"missing_required": ["softmax"]}, _ITEMS, False),
-    (oc.G11, {}, _CTX, True),
+    (oc.G11, {}, _ITEMS, True),
+    (oc.G11, {}, _CTX, False),  # nothing sent: absence hides no cap
     (oc.G11, {"missing_required": None}, _CTX, True),
     (oc.G11, {"missing_required": "softmax"}, _ITEMS, True),
     (oc.G11, {"missing_required": ["softmax", 2]}, _ITEMS, True),
     (oc.G12, {"misconceptions_committed": []}, _CTX, False),
-    (oc.G12, {}, _CTX, True),
+    (oc.G12, {}, _ITEMS, True),
+    (oc.G12, {}, _CTX, False),
     (oc.G12, {"misconceptions_committed": {"a": 1}}, _ITEMS, True),
     (oc.G13, {"missing_required": []}, _CTX, False),
     (oc.G13, {}, _CTX, False),  # G11's job
