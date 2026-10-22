@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import PROVIDER_ENV_VARS
+from conftest import PROVIDER_ENV_VARS, _network_command
 
 CONFTEST = Path(__file__).with_name("conftest.py")
 ISOLATED_ENV = Path(__file__).with_name("_isolated_env.py")
@@ -122,6 +122,9 @@ def test_local_child_processes_still_run():
                  ["/nonexistent/sh", "scripts/dev.sh"]):
         with pytest.raises(FileNotFoundError):
             subprocess.run(argv)
+    # UV_OFFLINE is read from the env the child gets, through `sh -c`, not from this process.
+    with pytest.raises(FileNotFoundError):
+        subprocess.run(["/nonexistent/sh", "-c", "uv sync"], env={**os.environ, "UV_OFFLINE": "1"})
 
 
 def test_uvloop_run_is_blocked():
@@ -294,6 +297,47 @@ def test_legitimate_traffic_and_opt_out_pass(result, name):
 
 def test_allow_network_marker_is_registered(result):
     assert "PytestUnknownMarkWarning" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("argv,child_env,parent_offline,expected", [
+    # Wrappers and env prefixes are stripped down to the program that actually runs.
+    (["env", "curl", "x"], None, False, "curl"),
+    (["/usr/bin/env", "node", "-e", "1"], None, False, "node"),
+    (["env", "-u", "HOME", "FOO=1", "curl", "x"], None, False, "curl"),
+    (["timeout", "5", "curl", "x"], None, False, "curl"),
+    (["timeout", "-s", "KILL", "5", "wget", "x"], None, False, "wget"),
+    (["xargs", "curl"], None, False, "curl"),
+    (["xargs", "-n", "1", "curl"], None, False, "curl"),
+    (["nohup", "npx", "tool"], None, False, "npx"),
+    (["bash", "-lc", "curl x"], None, False, "curl"),
+    (["sh", "-e", "-c", "curl x"], None, False, "curl"),
+    (["sh", "-c", "exec uv run uvicorn x"], None, False, "uv without --offline"),
+    (["sh", "-c", "FOO=1 curl x"], None, False, "curl"),
+    (["git", "remote", "update"], None, False, "git remote update"),
+    (["pip3.12", "install", "x"], None, False, "pip install"),
+    # UV_OFFLINE counts only in the env the child actually gets.
+    (["sh", "-c", "uv sync"], {"PATH": "/bin"}, True, "uv without --offline"),
+    (["env", "-i", "uv", "sync"], None, True, "uv without --offline"),
+    (["sh", "-c", "uv sync"], {"UV_OFFLINE": "1"}, False, None),
+    (["sh", "-c", "UV_OFFLINE=1 uv sync"], {}, False, None),
+    (["env", "UV_OFFLINE=1", "uv", "sync"], {}, False, None),
+    (["uv", "sync"], None, True, None),
+    # Local commands, including everything the suite itself spawns.
+    (["uv", "run", "--offline", "alembic", "upgrade", "head"], {}, False, None),
+    (["git", "remote", "-v"], None, False, None),
+    (["git", "status"], None, False, None),
+    (["command", "-v", "curl"], None, False, None),
+    (["sh", "scripts/dev.sh"], None, False, None),
+    (["bash", "-l", "script.sh"], None, False, None),
+    (["timeout", "5", "sleep", "1"], None, False, None),
+    ([sys.executable, "-m", "alembic", "upgrade", "head"], None, False, None),
+])
+def test_child_process_classifier(monkeypatch, argv, child_env, parent_offline, expected):
+    if parent_offline:
+        monkeypatch.setenv("UV_OFFLINE", "1")
+    else:
+        monkeypatch.delenv("UV_OFFLINE", raising=False)
+    assert _network_command(argv, child_env) == expected
 
 
 def test_outer_process_env_is_scrubbed():
