@@ -259,3 +259,9 @@ def test_a_tool_use_answer_is_used_when_the_model_ignores_json_mode(session, dee
     wire = Wire(_message(tool_use))
     assert _complete(wire) == GOOD
     assert len(wire.requests) == 1
+
+
+def test_an_example_object_in_an_early_block_does_not_shadow_the_answer(session, deepseek):
+    wire = Wire(_message(_text('The shape is {"phases": "..."} as described.'), _text(GOOD)))
+    assert _complete(wire) == GOOD
+    assert len(wire.requests) == 1

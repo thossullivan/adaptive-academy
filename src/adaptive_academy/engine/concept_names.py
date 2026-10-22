@@ -127,11 +127,22 @@ _SPACED_COMPOUND = re.compile(r"^([A-Z]\w*) - ([A-Z]\w*)(?=$|\s+[a-z])")
 _REPAIR_COMPOUND = re.compile(r"\b([A-Z]\w*) - ([A-Z]\w*)(?=\s+(\S+)$)")
 _WHOLE_COMPOUND = re.compile(r"^([A-Z]\w*) - ([A-Z]\w*)$")
 _NAMED_OBJECT_NOUNS = frozenset({
-    "algorithm", "bound", "criterion", "distance", "distribution", "divergence", "equation",
-    "estimator", "inequality", "kernel", "law", "lemma", "loss", "method", "metric", "model",
-    "network", "norm", "principle", "problem", "process", "rule", "search", "space",
-    "statistic", "test", "theorem", "transform",
+    "algorithm", "approximation", "architecture", "bound", "condition", "criterion", "curve",
+    "decomposition", "derivative", "distance", "distribution", "divergence", "effect",
+    "equation", "equilibrium", "estimator", "expansion", "filter", "formula", "framework",
+    "function", "inequality", "integral", "iteration", "kernel", "law", "lemma", "loss",
+    "method", "metric", "model", "network", "norm", "orthogonalization", "potential",
+    "principle", "problem", "procedure", "process", "rule", "scheme", "search", "space",
+    "statistic", "test", "theorem", "theory", "thesis", "tradeoff", "transform",
+    "transformation",
 })
+
+
+def _object_noun(word: str) -> bool:
+    """`word` (edge punctuation and a plural ending ignored) names a kind of object."""
+    w = word.strip(".,;:!?)(\"'").casefold()
+    return any(form in _NAMED_OBJECT_NOUNS
+               for form in (w, w[:-1] if w.endswith("s") else w, w[:-2] if w.endswith("es") else w))
 
 
 def _repair_join(text: str) -> str:
@@ -139,7 +150,7 @@ def _repair_join(text: str) -> str:
     if _WHOLE_COMPOUND.match(text):
         return _WHOLE_COMPOUND.sub(r"\1-\2", text)
     m = _REPAIR_COMPOUND.search(text)
-    if m and m.group(3).casefold() in _NAMED_OBJECT_NOUNS:
+    if m and _object_noun(m.group(3)):
         return text[:m.start()] + f"{m.group(1)}-{m.group(2)}" + text[m.end():]
     return text
 _FUNCTION_NAME = re.compile(r"^[^\W\d_]+(?=\()")

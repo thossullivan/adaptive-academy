@@ -289,3 +289,23 @@ def test_repair_still_drops_long_dash_claims(name):
 def test_repair_does_not_glue_a_subtitle_or_claim_into_a_compound(name, expected):
     # Final review: only eponym-shaped compounds are joined by repair.
     assert repair_name(name, fallback="Concept 1") == expected
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("Navier - Stokes Equations", "Navier-Stokes Equations"),
+    ("Euler - Lagrange Equations", "Euler-Lagrange Equations"),
+    ("Runge - Kutta Methods", "Runge-Kutta Methods"),
+    ("Born - Oppenheimer Approximation", "Born-Oppenheimer Approximation"),
+    ("Black - Scholes Formula", "Black-Scholes Formula"),
+    ("Radon - Nikodym Derivative", "Radon-Nikodym Derivative"),
+    ("Bias - Variance Tradeoff", "Bias-Variance Tradeoff"),
+    ("Mean - Field Theory", "Mean-Field Theory"),
+    ("Encoder - Decoder Architecture", "Encoder-Decoder Architecture"),
+    ("Precision - Recall Curve", "Precision-Recall Curve"),
+    ("Newton - Raphson Iteration", "Newton-Raphson Iteration"),
+    ("Gauss - Newton Method.", "Gauss-Newton Method."),
+    ("Gram - Schmidt Orthogonalization", "Gram-Schmidt Orthogonalization"),
+    ("Church - Turing Thesis", "Church-Turing Thesis"),
+])
+def test_repair_keeps_common_named_compounds_with_plural_or_punctuated_tails(name, expected):
+    assert repair_name(name, fallback="Concept 1") == expected

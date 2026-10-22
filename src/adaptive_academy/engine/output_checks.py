@@ -43,13 +43,15 @@ Rules, with the reason each exists:
   G10 WARN  A score below the top band (< 0.9) names at least one gap (in gaps,
             missing_required or misconceptions_committed). Every band below 0.90 is defined
             by something missing; a low grade with no gaps tells the learner nothing to fix.
-  G11 FAIL  "missing_required" is present and a list of strings. GRADE (v6) requires it:
-            it is how the grader reports a REQUIRED ELEMENT the answer does not cover, and
-            the code caps on it. Absent would read as "nothing missing", an uncapped grade.
-  G12 FAIL  "misconceptions_committed" is present and a list of strings: the same, for a
-            KNOWN MISCONCEPTION the answer commits (the 0.50 cap).
-  G13 FAIL  Every missing_required entry is one of the REQUIRED ELEMENTS sent (compared
-            trimmed and casefolded; CheckContext.required). The entry becomes the recorded
+  G11 FAIL  "missing_required" is present and a list of strings whenever REQUIRED ELEMENTS
+            were sent. GRADE (v6) requires it: it is how the grader reports a REQUIRED
+            ELEMENT the answer does not cover, and the code caps on it; absent would read as
+            "nothing missing", an uncapped grade. With nothing sent, absence hides no cap.
+  G12 FAIL  "misconceptions_committed" is present and a list of strings whenever KNOWN
+            MISCONCEPTIONS were sent: the same, for one the answer commits (the 0.50 cap).
+  G13 FAIL  Every missing_required entry is one of the REQUIRED ELEMENTS sent (compared by
+            item_key: NFKC, dashes, quotes, bullets and edge punctuation forgiven,
+            casefolded; CheckContext.required). The entry becomes the recorded
             gap "omitted required element: <item>"; an invented or paraphrased one would
             put words the rubric never had into the learner's record, so the regeneration
             names it.

@@ -323,24 +323,30 @@ class AnthropicLLMClient:
                 raise StructuredOutputError(stop_reason)
             texts = [b.text for b in resp.content if b.type == "text"]
             text = "".join(texts)
-            # Each text block on its own first (two complete objects, or a stray brace in
-            # prose, would spoil the joined text), then the joined text (an object split
-            # across blocks), then a tool_use block's input if the model used a tool anyway.
-            data = next((d for d in map(_json_object, texts) if d is not None), None)
-            if data is None:
-                data = _json_object(text)
-            if data is None:
-                data = next((b.input for b in resp.content
-                             if b.type == "tool_use" and isinstance(b.input, dict)), None)
+            # Candidates in order: each text block on its own (two complete objects, or a
+            # stray brace in prose, would spoil the joined text), the joined text (an object
+            # split across blocks), then a tool_use block's input if the model used a tool
+            # anyway. The first that fits the schema wins, so an example object in an early
+            # prose block can't shadow the real answer; if none fits, the first parseable
+            # one's violations go into the retry.
+            candidates = [d for d in (*map(_json_object, texts), _json_object(text))
+                          if d is not None]
+            candidates += [b.input for b in resp.content
+                           if b.type == "tool_use" and isinstance(b.input, dict)]
+            data = None
+            violations: list = []
+            for candidate in candidates:
+                found = schema_violations(candidate, schema)
+                if not found:
+                    return candidate
+                if data is None:
+                    data, violations = candidate, found
             if data is None:
                 failure = "not_json"
                 begins = (f"it begins {text.strip()[:60]!r}" if text.strip()
                           else "it had no text")
                 listed = f"- $: the reply is not a JSON object ({begins})"
             else:
-                violations = schema_violations(data, schema)
-                if not violations:
-                    return data
                 failure = "schema_mismatch"
                 listed = describe_violations(violations)
             if not retries_left:
