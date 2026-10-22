@@ -81,7 +81,44 @@ page. It needs no API key. Remove it from its dashboard when you're done.
 
 The defaults are `claude-sonnet-5-5` for reasoning and `claude-haiku-5-5` for shorter text,
 in Docker too. If one isn't available to your key, set `AA_MODEL_REASONING` or
-`AA_MODEL_COPY` in `.env` and restart the API.
+`AA_MODEL_COPY` in `.env` and restart the API. Leave them blank to use the defaults of the
+backend you're on.
+
+## OpenRouter
+
+To run on an OpenRouter key instead of an Anthropic one, add these to `.env` and restart:
+
+```bash
+AA_LLM_BACKEND=openrouter
+OPENROUTER_API_KEY=sk-or-...
+```
+
+This works in Docker too. The defaults are `anthropic/claude-sonnet-5.5` and
+`anthropic/claude-haiku-5.5`. Model names on OpenRouter are `vendor/model`, for example
+`deepseek/deepseek-v4.1-flash-1017`.
+
+Things to know:
+
+- Claude models get full support. Any other model works but is marked **Experimental** on
+  the setup card and the Usage page. In a full run, DeepSeek V4.1 Flash cost about a quarter
+  of Claude, but tutor turns took 7 to 28 seconds instead of a few.
+- Each request asks OpenRouter to skip providers that may train on your prompts. It doesn't
+  turn off storage: providers can still keep prompts for things like abuse checks.
+- The app never sends your Anthropic key to OpenRouter, even if `ANTHROPIC_BASE_URL` points
+  there, and it warns you if a key is in the wrong variable.
+- What OpenRouter charges is recorded on the Usage page and counts toward your daily limit.
+
+## Claude subscription (without Docker only)
+
+`AA_LLM_BACKEND=agent_sdk` sends calls through the Claude Agent SDK, using your Claude plan
+instead of an API key. It needs Claude Code installed and logged in on the same machine, so it
+doesn't work in Docker: there the setup card says so and AI features stay off until you
+change it.
+
+## Time zone
+
+"Today" (for the date in prompts and the daily limit) is the server's local day. In Docker
+that's UTC unless you set `TZ` in `.env`, for example `TZ=America/Los_Angeles`.
 
 ## Better search (optional)
 

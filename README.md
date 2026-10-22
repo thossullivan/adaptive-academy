@@ -8,8 +8,8 @@ builds a study plan, tutors you, and keeps track of what you actually know.
 The tutor won't give you the answer until you've tried. That rule lives in the code, not just the
 prompt.
 
-It runs on your own Anthropic API key. Your learning records stay on your computer, but each AI
-request is still sent to Anthropic.
+It runs on your own Anthropic API key, or an OpenRouter key. Your learning records stay on your
+computer, but each AI request is still sent to the model's provider.
 
 ## See it
 
@@ -69,23 +69,30 @@ just dev     # starts the app; Ctrl-C stops it
 
 Open http://localhost:5173.
 
+To use an OpenRouter key instead, set `AA_LLM_BACKEND=openrouter` and `OPENROUTER_API_KEY` in
+`.env`. Claude models are the default there. Other models, such as DeepSeek, work but are
+marked experimental.
+
 Either way, [Your first hour](docs/FIRST_HOUR.md) is a good place to start. For everything
-else (vault setup, Linux file ownership, ports, models, offline use), see
+else (OpenRouter, vault setup, Linux file ownership, ports, models, offline use), see
 [docs/SETUP.md](docs/SETUP.md).
 
 ## Cost and privacy
 
-Several agents work together, so it uses more tokens than a single chatbot. In one
-measured run on Claude Sonnet 5.5, researching a new topic cost about 40 to 50 cents, and a
-tutor turn cost about a cent. A busy day can reach a few dollars.
+Several agents work together, so it uses more tokens than a single chatbot. In measured runs,
+starting a new topic (research, curriculum, a few tutor turns, a grade) cost about 85 cents on
+Claude Sonnet 5.5 and about 20 cents on DeepSeek V4.1 Flash through OpenRouter. Most of that is
+the web research. A tutor turn costs about a cent. A busy day can reach a few dollars.
 
 The **Usage** page shows what you've spent, by day, feature, and model. To set a daily limit,
 add `AA_DAILY_BUDGET_USD=5` to `.env`. Details and limits of that cap are in
 [docs/COSTS.md](docs/COSTS.md).
 
 Your records are stored on your machine. There's no account and no telemetry. The content of
-each AI request does go to Anthropic's API, and the app fetches the web pages and papers you
-give it.
+each AI request does go to Anthropic's API, or through OpenRouter to the model's provider if
+you use OpenRouter. On OpenRouter the app asks only for providers that don't train on your
+prompts; that isn't the same as not storing them. The app also fetches the web pages and
+papers you give it.
 
 ## Back up and restore your data
 
