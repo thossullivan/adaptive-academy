@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 PUBLIC_DOCS = [
     ROOT / name for name in ("README.md", "CONTRIBUTING.md", "SECURITY.md", "ROADMAP.md")
-] + sorted((ROOT / "docs").glob("*.md"))
+] + sorted((ROOT / "docs").glob("*.md")) + sorted((ROOT / "evals").glob("**/README.md"))
 
 RULES = [
     ("em or en dash", re.compile(r"[—–]")),

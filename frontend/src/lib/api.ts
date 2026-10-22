@@ -31,6 +31,7 @@ import type {
   Program,
   ProgramContext,
   ProgramDetail,
+  QualityReport,
   Remediation,
   ResearchResult,
   Retention,
@@ -108,6 +109,7 @@ export function scoutCardTitle(suggestions: TopicSuggestion[]): string | null {
 export const api = {
   getSetup: () => fetch('/api/setup').then(j<SetupStatus>),
   getUsage: () => fetch('/api/usage').then(j<UsageReport>),
+  getUsageQuality: () => fetch('/api/usage/quality').then(j<QualityReport>),
   listTopics: () => fetch('/api/topics').then(j<Topic[]>),
   /** Add the demo topic (idempotent; no API key needed) and return its id. */
   createDemo: () => fetch('/api/demo', { method: 'POST' }).then(j<DemoCreated>),

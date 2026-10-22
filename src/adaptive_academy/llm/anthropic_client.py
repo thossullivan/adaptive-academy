@@ -25,7 +25,14 @@ from adaptive_academy.llm.types import (
     StructuredOutputError,
     ToolCall,
 )
-from adaptive_academy.llm.usage import check_budget, record_usage
+from adaptive_academy.llm.usage import (
+    OUTCOME_EMPTY,
+    OUTCOME_INVALID,
+    OUTCOME_OK,
+    check_budget,
+    record_usage,
+    stop_outcome,
+)
 from adaptive_academy.prompts import (
     SCHEMA_RESEND_TEXT,
     SCHEMA_RESEND_TOOL,
@@ -100,6 +107,51 @@ def content_block_to_param(block: Any) -> dict[str, Any]:
     return dict(vars(block))
 
 
+def reply_outcome(resp: Any) -> str | None:
+    """How a plain completion ended, for its usage row (LLMUsage.outcome): refused, cut off,
+    empty (no text and no tool call), or ok. None if the response can't be read: the row is
+    still written, without a guess."""
+    try:
+        stopped = stop_outcome(getattr(resp, "stop_reason", None))
+        if stopped is not None:
+            return stopped
+        blocks = list(resp.content or [])
+        if any(b.type == "tool_use" for b in blocks):
+            return OUTCOME_OK
+        text = "".join(b.text for b in blocks if b.type == "text")
+        return OUTCOME_OK if text.strip() else OUTCOME_EMPTY
+    except Exception:  # noqa: BLE001 - accounting must never break a billed call
+        return None
+
+
+def _json_schema_answer(
+    resp: Any, schema: dict[str, Any],
+) -> tuple[str, dict[str, Any] | None, dict[str, Any] | None, list]:
+    """A json_schema-mode response read: (its joined text, the answer that fits `schema` or
+    None, else the first parseable object or None, and that object's violations).
+
+    Candidates in order: each text block on its own (two complete objects, or a stray brace
+    in prose, would spoil the joined text), the joined text (an object split across blocks),
+    then a tool_use block's input if the model used a tool anyway. The first that fits the
+    schema wins, so an example object in an early prose block can't shadow the real answer;
+    if none fits, the first parseable one's violations go into the retry.
+    """
+    texts = [b.text for b in resp.content if b.type == "text"]
+    text = "".join(texts)
+    candidates = [d for d in (*map(_json_object, texts), _json_object(text)) if d is not None]
+    candidates += [b.input for b in resp.content
+                   if b.type == "tool_use" and isinstance(b.input, dict)]
+    data = None
+    violations: list = []
+    for candidate in candidates:
+        found = schema_violations(candidate, schema)
+        if not found:
+            return text, candidate, None, []
+        if data is None:
+            data, violations = candidate, found
+    return text, None, data, violations
+
+
 def _json_object(text: str) -> dict[str, Any] | None:
     """The JSON object in a text answer (as sent, or inside fences or prose), else None."""
     for candidate in (text, extract_json(text)):
@@ -156,10 +208,12 @@ class AnthropicLLMClient:
         # (api/deps.py), so the next request gets the new day.
         self._today = today_line()
 
-    def _record(self, resp: Any, operation: str) -> None:
-        # Recorded as soon as the call returns: it was billed even if parsing fails below.
+    def _record(self, resp: Any, operation: str, outcome: str | None) -> None:
+        # Recorded for every call that returned, even when parsing fails below (complete_json
+        # records in a `finally`): it was billed either way.
         record_usage(backend=self._backend.name, model=self._model, role=self._role,
-                     operation=operation, usage=getattr(resp, "usage", None))
+                     operation=operation, usage=getattr(resp, "usage", None),
+                     outcome=outcome)
 
     def _check_budget(self) -> None:
         check_budget(self._model, reports_cost=self._backend.reports_cost,
@@ -188,7 +242,7 @@ class AnthropicLLMClient:
             **request,
             **request_extra_body(self._backend),
         )
-        self._record(resp, "complete")
+        self._record(resp, "complete", reply_outcome(resp))
         text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for block in resp.content:
@@ -261,29 +315,36 @@ class AnthropicLLMClient:
             self._check_budget()
             resp = self._client.messages.create(messages=attempt, **request,
                                                 **request_extra_body(self._backend))
-            self._record(resp, "complete_json")
-            stop_reason = getattr(resp, "stop_reason", None)
-            if stop_reason in NO_RETRY_STOP_REASONS:
-                raise StructuredOutputError(stop_reason)
-            call = next((b for b in resp.content
-                         if b.type == "tool_use" and b.name == tool_name), None)
-            if call is None:
-                failure = "no_tool_use"
-                # Append-only correction: a new user turn, never an edit of earlier history.
-                correction = [{"role": "user",
-                               "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}]
-            else:
-                violations = (schema_violations(call.input, input_schema) if check_shape
-                              else [])
-                if not violations:
-                    return call.input
-                failure = "schema_mismatch"
-                listed = describe_violations(violations)
-                if not retries_left:
-                    raise StructuredOutputError(
-                        failure, "structured completion did not match its schema after a "
-                                 f"corrective retry:\n{listed}")
-                correction = self._schema_correction(resp, tool_name, listed)
+            outcome = None  # how this call ended; recorded below whatever happens
+            try:
+                stop_reason = getattr(resp, "stop_reason", None)
+                if stop_reason in NO_RETRY_STOP_REASONS:
+                    outcome = stop_outcome(stop_reason)
+                    raise StructuredOutputError(stop_reason)
+                call = next((b for b in resp.content
+                             if b.type == "tool_use" and b.name == tool_name), None)
+                if call is None:
+                    outcome = OUTCOME_INVALID
+                    failure = "no_tool_use"
+                    # Append-only correction: a new user turn, never an edit of history.
+                    correction = [{"role": "user",
+                                   "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}]
+                else:
+                    violations = (schema_violations(call.input, input_schema) if check_shape
+                                  else [])
+                    if not violations:
+                        outcome = OUTCOME_OK
+                        return call.input
+                    outcome = OUTCOME_INVALID
+                    failure = "schema_mismatch"
+                    listed = describe_violations(violations)
+                    if not retries_left:
+                        raise StructuredOutputError(
+                            failure, "structured completion did not match its schema after "
+                                     f"a corrective retry:\n{listed}")
+                    correction = self._schema_correction(resp, tool_name, listed)
+            finally:
+                self._record(resp, "complete_json", outcome)
             attempt = [*messages, *correction]
         raise StructuredOutputError(failure)
 
@@ -317,30 +378,18 @@ class AnthropicLLMClient:
             # in extra_body; output_config is a regular SDK parameter.
             resp = self._client.messages.create(messages=attempt, **request,
                                                 **request_extra_body(self._backend))
-            self._record(resp, "complete_json")
-            stop_reason = getattr(resp, "stop_reason", None)
-            if stop_reason in NO_RETRY_STOP_REASONS:
-                raise StructuredOutputError(stop_reason)
-            texts = [b.text for b in resp.content if b.type == "text"]
-            text = "".join(texts)
-            # Candidates in order: each text block on its own (two complete objects, or a
-            # stray brace in prose, would spoil the joined text), the joined text (an object
-            # split across blocks), then a tool_use block's input if the model used a tool
-            # anyway. The first that fits the schema wins, so an example object in an early
-            # prose block can't shadow the real answer; if none fits, the first parseable
-            # one's violations go into the retry.
-            candidates = [d for d in (*map(_json_object, texts), _json_object(text))
-                          if d is not None]
-            candidates += [b.input for b in resp.content
-                           if b.type == "tool_use" and isinstance(b.input, dict)]
-            data = None
-            violations: list = []
-            for candidate in candidates:
-                found = schema_violations(candidate, schema)
-                if not found:
-                    return candidate
-                if data is None:
-                    data, violations = candidate, found
+            outcome = None  # how this call ended; recorded below whatever happens
+            try:
+                stop_reason = getattr(resp, "stop_reason", None)
+                if stop_reason in NO_RETRY_STOP_REASONS:
+                    outcome = stop_outcome(stop_reason)
+                    raise StructuredOutputError(stop_reason)
+                text, answer, data, violations = _json_schema_answer(resp, schema)
+                outcome = OUTCOME_OK if answer is not None else OUTCOME_INVALID
+            finally:
+                self._record(resp, "complete_json", outcome)
+            if answer is not None:
+                return answer
             if data is None:
                 failure = "not_json"
                 begins = (f"it begins {text.strip()[:60]!r}" if text.strip()

@@ -250,7 +250,7 @@ def test_guard_messages_demarcate_and_escape_untrusted_text():
 
 
 def test_guard_prompt_is_versioned_and_treats_inputs_as_untrusted():
-    assert TUTOR_SOLUTION_GUARD.tag == "tutor.solution_guard@v3"
+    assert TUTOR_SOLUTION_GUARD.tag == "tutor.solution_guard@v4"
     assert "UNTRUSTED" in TUTOR_SOLUTION_GUARD
     assert "—" not in GUARD_FALLBACK and "!" not in GUARD_FALLBACK
 
@@ -387,14 +387,16 @@ def test_no_check_runs_when_the_attempt_is_logged_earlier_in_the_same_turn(sessi
                                          input={"summary": "softmax of QK^T"})]),
         LLMResponse(text=SUBTLE_LEAK),
     ])
-    guard = ScriptedLLMClient([])
+    # Only the attempt check runs (one call, no draft); the post-attempt reply isn't reviewed.
+    guard = ScriptedLLMClient([_verdict(False, attempted=True)])
 
-    result = run_tutor_turn(session, convo, "I think it's softmax(QK^T)V", llm,
-                            guard_llm=guard)
+    result = run_tutor_turn(session, convo, "I think it's softmax(QK^T)V, since QK^T scores "
+                            "each query against each key", llm, guard_llm=guard)
 
     assert result.reply == SUBTLE_LEAK
-    assert guard.calls == []
-    assert not any(k.startswith("guard:") for k in _kinds(result))
+    assert len(guard.calls) == 1
+    assert "DRAFT_REPLY" not in guard.calls[0]["messages"][0]["content"]
+    assert [k for k in _kinds(result) if k.startswith("guard:")] == ["guard:attempt_checked"]
 
 
 def test_an_allowed_reveal_is_never_checked(session):
@@ -405,15 +407,15 @@ def test_an_allowed_reveal_is_never_checked(session):
         LLMResponse(tool_calls=[ToolCall(id="t2", name="reveal_solution",
                                          input={"text": CODE_LEAK})]),
     ])
-    guard = ScriptedLLMClient([])
+    guard = ScriptedLLMClient([_verdict(False, attempted=True)])  # the attempt check only
 
     result = run_tutor_turn(session, convo, "my attempt: softmax(QK^T)V", llm,
                             guard_llm=guard)
 
     assert result.reply == CODE_LEAK
-    assert guard.calls == []
+    assert len(guard.calls) == 1
     assert "tool:reveal_solution:allowed" in _kinds(result)
-    assert not any(k.startswith("guard:") for k in _kinds(result))
+    assert [k for k in _kinds(result) if k.startswith("guard:")] == ["guard:attempt_checked"]
 
 
 def test_text_after_a_blocked_reveal_is_still_checked(session):
@@ -965,3 +967,426 @@ def test_a_verdict_without_a_boolean_learner_attempted_drops_the_deferred_attemp
     session.refresh(convo)
     assert convo.attempt_logged is False
     assert "tool:log_attempt:dropped" in _kinds(result)
+
+
+# --- the attempt check on log_attempt -----------------------------------------------------
+# The tutor model alone used to decide that the learner tried: any attempt-shaped message
+# ("I think it's 42") unlocked reveal_solution and ended every later check. Now a log_attempt
+# counts only if the guard's model check finds a real attempt in the learner's own message.
+# The scripted verdicts below stand in for that judgement; the prompt pins the definition.
+
+GUESS = "I think it's 42"
+SHORT_REAL = "I'd divide by sqrt(d_k) because the variance grows with dimension"
+LONG_WRONG = ("Let me work it through. The scores are QK^T, one row per query. Each entry is "
+              "a sum of d_k products, so I'd normalise by d_k itself to keep it bounded, then "
+              "take a softmax over each column so that every key gets a distribution, and "
+              "multiply V by that. So: softmax_col(QK^T / d_k) V.")
+SECRET = "THE SECRET: softmax(QK^T / sqrt(d_k)) V"
+
+
+def _attempt_then_reveal(summary: str = "tried") -> list[LLMResponse]:
+    """A tutor turn that logs an attempt, tries to reveal, then (if blocked) hints."""
+    return [
+        LLMResponse(tool_calls=[ToolCall(id="t1", name="log_attempt",
+                                         input={"summary": summary})]),
+        LLMResponse(tool_calls=[ToolCall(id="t2", name="reveal_solution",
+                                         input={"text": SECRET})]),
+        LLMResponse(text=HINT),
+    ]
+
+
+def _tool_result(llm_call: dict, tool_use_id: str) -> str:
+    """The tool_result content the tutor got back for one tool call."""
+    for m in llm_call["messages"]:
+        if isinstance(m["content"], list):
+            for block in m["content"]:
+                if block.get("type") == "tool_result" and block["tool_use_id"] == tool_use_id:
+                    return block["content"]
+    raise AssertionError(f"no tool_result for {tool_use_id}")
+
+
+def test_a_bare_guess_is_not_recorded_and_the_reveal_stays_blocked(session):
+    convo = _seed(session)
+    session.add(Message(conversation_id=convo.id, role="tutor",
+                        content="What should QK^T be divided by, and why?"))
+    session.commit()
+    llm = _SnapshotScripted(_attempt_then_reveal(summary="learner says 42"))
+    # The attempt check (no draft), then the review of the final, still pre-attempt, reply.
+    guard = ScriptedLLMClient([_verdict(False, "a bare guess", attempted=False),
+                               _verdict(False)])
+
+    result = run_tutor_turn(session, convo, GUESS, llm, guard_llm=guard)
+
+    assert result.reply == HINT
+    session.refresh(convo)
+    assert convo.attempt_logged is False
+    kinds = _kinds(result)
+    assert "tool:log_attempt" not in kinds
+    assert kinds.index("tool:log_attempt:rejected") < kinds.index("tool:reveal_solution:blocked")
+    assert SECRET not in _stored_text(session) and SECRET not in result.reply
+    # The tutor is told why, and to ask for the learner's reasoning.
+    assert _tool_result(llm.calls[1], "t1") == solution_guard.ATTEMPT_REJECTED
+    assert "reasoning" in solution_guard.ATTEMPT_REJECTED
+    # Fixed text in the visible trace: never the tutor's summary or the model's reason.
+    details = {e.kind: e.detail for e in result.events}
+    assert details["tool:log_attempt:rejected"] == (
+        "not recorded: no attempt in the learner's message")
+    assert details["guard:attempt_checked"] == "source=model attempted=false"
+    assert "learner says 42" not in " ".join(e.detail for e in result.events)
+    assert "a bare guess" not in " ".join(e.detail for e in result.events)
+    # The check judged the learner's own message, with the question for context, no draft.
+    sent = guard.calls[0]["messages"][0]["content"]
+    assert f"<<<LEARNER_MESSAGE>>>\n{GUESS}\n<<<END_LEARNER_MESSAGE>>>" in sent
+    assert "What should QK^T be divided by" in sent
+    assert "DRAFT_REPLY" not in sent and "learner says 42" not in sent
+    assert guard.calls[0]["system"] == TUTOR_SOLUTION_GUARD
+    # The final reply was still pre-attempt, so it was reviewed.
+    assert [e.detail for e in result.events if e.kind == "guard:solution_checked"] == [
+        "source=model gives_away=false"]
+
+
+@pytest.mark.parametrize("learner", ["is it 42?", "just tell me", "I don't know, show me",
+                                     "What's the formula for scaled dot-product attention?"])
+def test_non_attempts_are_rejected(session, learner):
+    convo = _seed(session)
+    llm = ScriptedLLMClient(_attempt_then_reveal())
+    guard = ScriptedLLMClient([_verdict(False, attempted=False), _verdict(False)])
+
+    result = run_tutor_turn(session, convo, learner, llm, guard_llm=guard)
+
+    session.refresh(convo)
+    assert convo.attempt_logged is False and result.reply == HINT
+    assert {"tool:log_attempt:rejected", "tool:reveal_solution:blocked"} <= set(_kinds(result))
+
+
+@pytest.mark.parametrize("learner", [SHORT_REAL, LONG_WRONG])
+def test_a_real_attempt_is_recorded_right_or_wrong(session, learner):
+    # A short attempt with a reason counts, and so does a long one that goes wrong.
+    convo = _seed(session)
+    llm = ScriptedLLMClient(_attempt_then_reveal())
+    guard = ScriptedLLMClient([_verdict(False, attempted=True)])
+
+    result = run_tutor_turn(session, convo, learner, llm, guard_llm=guard)
+
+    session.refresh(convo)
+    assert convo.attempt_logged is True
+    assert result.reply == SECRET  # the gate allowed the reveal
+    kinds = _kinds(result)
+    assert "tool:log_attempt" in kinds and "tool:reveal_solution:allowed" in kinds
+    assert "tool:log_attempt:rejected" not in kinds
+    assert len(guard.calls) == 1  # one check; the reveal and post-attempt text aren't reviewed
+    assert learner in guard.calls[0]["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("guard model unavailable"), None])
+def test_an_unavailable_attempt_check_fails_closed_without_crashing(session, monkeypatch, exc):
+    from adaptive_academy.llm.usage import BudgetExceededError
+
+    monkeypatch.setattr(solution_guard, "_warned_attempt_unchecked", False)
+    convo = _seed(session)
+    llm = ScriptedLLMClient(_attempt_then_reveal())
+    broken = _BrokenGuard(exc or BudgetExceededError(1.5, 1.0))
+
+    result = run_tutor_turn(session, convo, SHORT_REAL, llm, guard_llm=broken)
+
+    assert result.reply == HINT  # the turn completes
+    session.refresh(convo)
+    assert convo.attempt_logged is False  # not recorded: fail closed
+    category = "unknown" if exc else "budget"
+    # Its own kind, so the scorecard's reply-check "screen only" share never counts it.
+    assert [e.detail for e in result.events if e.kind == "guard:attempt_unavailable"] == [
+        f"{category}: attempt check failed, attempt not recorded"]
+    assert [e.detail for e in result.events if e.kind == "guard:unavailable"] == [
+        f"{category}: model check failed, screen used"]  # the reply review only
+    assert ("tool:log_attempt:rejected", "not recorded: the attempt check was unavailable") in [
+        (e.kind, e.detail) for e in result.events]
+    assert "tool:reveal_solution:blocked" in _kinds(result)
+    assert _tool_result(llm.calls[1], "t1") == solution_guard.ATTEMPT_UNVERIFIED
+    assert broken.calls == 2  # the attempt check, then the review of the hint (screen used)
+
+
+def test_an_unavailable_attempt_check_warns_once_per_process(session, monkeypatch, caplog):
+    monkeypatch.setattr(solution_guard, "_warned_attempt_unchecked", False)
+    monkeypatch.setattr(solution_guard, "_warned_degraded", True)
+    convo = _seed(session)
+    llm = ScriptedLLMClient(_attempt_then_reveal() + _attempt_then_reveal())
+
+    with caplog.at_level("WARNING", logger="adaptive_academy.engine.solution_guard"):
+        run_tutor_turn(session, convo, SHORT_REAL, llm, guard_llm=_BrokenGuard())
+        run_tutor_turn(session, convo, SHORT_REAL, llm, guard_llm=_BrokenGuard())
+
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1 and "Attempt check failed" in warnings[0]
+
+
+def test_without_a_guard_client_log_attempt_is_never_recorded(session):
+    convo = _seed(session)
+    llm = ScriptedLLMClient(_attempt_then_reveal())
+
+    result = run_tutor_turn(session, convo, SHORT_REAL, llm)
+
+    session.refresh(convo)
+    assert convo.attempt_logged is False and result.reply == HINT
+    assert ("guard:attempt_unavailable",
+            "no_client: attempt check unavailable, attempt not recorded"
+            ) in [(e.kind, e.detail) for e in result.events]
+    assert "guard:unavailable" not in _kinds(result)  # screen-only reviews are not failures
+
+
+def test_a_second_log_attempt_in_the_turn_reuses_the_verdict(session):
+    # The tutor, told "not an attempt", tries log_attempt again: no second call, still no.
+    convo = _seed(session)
+    llm = ScriptedLLMClient([
+        LLMResponse(tool_calls=[ToolCall(id="t1", name="log_attempt", input={"summary": "a"})]),
+        LLMResponse(tool_calls=[ToolCall(id="t2", name="log_attempt", input={"summary": "b"})]),
+        LLMResponse(text=HINT),
+    ])
+    guard = ScriptedLLMClient([_verdict(False, attempted=False), _verdict(False)])
+
+    result = run_tutor_turn(session, convo, GUESS, llm, guard_llm=guard)
+
+    assert len(guard.calls) == 2  # one attempt check (reused once), one review of the hint
+    assert [e.detail for e in result.events if e.kind == "guard:attempt_checked"] == [
+        "source=model attempted=false", "source=reused attempted=false"]
+    assert _kinds(result).count("tool:log_attempt:rejected") == 2
+    session.refresh(convo)
+    assert convo.attempt_logged is False
+
+
+def test_a_failed_attempt_check_is_not_retried_in_the_turn(session):
+    convo = _seed(session)
+    llm = ScriptedLLMClient([
+        LLMResponse(tool_calls=[ToolCall(id="t1", name="log_attempt", input={"summary": "a"})]),
+        LLMResponse(tool_calls=[ToolCall(id="t2", name="log_attempt", input={"summary": "b"})]),
+        LLMResponse(text=HINT),
+    ])
+    broken = _BrokenGuard()
+
+    result = run_tutor_turn(session, convo, SHORT_REAL, llm, guard_llm=broken)
+
+    assert broken.calls == 2  # one attempt check, one review: the failure was reused
+    # One event per failure: the reused failure traces nothing new.
+    assert _kinds(result).count("guard:attempt_unavailable") == 1
+    assert _kinds(result).count("tool:log_attempt:rejected") == 2
+
+
+def test_log_attempt_in_an_unlocked_conversation_needs_no_check(session):
+    # The answer is already unlocked: a later log_attempt (even on "is it 42?") has nothing
+    # to decide. No model call, no rejection, and no "do not state the solution" text.
+    convo = _seed(session, attempt_logged=True)
+    llm = ScriptedLLMClient(_attempt_then_reveal())
+    guard = ScriptedLLMClient([])  # any call would raise "ran out of responses"
+
+    result = run_tutor_turn(session, convo, "is it 42?", llm, guard_llm=guard)
+
+    assert guard.calls == []
+    assert _tool_result(llm.calls[1], "t1") == "ok: attempt recorded"
+    assert result.reply == SECRET  # the reveal is still allowed
+    kinds = _kinds(result)
+    assert "tool:log_attempt:rejected" not in kinds
+    assert not any(k.startswith("guard:") for k in kinds)
+    session.refresh(convo)
+    assert convo.attempt_logged is True
+
+
+def test_the_attempt_check_reuses_a_review_verdict_on_the_same_message():
+    # If the guard already judged this turn's learner message, the attempt check asks nothing.
+    events: list[tuple[str, str]] = []
+    llm = ScriptedLLMClient([_verdict(False, attempted=True)])
+    guard = SolutionGuard(concept="attention", learner_text=SHORT_REAL, llm=llm,
+                          emit=lambda k, d="": events.append((k, d)))
+
+    assert guard.review(HINT) == "pass"
+    assert guard.attempt_tool("divides by sqrt(d_k)") == (True, "ok: attempt recorded")
+    assert len(llm.calls) == 1  # one call, not two
+    assert ("guard:attempt_checked", "source=reused attempted=true") in events
+
+
+def test_a_refused_attempt_cannot_come_back_through_a_regeneration(session):
+    # log_attempt is refused, the tutor then leaks, and its regeneration logs the attempt
+    # again (deferred). The regenerated review's verdict disagrees and says "attempted", but
+    # the refusal stands for the turn: dropped, not recorded.
+    convo = _seed(session)
+    llm = ScriptedLLMClient([
+        LLMResponse(tool_calls=[ToolCall(id="t1", name="log_attempt", input={"summary": "a"})]),
+        LLMResponse(text=SUBTLE_LEAK),
+        LLMResponse(tool_calls=[ToolCall(id="t2", name="log_attempt", input={"summary": "b"})]),
+        LLMResponse(text=HINT),
+    ])
+    guard = ScriptedLLMClient([_verdict(False, attempted=False), _verdict(True),
+                               _verdict(False, attempted=True)])
+
+    result = run_tutor_turn(session, convo, GUESS, llm, guard_llm=guard)
+
+    assert result.reply == HINT
+    session.refresh(convo)
+    assert convo.attempt_logged is False
+    kinds = _kinds(result)
+    assert {"tool:log_attempt:rejected", "tool:log_attempt:deferred",
+            "tool:log_attempt:dropped"} <= set(kinds)
+    assert "tool:log_attempt" not in kinds
+
+
+def test_the_attempt_check_judges_the_learner_message_and_not_the_tutor_summary():
+    [msg] = build_guard_messages("attention", GUESS, None, previous_tutor="Divide by what?")
+    text = msg["content"]
+    assert "<<<DRAFT_REPLY>>>" not in text
+    assert text.splitlines()[-1].startswith("CHECK: ")
+    assert "learner_attempted" in text.splitlines()[-1]
+
+
+def test_guard_prompt_defines_a_real_attempt():
+    text = " ".join(str(TUTOR_SOLUTION_GUARD).split())
+    assert TUTOR_SOLUTION_GUARD.tag == "tutor.solution_guard@v4"
+    # What counts: an answer with some working, a step, code, or reasoning, right or wrong.
+    assert "an answer with some working, a step, code, or reasoning" in text
+    assert "right or wrong" in text
+    # Short genuine attempts must pass: the brief's own example is in the prompt.
+    assert "I'd divide by sqrt(d_k) because the variance grows with dimension" in text
+    # What does not: a bare guess, a request, a question back, a restatement.
+    for phrase in ("bare guess", "I think it's 42", "is it 42?", "just tell me",
+                   "a question back", "a restatement of the task"):
+        assert phrase in text
+    # The no-draft mode.
+    assert "CHECK:" in text
+
+
+def test_no_write_lock_is_held_during_the_attempt_check(tmp_path):
+    path = tmp_path / "attempt.db"
+    engine = create_engine(f"sqlite:///{path}",
+                           connect_args={"check_same_thread": False, "timeout": 1})
+    SQLModel.metadata.create_all(engine)
+    ensure_fts(engine)
+
+    def lock_free() -> bool:
+        conn = sqlite3.connect(path, timeout=0)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute("ROLLBACK")
+            return True
+        except sqlite3.OperationalError:
+            return False
+        finally:
+            conn.close()
+
+    class _ProbingGuard:
+        def __init__(self):
+            self.lock_free: list[bool] = []
+
+        def complete(self, system, messages, tools):
+            self.lock_free.append(lock_free())
+            return _verdict(False, attempted=True)
+
+    with Session(engine) as session:
+        convo = _seed(session)
+        guard = _ProbingGuard()
+        llm = ScriptedLLMClient(_attempt_then_reveal())
+        result = run_tutor_turn(session, convo, SHORT_REAL, llm, guard_llm=guard)
+    engine.dispose()
+
+    assert result.reply == SECRET
+    assert guard.lock_free == [True]
+
+
+# --- the attempt check on the subscription path --------------------------------------------
+
+
+def _sdk_attempt_turn(session, monkeypatch, *, learner, guard_llm, reply=HINT,
+                      attempt_logged=False):
+    """An SDK turn whose run calls the REAL in-process handlers: log_attempt, then
+    reveal_solution(text=SECRET); its reply is `reply` unless the reveal was allowed."""
+    convo = _seed(session, attempt_logged=attempt_logged)
+    captured: dict = {}
+    real_server = tutor_sdk.create_sdk_mcp_server
+
+    def capture_server(name, tools):
+        captured.update({t.name: t for t in tools})
+        return real_server(name, tools=tools)
+
+    tool_results: list[dict] = []
+
+    async def fake_query(prompt, options):
+        tool_results.append(await captured["log_attempt"].handler({"summary": "the summary"}))
+        revealed = await captured["reveal_solution"].handler({"text": SECRET})
+        tool_results.append(revealed)
+        yield _FakeResult(SECRET if not revealed.get("is_error") else reply)
+
+    monkeypatch.setattr(tutor_sdk, "create_sdk_mcp_server", capture_server)
+    monkeypatch.setattr(tutor_sdk, "ResultMessage", _FakeResult)
+    monkeypatch.setattr(tutor_sdk, "query", fake_query)
+    result = tutor_sdk.run_tutor_turn_sdk(session, convo, learner, guard_llm=guard_llm)
+    session.refresh(convo)
+    return convo, result, tool_results
+
+
+def test_sdk_a_bare_guess_is_not_recorded_and_the_reveal_stays_blocked(session, monkeypatch):
+    guard = ScriptedLLMClient([_verdict(False, attempted=False), _verdict(False)])
+    convo, result, (logged, reveal) = _sdk_attempt_turn(
+        session, monkeypatch, learner=GUESS, guard_llm=guard)
+
+    assert convo.attempt_logged is False
+    assert result.reply == HINT
+    assert solution_guard.ATTEMPT_REJECTED in str(logged["content"])
+    assert reveal.get("is_error") is True and SECRET not in str(reveal["content"])
+    kinds = _kinds(result)
+    assert "tool:log_attempt:rejected" in kinds and "tool:log_attempt" not in kinds
+    assert "the summary" not in " ".join(e.detail for e in result.events)
+    assert len(guard.calls) == 2  # the attempt check, then the review of the reply
+    assert SECRET not in _stored_text(session)
+
+
+def test_sdk_a_real_attempt_is_recorded_and_unlocks_the_reveal(session, monkeypatch):
+    guard = ScriptedLLMClient([_verdict(False, attempted=True)])
+    convo, result, (logged, reveal) = _sdk_attempt_turn(
+        session, monkeypatch, learner=SHORT_REAL, guard_llm=guard)
+
+    assert convo.attempt_logged is True
+    assert "ok: attempt recorded" in str(logged["content"])
+    assert "is_error" not in reveal and result.reply == SECRET
+    assert len(guard.calls) == 1
+
+
+def test_sdk_an_unavailable_attempt_check_fails_closed(session, monkeypatch):
+    monkeypatch.setattr(solution_guard, "_warned_attempt_unchecked", False)
+    monkeypatch.setattr(solution_guard, "_warned_degraded", True)
+    convo, result, (logged, reveal) = _sdk_attempt_turn(
+        session, monkeypatch, learner=SHORT_REAL, guard_llm=_BrokenGuard())
+
+    assert convo.attempt_logged is False and result.reply == HINT
+    assert solution_guard.ATTEMPT_UNVERIFIED in str(logged["content"])
+    assert reveal.get("is_error") is True
+    assert _kinds(result).count("guard:attempt_unavailable") == 1
+
+
+def test_sdk_log_attempt_in_an_unlocked_conversation_needs_no_check(session, monkeypatch):
+    guard = ScriptedLLMClient([])  # any call would raise "ran out of responses"
+    convo, result, (logged, reveal) = _sdk_attempt_turn(
+        session, monkeypatch, learner="is it 42?", guard_llm=guard, attempt_logged=True)
+
+    assert guard.calls == []
+    assert str(logged["content"]) == str([{"type": "text", "text": "ok: attempt recorded"}])
+    assert "is_error" not in reveal and result.reply == SECRET
+    kinds = _kinds(result)
+    assert "tool:log_attempt:rejected" not in kinds
+    assert not any(k.startswith("guard:") for k in kinds)
+    assert convo.attempt_logged is True
+
+
+def test_sdk_attempt_check_runs_off_the_event_loop(session, monkeypatch):
+    # The subscription guard client (AgentSDKLLMClient) calls asyncio.run per check, which
+    # raises inside a running loop. The SDK tool handlers run inside one, so the check must
+    # run in a worker thread or every real attempt would fail closed.
+    import asyncio
+
+    class _LoopingGuard(ScriptedLLMClient):
+        def complete(self, system, messages, tools):
+            async def _call():
+                return ScriptedLLMClient.complete(self, system, messages, tools)
+            return asyncio.run(_call())
+
+    guard = _LoopingGuard([_verdict(False, attempted=True)])
+    convo, result, (logged, reveal) = _sdk_attempt_turn(
+        session, monkeypatch, learner=SHORT_REAL, guard_llm=guard)
+
+    assert "guard:attempt_unavailable" not in _kinds(result)
+    assert convo.attempt_logged is True and result.reply == SECRET

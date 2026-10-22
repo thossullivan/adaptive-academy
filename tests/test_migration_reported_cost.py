@@ -41,7 +41,7 @@ def test_reported_cost_migration_upgrades_populated_database_and_downgrades(tmp_
         _insert_usage(connection, 2, "anthropic", "NULL")  # an unpriced model
     engine.dispose()
 
-    upgraded = _alembic(url, "upgrade", "head")
+    upgraded = _alembic(url, "upgrade", REPORTED_COST_REVISION)
     assert upgraded.returncode == 0, upgraded.stderr
     engine = create_engine(url)
     inspector = inspect(engine)

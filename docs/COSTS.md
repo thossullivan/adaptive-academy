@@ -12,6 +12,31 @@ list prices. The **Usage** page (`/usage`, or `GET /api/usage`) shows spend for 
 If a model isn't in the app's price list, its tokens are still recorded and it shows
 "price unknown".
 
+## See if the model is doing its job
+
+Below the spend, a quality scorecard (`GET /api/usage/quality`) answers whether the money is
+well spent. Pick a time window, and it shows:
+
+- **Cost per grade.** Everything spent on the features that grade your answers (assess,
+  recall checks, teach, productive failure, artifact review, roleplay, paper probe), divided by
+  the grades they wrote. An artifact review counts as one grade, however many concepts it
+  covers. Calls on a model with no known price are left out, and the card says so. The demo
+  topic is left out.
+- **Grade checks.** How often a grade failed one of its named checks and the model was asked
+  once more, how many grades were rejected, and which checks fail most.
+- **Solution guard.** How often a tutor reply written before your first attempt gave the answer
+  away and was held back, how often the tutor fell back to a plain question, and how often the
+  model check failed and the keyword screen decided alone.
+- **Calls by feature and by model.** Calls, cost per call, and problems: calls the model
+  refused, answered with nothing, cut off, or answered in the wrong format.
+
+A grade in the wrong format shows under grade checks, not under problems: graders are checked
+after the call, so the call itself reads as fine.
+
+Problems are recorded for API-key calls only, from this version on. Older calls and Claude
+subscription calls show "not recorded". The exact definitions are in
+`src/adaptive_academy/engine/scorecard.py`.
+
 ## Set a daily limit
 
 Add `AA_DAILY_BUDGET_USD=5` (any amount) to `.env` and restart the API. `0` blocks every call.

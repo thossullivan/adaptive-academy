@@ -1,9 +1,10 @@
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from sqlmodel import Session, col, select
 
-from adaptive_academy.engine.grade_gate import checked_completion
+from adaptive_academy.engine.grade_gate import CheckedAnswer, checked_completion
 from adaptive_academy.engine.output_checks import (
     GRADE_RUBRIC, CheckContext, item_key, match_items,
 )
@@ -127,6 +128,16 @@ def penalize_score(llm_score: float, rules_gaps: list[str]) -> float:
     if any(g.startswith("contains likely misconception") for g in rules_gaps):
         s = min(s, _MISCONCEPTION_CEIL)
     return round(s, 4)
+
+
+def final_score(grade: "GradeDraft", rules_gaps: list[str]) -> float:
+    """The score a grade is recorded with: the grader's score under the code-enforced
+    illusion-of-competence cap (no mechanism: at most 0.50) and the rubric ceilings
+    (penalize_score). record_grade writes it; the grading eval (evals/grading) scores it."""
+    score = grade.score
+    if not grade.mechanism_present:
+        score = min(score, _NO_MECHANISM_CEIL)
+    return penalize_score(score, rules_gaps)
 
 
 @dataclass
@@ -261,6 +272,51 @@ def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
     return GRADE, "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class GradeRequest:
+    """One grader call as grade_concept sends it: the prompt, and the rubric items in it."""
+
+    system: str
+    user: str
+    required: tuple[str, ...]
+    misconceptions: tuple[str, ...]
+
+
+def grade_request(concept_name: str, kind: str, criteria: list[str], reference: str,
+                  response: str, *, must_include: list[str],
+                  weak_signs: list[str]) -> GradeRequest:
+    """The grade prompt for these rubric items (stripped and deduplicated, _items)."""
+    required, misconceptions = _items(must_include), _items(weak_signs)
+    system, user = build_grade_prompt(
+        concept_name, kind, criteria, reference, response,
+        required=required, misconceptions=misconceptions)
+    return GradeRequest(system, user, tuple(required), tuple(misconceptions))
+
+
+@dataclass
+class GraderRun:
+    """A checked grader answer and the enforced gaps it names (rubric_gaps)."""
+
+    grade: GradeDraft
+    rules_gaps: list[str]
+    answer: CheckedAnswer
+
+
+def run_grader(session: Session, llm: LLMClient, request: GradeRequest, *,
+               emit: Callable[[str, str], None]) -> GraderRun:
+    """Make the grader call through its output checks (grade_gate.checked_completion: one
+    regeneration at most, GradeCheckError when a FAIL survives) and name the enforced gaps.
+    Writes nothing but what `emit` and the gate record."""
+    emit("prompt", GRADE.tag)
+    answer = checked_completion(
+        session, llm, system=request.system, user=request.user, rubric=GRADE_RUBRIC,
+        emit=emit, ctx=CheckContext(required=request.required,
+                                    misconceptions=request.misconceptions))
+    grade = grade_from_dict(answer.data)
+    return GraderRun(grade, rubric_gaps(grade, list(request.required),
+                                        list(request.misconceptions)), answer)
+
+
 def _deliverable_criteria(session: Session, item_id: int | None) -> list[str]:
     if item_id is None:
         return []
@@ -368,21 +424,15 @@ def grade_concept(
             concept=concept.name, question=concept.name)
     emit("assess:probe", kind)
 
-    required, misconceptions = _items(must_include), _items(weak_signs)
-    emit("prompt", GRADE.tag)
-    system, user = build_grade_prompt(
-        concept.name, kind, criteria, reference, response,
-        required=required, misconceptions=misconceptions)
-    answer = checked_completion(
-        session, llm, system=system, user=user, rubric=GRADE_RUBRIC, emit=emit,
-        ctx=CheckContext(required=tuple(required), misconceptions=tuple(misconceptions)))
-    grade = grade_from_dict(answer.data)
+    request = grade_request(concept.name, kind, criteria, reference, response,
+                            must_include=must_include, weak_signs=weak_signs)
+    run = run_grader(session, llm, request, emit=emit)
     return CheckedGrade(
-        concept=concept, kind=kind, response=response, probe=probe, grade=grade,
-        rules_gaps=rubric_gaps(grade, required, misconceptions), topic_id=topic_id,
+        concept=concept, kind=kind, response=response, probe=probe, grade=run.grade,
+        rules_gaps=run.rules_gaps, topic_id=topic_id,
         rubric_id=rubric_id, anchor_id=anchor_ref_id, item_id=item_id,
         confidence_predicted=confidence_predicted, baseline_id=baseline_id, events=events,
-        prompt_tag=answer.prompt_tag(GRADE))
+        prompt_tag=run.answer.prompt_tag(GRADE))
 
 
 def record_grade(
@@ -404,22 +454,20 @@ def record_grade(
         emit("assess:rules", f"{len(rules_gaps)} hard gap(s)")
     # Code-enforced illusion-of-competence cap: fluent prose with no demonstrated mechanism
     # cannot score above 'developing', no matter what the LLM returned (defense in depth).
-    score = grade.score
     if not grade.mechanism_present:
-        score = min(score, _NO_MECHANISM_CEIL)
         emit("assess:mechanism", "capped: no mechanism demonstrated")
-    final_score = penalize_score(score, rules_gaps)
+    score = final_score(grade, rules_gaps)
     gaps = list(grade.gaps) + rules_gaps
-    emit("assess:graded", f"score={final_score}")
+    emit("assess:graded", f"score={score}")
 
     baseline_id = checked.baseline_id
     baseline = session.get(Assessment, baseline_id) if baseline_id else None
-    delta = compute_delta(final_score, baseline.score if baseline else None)
-    confidence_actual = final_score if kind == "calibration" else grade.confidence_actual
+    delta = compute_delta(score, baseline.score if baseline else None)
+    confidence_actual = score if kind == "calibration" else grade.confidence_actual
 
     assessment = Assessment(
         concept_id=concept.id, item_id=checked.item_id, kind=kind, prompt=checked.probe,
-        response=checked.response, verdict=grade.verdict, score=final_score, gaps=gaps,
+        response=checked.response, verdict=grade.verdict, score=score, gaps=gaps,
         confidence_predicted=checked.confidence_predicted, confidence_actual=confidence_actual,
         rubric_id=checked.rubric_id, anchor_id=checked.anchor_id,
         baseline_assessment_id=baseline_id, delta=delta,
@@ -430,7 +478,7 @@ def record_grade(
 
     estimate: KnowledgeEstimate | None = None
     if kind in GRADING_KINDS:
-        level, conf = level_from_score(final_score)
+        level, conf = level_from_score(score)
         estimate = session.exec(
             select(KnowledgeEstimate).where(KnowledgeEstimate.concept_id == concept.id)).first()
         if estimate is None:

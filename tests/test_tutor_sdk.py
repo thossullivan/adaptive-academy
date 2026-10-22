@@ -1,6 +1,8 @@
+import json
 import types
 
 import adaptive_academy.engine.tutor_sdk as mod
+from adaptive_academy.engine.solution_guard import ATTEMPT_REJECTED, SolutionGuard
 from adaptive_academy.engine.tools import reveal_gate
 from adaptive_academy.engine.tutor_sdk import (
     format_history,
@@ -8,6 +10,8 @@ from adaptive_academy.engine.tutor_sdk import (
     reveal_solution_result,
     run_tutor_turn_sdk,
 )
+from adaptive_academy.llm.scripted_client import ScriptedLLMClient
+from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
     Concept, Conversation, KnowledgeEstimate, Message, Topic, Track,
 )
@@ -33,16 +37,38 @@ def test_reveal_handler_blocks_and_never_leaks_solution():
     assert "tool:reveal_solution:blocked" in events
 
 
+def _attempt_guard(emit, attempted: bool) -> SolutionGuard:
+    verdict = {"gives_away_solution": False, "learner_attempted": attempted, "reason": "r"}
+    return SolutionGuard(concept="calculus", learner_text="I used the chain rule because...",
+                         llm=ScriptedLLMClient([LLMResponse(text=json.dumps(verdict))]),
+                         emit=emit)
+
+
 def test_log_attempt_then_reveal_allows_and_returns_solution():
     convo = types.SimpleNamespace(attempt_logged=False)
     events = []
     emit = lambda k, d="": events.append(k)  # noqa: E731
-    log_attempt_result(convo, emit, {"summary": "I tried the chain rule"})
+    out = log_attempt_result(convo, {"summary": "I tried the chain rule"},
+                             guard=_attempt_guard(emit, True))
+    assert "ok: attempt recorded" in str(out["content"])
     assert convo.attempt_logged is True
     out = reveal_solution_result(convo, emit, {"text": "THE SECRET ANSWER IS 42"})
     assert "is_error" not in out
     assert "THE SECRET ANSWER IS 42" in str(out["content"])
     assert "tool:log_attempt" in events and "tool:reveal_solution:allowed" in events
+
+
+def test_log_attempt_without_a_real_attempt_keeps_the_reveal_blocked():
+    convo = types.SimpleNamespace(attempt_logged=False)
+    events = []
+    emit = lambda k, d="": events.append(k)  # noqa: E731
+    out = log_attempt_result(convo, {"summary": "they guessed 42"},
+                             guard=_attempt_guard(emit, False))
+    assert convo.attempt_logged is False
+    assert ATTEMPT_REJECTED in str(out["content"])
+    reveal = reveal_solution_result(convo, emit, {"text": "THE SECRET ANSWER IS 42"})
+    assert reveal.get("is_error") is True and "THE SECRET ANSWER IS 42" not in str(reveal)
+    assert "tool:log_attempt:rejected" in events and "tool:log_attempt" not in events
 
 
 def _seed(session):

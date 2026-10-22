@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from adaptive_academy.api.deps import get_session
+from adaptive_academy.engine.scorecard import quality_scorecard
 from adaptive_academy.llm import pricing
 from adaptive_academy.llm.backends import current_backend_name
 from adaptive_academy.llm.usage import usage_summary
@@ -66,6 +67,86 @@ class UsageOut(BaseModel):
     priced_models: list[str]
     pricing_source: str
     pricing_as_of: str
+
+
+class QualityCallsOut(BaseModel):
+    """How a group's calls went. See engine/scorecard.py for every definition."""
+
+    calls: int
+    cost_usd: float
+    unpriced_calls: int
+    cost_per_call_usd: float | None  # spend over the calls with a cost; None when none had one
+    recorded_calls: int  # calls with an outcome; the four counts below are out of these
+    refusals: int
+    empty_replies: int
+    cut_offs: int
+    invalid_outputs: int  # structured answers in the wrong format, retried or not
+
+
+class QualityFeatureOut(QualityCallsOut):
+    feature: str | None
+
+
+class QualityModelOut(QualityCallsOut):
+    model: str
+    experimental: bool = False
+
+
+class FailedRuleOut(BaseModel):
+    rule_id: str
+    count: int
+
+
+class GradingQualityOut(BaseModel):
+    calls: int  # on the grading features (QualityOut.grading_features)
+    cost_usd: float
+    unpriced_calls: int
+    graded_assessments: int  # Assessment rows written, demo topic excluded
+    cost_per_assessment_usd: float | None
+    first_attempts: int
+    regenerations: int
+    regenerations_per_grade: float | None
+    rejected: int
+    rejected_failed_checks: int
+    rejected_stopped: int
+    rejected_share: float | None
+    top_failed_rules: list[FailedRuleOut]
+
+
+class GuardQualityOut(BaseModel):
+    checks: int
+    blocked: int
+    blocked_share: float | None
+    fallbacks: int
+    unavailable: int
+    unavailable_share: float | None
+    attempt_unavailable: int
+
+
+class QualityWindowOut(BaseModel):
+    by_feature: list[QualityFeatureOut]
+    by_model: list[QualityModelOut]
+    grading: GradingQualityOut
+    guard: GuardQualityOut
+
+
+class QualityWindowsOut(BaseModel):
+    today: QualityWindowOut
+    last_7_days: QualityWindowOut
+    last_30_days: QualityWindowOut
+    all_time: QualityWindowOut
+
+
+class QualityOut(BaseModel):
+    grading_features: list[str]
+    windows: QualityWindowsOut
+
+
+@router.get("/quality", response_model=QualityOut)
+def get_quality(session: Session = Depends(get_session)) -> QualityOut:
+    """The quality scorecard: per window, how each feature's and model's calls went, what a
+    graded assessment costs, grading health, and the tutor's solution guard."""
+    return QualityOut(**quality_scorecard(session))
 
 
 @router.get("", response_model=UsageOut)

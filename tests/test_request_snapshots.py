@@ -1,6 +1,7 @@
 """Pin the exact request the main call surfaces send to the Anthropic API.
 
-Pinned surfaces (see SURFACES below): a two-turn tutor conversation with a tool step, an
+Pinned surfaces (see SURFACES below): a two-turn tutor conversation with a tool step (and
+the solution guard's attempt check on its log_attempt), an
 assessment (rubric then grade), curriculum generation, a research search, the research
 foundation, a two-turn roleplay persona, a teach-back grade, the paper-probe director, and
 the tutor's solution guard with its regeneration. Other engine calls are not pinned here.
@@ -209,6 +210,7 @@ def _concept(session):
 
 
 def _tutor_turn(session, rec):
+    from adaptive_academy.engine.solution_guard import GUARD_TOOL
     from adaptive_academy.engine.tutor import run_tutor_turn
 
     topic, concept = _concept(session)
@@ -217,13 +219,18 @@ def _tutor_turn(session, rec):
     session.commit()
     rec.queue += [
         _tool("log_attempt", {"summary": "softmax over QK^T"}),
+        # The solution guard's attempt check (copy role, no draft) confirms the attempt.
+        _tool(GUARD_TOOL, {"gives_away_solution": False, "learner_attempted": True,
+                           "reason": "a formula with its parts named"}, id_="toolu_a1"),
         _text("Good start. Why divide by sqrt(d_k)?"),
         _text("Right: it keeps the softmax out of saturation."),
     ]
     llm = deps.get_llm()
     # Two learner turns: the first runs a tool step, the second resends the history.
-    run_tutor_turn(session, convo, "Attention is softmax(QK^T)V.", llm)
-    run_tutor_turn(session, convo, "To keep the dot products from growing with d_k.", llm)
+    run_tutor_turn(session, convo, "Attention is softmax(QK^T)V: each query scores every "
+                   "key, and the weights mix the values.", llm, guard_llm=deps.get_guard_llm())
+    run_tutor_turn(session, convo, "To keep the dot products from growing with d_k.", llm,
+                   guard_llm=deps.get_guard_llm())
 
 
 def _tutor_solution_guard(session, rec):

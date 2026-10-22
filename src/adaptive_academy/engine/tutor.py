@@ -50,7 +50,8 @@ def run_tutor_turn(
     guard_llm: LLMClient | None = None,
 ) -> TurnResult:
     """One learner turn. `guard_llm` is the solution guard's copy-role client
-    (api/deps.get_guard_llm); None runs the guard's deterministic screen only."""
+    (api/deps.get_guard_llm); None runs the guard's deterministic screen only, and then no
+    log_attempt is ever recorded (the attempt check fails closed)."""
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:
@@ -225,21 +226,25 @@ def _execute_tool(
     convo: Conversation,
     call: ToolCall,
     emit: Callable[..., None],
-    guard: SolutionGuard | None = None,
+    guard: SolutionGuard,
 ) -> tuple[bool, str]:
     tier = TIERS.get(call.name, "auto")
 
     if call.name == "log_attempt":
-        if guard is not None and guard.regenerating:
-            # Rewriting a withheld draft: the tutor can't unlock the gate mid-turn. The
-            # attempt is deferred (recorded after the turn if the reply passes review), so
-            # reveal_solution stays gated and the reply is still reviewed.
-            return True, guard.defer_attempt(call.input.get("summary", ""))
-        convo.attempt_logged = True
-        session.add(convo)
+        # The tutor's say-so is not enough: the guard's attempt check must find a real
+        # attempt in the learner's own message (engine/solution_guard.py). While a withheld
+        # draft is being rewritten the attempt is deferred instead (recorded after the turn
+        # if the reply passes review), so reveal_solution stays gated either way until then.
+        # A conversation already unlocked needs no check. Release the write lock first (F5):
+        # the check may make a model call.
         session.commit()
-        emit("tool:log_attempt", call.input.get("summary", ""))
-        return True, "ok: attempt recorded"
+        recorded, payload = guard.attempt_tool(call.input.get("summary", ""),
+                                               attempt_logged=convo.attempt_logged)
+        if recorded and not convo.attempt_logged:
+            convo.attempt_logged = True
+            session.add(convo)
+            session.commit()
+        return True, payload
 
     if call.name == "reveal_solution":
         # Non-gated tiers are always permitted; gated reveal goes through the attempt-gate.
