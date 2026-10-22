@@ -20,7 +20,7 @@ concurrency:
 jobs:
   backend:
     name: Backend (ruff + pytest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -33,7 +33,7 @@ jobs:
 
   frontend:
     name: Frontend (svelte-check + vitest)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -50,7 +50,7 @@ jobs:
 
   e2e:
     name: E2E (Playwright, desktop + phone)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
