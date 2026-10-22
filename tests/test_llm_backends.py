@@ -164,3 +164,15 @@ def test_experimental_models_lists_configured_ones(monkeypatch):
     assert model_catalog.experimental_models() == []
     monkeypatch.setattr(settings, "copy_model", "deepseek/deepseek-v4")
     assert model_catalog.experimental_models() == ["deepseek/deepseek-v4"]
+
+
+def test_the_missing_key_message_names_the_right_restart_step(monkeypatch):
+    from adaptive_academy.llm.keys import missing_key_detail
+
+    monkeypatch.delenv("AA_IN_CONTAINER", raising=False)
+    host = missing_key_detail("ANTHROPIC_API_KEY")
+    assert "just api" in host and "just up" not in host
+    monkeypatch.setenv("AA_IN_CONTAINER", "1")
+    docker = missing_key_detail("ANTHROPIC_API_KEY")
+    assert "just up" in docker and "just api" not in docker
+    assert "—" not in host and "—" not in docker
