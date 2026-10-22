@@ -13,20 +13,22 @@ request is still sent to Anthropic.
 
 ## See it
 
-![The dashboard of the demo topic: progress, concepts, cards due, and each concept's signals and verdict, beside a calibration plot](docs/images/dashboard.png)
+[![A one-minute walk through the demo: the dashboard, today's plan, a tutor session where the full answer only comes after an attempt, and the concept graph](docs/images/demo.gif)](docs/images/demo.mp4)
 
 This is the built-in demo topic. You can load it from the empty home page without an API key.
-[Your first hour](docs/FIRST_HOUR.md) walks you through it.
+[Your first hour](docs/FIRST_HOUR.md) walks you through it. Click the animation for a sharper
+video.
 
 | | |
 |---|---|
-| ![Today's session: review, build, probe the weakest concept, teach it back](docs/images/today.png) | ![A tutor conversation where the tutor asks questions until the learner makes an attempt](docs/images/tutor.png) |
-| **Today**: what to do next, based on where you are. | **Tutor**: questions until you've made an attempt, then the full answer. (This one is a saved demo conversation. Browsing your past sessions is planned.) |
-| ![The concept graph, with stars coloured by how well each concept is known](docs/images/constellation.png) | ![The knowledge map, showing why one concept is shaky and another is solid](docs/images/competence.png) |
-| **Constellation**: your concepts as a graph. | **Why this verdict**: what each concept's rating is based on, and what would raise it. |
+| ![The dashboard of the demo topic: progress, concepts, cards due, and each concept's signals and verdict, beside a calibration plot](docs/images/dashboard.png) | ![Today's session: review, build, probe the weakest concept, teach it back](docs/images/today.png) |
+| **Dashboard**: one topic at a glance. | **Today**: what to do next, based on where you are. |
+| ![A tutor conversation where the tutor asks questions until the learner makes an attempt](docs/images/tutor.png) | ![The concept graph, with stars coloured by how well each concept is known](docs/images/constellation.png) |
+| **Tutor**: questions until you've made an attempt, then the full answer. (This one is a saved demo conversation. Browsing your past sessions is planned.) | **Constellation**: your concepts as a graph. |
+| ![The knowledge map, showing why one concept is shaky and another is solid](docs/images/competence.png) | ![The Usage page: spend by day, feature, and model, with a daily limit](docs/images/usage.png) |
+| **Why this verdict**: what each concept's rating is based on, and what would raise it. | **Usage**: what each feature costs. The demo makes no AI calls, so these numbers are based on a real test run. |
 
-There's also a [Usage page](docs/images/usage.png) and a [phone layout](docs/images/phone-today.png).
-The demo makes no AI calls, so the Usage numbers in that screenshot are based on a real test run.
+There's also a [phone layout](docs/images/phone-today.png).
 
 ## What it does
 
