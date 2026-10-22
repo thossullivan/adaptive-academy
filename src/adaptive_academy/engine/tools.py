@@ -1,22 +1,7 @@
 # Tool schemas (Anthropic tool-use format) + tier table.
 # Tiers: "auto" executes immediately; "gated" is blocked until attempt_logged is True.
-# log_attempt is "auto" but checked: it records only if the solution guard's attempt check
-# finds a real attempt in the learner's own message (engine/solution_guard.py).
-
-LOG_ATTEMPT = {
-    "name": "log_attempt",
-    "description": (
-        "Record that the learner's latest message contains a genuine attempt: an answer with "
-        "some working, a step, code, or reasoning, right or wrong (partial is fine). A bare "
-        "guess, a request, or a question back is not an attempt; ask for their reasoning "
-        "instead. The app checks the learner's message and may refuse the record."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {"summary": {"type": "string"}},
-        "required": ["summary"],
-    },
-}
+# The tutor has no tool that logs an attempt: only the learner can, with the Submit attempt
+# button (engine/attempt.py), so the tutor can never open the gate for itself.
 
 REVEAL_SOLUTION = {
     "name": "reveal_solution",
@@ -32,8 +17,8 @@ REVEAL_SOLUTION = {
     },
 }
 
-TOOLS = [LOG_ATTEMPT, REVEAL_SOLUTION]
-TIERS = {"log_attempt": "auto", "reveal_solution": "gated"}
+TOOLS = [REVEAL_SOLUTION]
+TIERS = {"reveal_solution": "gated"}
 
 _BLOCKED_MSG = (
     "BLOCKED: the learner has not logged an attempt yet. Do NOT reveal the solution. "

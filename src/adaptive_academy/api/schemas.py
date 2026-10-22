@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -67,6 +67,7 @@ class StartConversationIn(BaseModel):
 class MessageOut(BaseModel):
     role: str
     content: str
+    is_attempt: bool = False  # the learner sent it with Submit attempt
 
 
 class MemoryHitOut(BaseModel):
@@ -111,6 +112,9 @@ class EventOut(BaseModel):
 
 class SendMessageIn(BaseModel):
     content: str
+    # The Submit attempt button: check the message and record it as the learner's attempt
+    # before the tutor runs (engine/attempt.py). Send leaves it false.
+    attempt: bool = False
 
 
 class ConversationOut(BaseModel):
@@ -131,9 +135,14 @@ class ConversationPreviewOut(BaseModel):
     challenge_level: str
 
 
+AttemptOutcomeOut = Literal["accepted", "rejected", "unverified", "already_logged"]
+
+
 class SendMessageOut(BaseModel):
     reply: str
     attempt_logged: bool
+    # What happened to a submitted attempt (engine/attempt.py); None for an ordinary message.
+    attempt_outcome: Optional[AttemptOutcomeOut] = None
     assistance_level: str
     challenge_level: str
     events: list[EventOut]

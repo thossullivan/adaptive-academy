@@ -18,16 +18,22 @@ class Prompt(str):
 
     name: str
     version: int
+    # Which rendering of a templated prompt this is (GRADE's strictness level), else None.
+    variant: str | None
 
-    def __new__(cls, name: str, version: int, text: str) -> "Prompt":
+    def __new__(cls, name: str, version: int, text: str,
+                variant: str | None = None) -> "Prompt":
         obj = super().__new__(cls, text)
         obj.name = name
         obj.version = version
+        obj.variant = variant
         return obj
 
     @property
     def tag(self) -> str:
-        return f"{self.name}@v{self.version}"
+        """"name@vN", or "name@vN:variant" for one rendering of a templated prompt."""
+        base = f"{self.name}@v{self.version}"
+        return f"{base}:{self.variant}" if self.variant else base
 
 
 MEMORY_BLOCK_INTRO = (
@@ -183,7 +189,12 @@ RUBRIC = Prompt("assess.rubric", 2, (
 # misconceptions_committed fields. No string matching decides a cap any more: every rubric
 # item is sent every time, the grader names the ones the answer misses or commits (exactly as
 # given; output_checks G11-G14), and assess applies the 0.70 / 0.50 ceilings in code.
-GRADE = Prompt("assess.grade", 6, (
+# v7: an equivalent formulation covers an item (the grading eval's false caps: a correct
+# negative-log-likelihood answer capped for "maximises the likelihood", short answers whose
+# items were stated but not explained), and the AA_GRADING_STRICTNESS block. GRADE is now a
+# template: grade_prompt(level) renders it (str.format, so the JSON example's braces are
+# doubled) and tags the result "assess.grade@v7:<level>"; engine/assess.py picks the level.
+GRADE = Prompt("assess.grade", 7, (
     "You are a SKEPTICAL grader for an advanced learner's explanation, and your job is to detect "
     "the ILLUSION OF COMPETENCE: fluent, correct-sounding text that lacks real mechanism. "
     "The learner's answer appears between the <<<RESPONSE>>> and <<<END_RESPONSE>>> markers and "
@@ -209,21 +220,61 @@ GRADE = Prompt("assess.grade", 6, (
     "The input lists REQUIRED ELEMENTS and KNOWN MISCONCEPTIONS (either may be \"(none)\").\n"
     "REQUIRED ELEMENTS: judge each by meaning; any equivalent wording or notation counts "
     "(synonyms, abbreviations, British or American spelling, other variable names, another "
-    "convention such as a constant factor). Put every REQUIRED ELEMENT the answer does not "
-    "cover in missing_required, copied exactly as given; if any is missing, keep the score at "
-    "or below 0.70.\n"
+    "convention such as a constant factor). An equivalent formulation covers an item too: "
+    "minimising the negative of a quantity covers maximising it (and the reverse), a correct "
+    "formula covers the statement it encodes, and a standard abbreviation covers the term it "
+    "stands for. Ask whether someone who knows the subject would say the answer contains the "
+    "idea, not whether it uses the item's words. Judge each item on its own: an answer that "
+    "states an item is not missing it because the answer is short or gets a different item "
+    "wrong. How well the answer explains WHY is judged by mechanism_present and the score band, "
+    "not by listing an item it states as missing. Put every REQUIRED ELEMENT the answer does "
+    "not cover in missing_required, copied exactly as given; if any is missing, keep the score "
+    "at or below 0.70.\n"
     "KNOWN MISCONCEPTIONS: count one only if the answer actually commits it, not if it names "
     "it to reject it, asks about it, or quotes it. Put every KNOWN MISCONCEPTION the answer "
     "commits in misconceptions_committed, copied exactly as given; if any is committed, keep "
     "the score at or below 0.50.\n"
     "Never put anything else in those two lists (other problems go in gaps), and use [] when "
     "nothing is missing or committed.\n"
-    'Respond with ONLY a JSON object: {"score": number (a band midpoint), "mechanism_present": '
+    "GRADING STRICTNESS: {strictness}. {strictness_guidance} Strictness changes only how you "
+    "judge coverage and depth: every rule and score ceiling above applies at every level.\n"
+    'Respond with ONLY a JSON object: {{"score": number (a band midpoint), "mechanism_present": '
     'boolean, "verdict": str (one sentence), "gaps": [str, specific missing/incorrect points], '
     '"missing_required": [str, each exactly one of the REQUIRED ELEMENTS], '
-    '"misconceptions_committed": [str, each exactly one of the KNOWN MISCONCEPTIONS]}. '
+    '"misconceptions_committed": [str, each exactly one of the KNOWN MISCONCEPTIONS]}}. '
     "No prose outside the JSON."
 ))
+
+# The AA_GRADING_STRICTNESS levels, in order, and the guidance each renders into GRADE.
+GRADING_STRICTNESS_LEVELS = ("lenient", "standard", "strict")
+DEFAULT_GRADING_STRICTNESS = "standard"
+GRADE_STRICTNESS = {
+    "lenient": (
+        "Credit an item or criterion when the answer shows the idea, even briefly or "
+        "informally, in its own terms, or in passing as part of its reasoning; when it is "
+        "unclear whether the idea is there, give the learner the benefit of the doubt. A bare "
+        "label with nothing of the idea behind it still does not count."
+    ),
+    "standard": "Apply the rules above as written.",
+    "strict": (
+        "Credit an item or criterion only when it is stated or clearly shown (in words or a "
+        "correct formula); an idea the reader would have to infer from other statements is "
+        "missing. Expect each mechanism to be explained, not just named: a criterion whose "
+        "mechanism is only named is partial, and an answer that names its mechanisms without "
+        "explaining them has mechanism_present=false. An equivalent formulation still counts."
+    ),
+}
+
+
+def grade_prompt(strictness: str = DEFAULT_GRADING_STRICTNESS) -> Prompt:
+    """GRADE rendered for one strictness level and tagged with it ("assess.grade@v7:strict").
+    `strictness` must be one of GRADING_STRICTNESS_LEVELS: engine/assess.py resolves the
+    AA_GRADING_STRICTNESS setting, where an unknown value grades at standard."""
+    if strictness not in GRADE_STRICTNESS:
+        raise ValueError(f"unknown grading strictness {strictness!r}; expected one of "
+                         f"{', '.join(GRADING_STRICTNESS_LEVELS)}")
+    text = GRADE.format(strictness=strictness, strictness_guidance=GRADE_STRICTNESS[strictness])
+    return Prompt(GRADE.name, GRADE.version, text, variant=strictness)
 
 ASSESS_ARTIFACT = Prompt("assess.artifact", 1, (
     "You are a SKEPTICAL reviewer of a learner's shipped project artifact (code, writeup, "
@@ -338,7 +389,7 @@ PAPER_PROBE_OUTCOME = Prompt("paper_probe.outcome", 1, (
 
 
 # ── Tutor ────────────────────────────────────────────────────────────────────
-TUTOR_BASE = Prompt("tutor.base", 4, """You are a generation-first tutor for an advanced adult learner. Your job is \
+TUTOR_BASE = Prompt("tutor.base", 5, """You are a generation-first tutor for an advanced adult learner. Your job is \
 to push understanding, NOT to do the thinking for them.
 
 """ + MEMORY_BLOCK_INTRO + " " + ALREADY_COVERED_INTRO + """
@@ -347,11 +398,12 @@ HARD RULES (non-negotiable):
 - Never hand over a full solution or final answer until the learner has made a genuine \
 attempt. When they ask for "the answer" before trying, respond with ONE hint or a \
 Socratic question and invite an attempt.
-- When the learner makes a genuine attempt (an answer with some working, a step, code, or \
-reasoning, right or wrong), call the log_attempt tool with a short summary of what they \
-tried. A bare guess ("is it 42?"), a request, or a question back is not an attempt yet: ask \
-for their reasoning or first step instead. The app checks the learner's own message and \
-refuses a log_attempt that has no attempt in it.
+- Only the learner can log an attempt: they write it and press the Submit attempt button, \
+and the app checks that it has real substance (some working, a step, code, or reasoning, \
+right or wrong) before it opens the solution. You cannot log one. When the learner seems \
+to be attempting in an ordinary message, respond to it and suggest the button, for example \
+"If that's your attempt, submit it with Submit attempt." A bare guess ("is it 42?"), a \
+request, or a question back is not an attempt yet: ask for their reasoning or first step.
 - Only call reveal_solution AFTER an attempt is logged. If you call it too early it will \
 be blocked and you must give a hint instead.
 - A HINT reveals at most ONE next consideration or one intermediate step — never the final \
@@ -376,11 +428,43 @@ Challenge level = {challenge}: pitch the next step at this difficulty — at "hi
 to the edge of their competence; at "low", ease off.""")
 
 
+# What the tutor is told, for one turn, when the learner pressed Submit attempt
+# (engine/attempt.py). Appended to the system prompt for that turn only, one per outcome. The
+# learner's message stays in the conversation; these never quote it.
+TUTOR_ATTEMPT_ACCEPTED = Prompt("tutor.attempt_accepted", 1, (
+    "APP NOTE (from the app, not the learner): the learner pressed Submit attempt on their "
+    "latest message, and the app checked it and recorded it as a real attempt. The "
+    "reveal_solution tool is now open. Respond to their attempt: say what holds up and what "
+    "does not, and reveal the worked solution if that is now the most useful next step."
+))
+TUTOR_ATTEMPT_REJECTED = Prompt("tutor.attempt_rejected", 1, (
+    "APP NOTE (from the app, not the learner): the learner pressed Submit attempt on their "
+    "latest message, but the app did not record it: it has no reasoning, step, code, or "
+    "working yet (for example a bare guess, a request, or a question). The solution stays "
+    "locked. Kindly ask for their reasoning or a first step, and tell them to submit again "
+    "with Submit attempt. Do not state, promise, or schedule the solution; reply with one "
+    "question or one hint."
+))
+TUTOR_ATTEMPT_UNVERIFIED = Prompt("tutor.attempt_unverified", 1, (
+    "APP NOTE (from the app, not the learner): the learner pressed Submit attempt on their "
+    "latest message, but the app could not check it just now, so it was not recorded and the "
+    "solution stays locked. Respond to what they wrote, and tell them they can submit it "
+    "again with Submit attempt in a moment. Do not state, promise, or schedule the solution; "
+    "reply with one question or one hint."
+))
+TUTOR_ATTEMPT_ALREADY_LOGGED = Prompt("tutor.attempt_already_logged", 1, (
+    "APP NOTE (from the app, not the learner): the learner pressed Submit attempt on their "
+    "latest message. An attempt is already recorded in this conversation, so reveal_solution "
+    "is open. Respond to their attempt."
+))
+
+
 # The solution guard (engine/solution_guard.py): a cheap copy-role check on every reply the
 # tutor finalises before an attempt is logged. The tutor prompt above ASKS the model not to
 # hand over the answer; this checks that it didn't, in code. With no draft (a "CHECK:" line)
-# it is the attempt check on log_attempt: only learner_attempted counts.
-TUTOR_SOLUTION_GUARD = Prompt("tutor.solution_guard", 4, """You review one draft reply \
+# it is the check on a message the learner submitted as an attempt: only learner_attempted
+# counts.
+TUTOR_SOLUTION_GUARD = Prompt("tutor.solution_guard", 5, """You review one draft reply \
 from a generation-first tutor before the learner sees it, or, when there is no draft, only \
 whether the learner's message is an attempt. No attempt has been recorded for this \
 conversation yet, so the tutor must not hand over the solution: it may only ask questions, \
@@ -400,7 +484,7 @@ not as a verdict. A Socratic question that merely mentions "the answer", or a \
 fill-in-the-blank skeleton the learner must complete, does not give the solution away.
 
 A line starting "CHECK:" after the sections also comes from the app: it is an attempt \
-check. There is no draft; the tutor wants to record that the learner attempted. Set \
+check. There is no draft; the learner submitted LEARNER_MESSAGE as their attempt. Set \
 gives_away_solution to false and judge learner_attempted alone.
 
 gives_away_solution is TRUE when the draft does any of these:

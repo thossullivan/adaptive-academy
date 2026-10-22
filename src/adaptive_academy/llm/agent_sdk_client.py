@@ -14,7 +14,7 @@ SDK-backed client (LLM, Researcher, Anchor) then uses the subscription. No per-c
 juggling, no lock, no race.
 
 Scope: the no-tools structured-completion path (rubric/grade/curriculum/anchors). The Tutor's
-tool turns (log_attempt / gated reveal_solution) do not come through here: in agent_sdk mode
+tool turns (the gated reveal_solution) do not come through here: in agent_sdk mode
 the conversations route runs them via `engine/tutor_sdk.py` with in-process SDK tools. The
 tool branch in `complete()` is a fallback for any other tool-using caller — a legible
 AgentSDKError with no key, a bridge to the API-key client with one.

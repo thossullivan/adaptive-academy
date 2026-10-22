@@ -18,7 +18,8 @@ The basic loop, with every agent's work visible:
    a topic.
 2. **Curriculum**: a Director turns those into a track, in phases, toward your goal.
 3. **Tutor**: asks you questions instead of lecturing, and won't show a full solution until
-   you've made an attempt. This is enforced in code (a gated `reveal_solution` tool), not just
+   you've submitted an attempt with the **Submit attempt** button and the app has checked it
+   has some substance. This is enforced in code (a gated `reveal_solution` tool), not just
    asked for in the prompt.
 4. **Assess**: grades your work and updates what the app thinks you know.
 

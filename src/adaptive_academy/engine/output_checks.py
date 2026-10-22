@@ -44,7 +44,7 @@ Rules, with the reason each exists:
             missing_required or misconceptions_committed). Every band below 0.90 is defined
             by something missing; a low grade with no gaps tells the learner nothing to fix.
   G11 FAIL  "missing_required" is present and a list of strings whenever REQUIRED ELEMENTS
-            were sent. GRADE (v6) requires it: it is how the grader reports a REQUIRED
+            were sent. GRADE (v6 on) requires it: it is how the grader reports a REQUIRED
             ELEMENT the answer does not cover, and the code caps on it; absent would read as
             "nothing missing", an uncapped grade. With nothing sent, absence hides no cap.
   G12 FAIL  "misconceptions_committed" is present and a list of strings whenever KNOWN

@@ -10,7 +10,7 @@ import json
 from adaptive_academy.engine.assess import build_grade_prompt, grade_request, run_grader
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.types import LLMResponse
-from adaptive_academy.prompts import GRADE
+from adaptive_academy.prompts import grade_prompt
 
 
 def _answer(**overrides) -> LLMResponse:
@@ -29,7 +29,7 @@ def test_grade_request_dedupes_items_and_renders_the_app_prompt():
     assert (req.system, req.user) == build_grade_prompt(
         "gradient descent", "self_explanation", ["explains the update"], "",
         "theta <- theta - eta * grad", required=["a", "b"], misconceptions=["m"])
-    assert req.system == GRADE
+    assert req.system == grade_prompt()
 
 
 def test_run_grader_checks_the_answer_and_names_the_enforced_gaps(session):
@@ -41,7 +41,7 @@ def test_run_grader_checks_the_answer_and_names_the_enforced_gaps(session):
     assert run.rules_gaps == ["omitted required element: a"]
     assert run.grade.score == 0.7
     assert run.answer.attempts == 1
-    assert events[0] == ("prompt", GRADE.tag)
+    assert events[0] == ("prompt", grade_prompt().tag)
     assert any(k == "grade:check" for k, _ in events)
     assert llm.calls[0]["system"] == req.system
     assert llm.calls[0]["messages"] == [{"role": "user", "content": req.user}]

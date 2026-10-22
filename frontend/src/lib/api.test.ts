@@ -12,7 +12,23 @@ describe('api.sendMessage', () => {
     const out = await api.sendMessage(1, 'answer please');
 
     expect(globalThis.fetch).toHaveBeenCalledWith('/api/conversations/1/messages', expect.objectContaining({ method: 'POST' }));
+    expect(JSON.parse((globalThis.fetch as any).mock.calls[0][1].body)).toEqual({ content: 'answer please', attempt: false });
     expect(out.reply).toBe('Hint: try first');
+  });
+
+  it('marks a Submit attempt send as an attempt', async () => {
+    const result = {
+      reply: 'Good start', attempt_logged: true, attempt_outcome: 'accepted',
+      assistance_level: 'low', challenge_level: 'high', events: [], memory: []
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => result } as Response);
+
+    const out = await api.sendMessage(1, 'I divide by sqrt(d_k) because...', true);
+
+    expect(JSON.parse((globalThis.fetch as any).mock.calls[0][1].body)).toEqual({
+      content: 'I divide by sqrt(d_k) because...', attempt: true
+    });
+    expect(out.attempt_outcome).toBe('accepted');
   });
 });
 

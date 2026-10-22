@@ -3,13 +3,15 @@ import { api } from './api';
 import {
   billedTo,
   experimentalModels,
+  gradingStrictness,
   isExperimental,
   keyPlaceholder,
   llmBlocked,
   missingKey,
   providerName,
   setupWarnings,
-  showSetupNotice
+  showSetupNotice,
+  strictnessNote
 } from './setup';
 import type { SetupStatus } from './types';
 
@@ -81,6 +83,33 @@ describe('llmBlocked', () => {
 
   it('never blocks on an unknown status', () => {
     expect(llmBlocked(null)).toBe(false);
+  });
+});
+
+describe('grading strictness', () => {
+  it('reads the level, standard when the API does not say', () => {
+    expect(gradingStrictness({ ...ready, grading_strictness: 'strict' })).toBe('strict');
+    expect(gradingStrictness(ready)).toBe('standard');
+    expect(gradingStrictness(null)).toBe('standard');
+  });
+
+  it('says nothing at standard and explains the other levels in plain words', () => {
+    expect(strictnessNote({ ...ready, grading_strictness: 'standard' })).toBeNull();
+    expect(strictnessNote(ready)).toBeNull();
+    const strict = strictnessNote({ ...ready, grading_strictness: 'strict' });
+    expect(strict).toContain('strict');
+    expect(strict).toContain('AA_GRADING_STRICTNESS');
+    expect(strict).toContain('explain how it works');
+    const lenient = strictnessNote({ ...ready, grading_strictness: 'lenient' });
+    expect(lenient).toContain('lenient');
+    expect(lenient).toContain('briefly or informally');
+    for (const note of [strict, lenient]) expect(note).not.toMatch(/[—–!]/);
+  });
+
+  it('shows the setup card when grading is not at standard', () => {
+    expect(showSetupNotice({ ...ready, grading_strictness: 'lenient' })).toBe(true);
+    expect(showSetupNotice({ ...ready, grading_strictness: 'strict' })).toBe(true);
+    expect(showSetupNotice({ ...ready, grading_strictness: 'standard' })).toBe(false);
   });
 });
 

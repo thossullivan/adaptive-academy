@@ -82,8 +82,8 @@ test('README video', async ({ page }) => {
 
   // 3. The tutor holds back the answer until there's an attempt.
   const composer = () => page.getByPlaceholder(/Ask the tutor/);
-  await replayTutor(page, demo, async (text) => {
-    if (text.startsWith('Attempt:')) {
+  await replayTutor(page, demo, async (text, attempt) => {
+    if (attempt) {
       // Point at the gate before the attempt that opens it.
       await moveTo(page, page.getByText('no attempt yet'), { below: true });
       await pause(page, 1800);
@@ -92,7 +92,7 @@ test('README video', async ({ page }) => {
     // About two seconds of typing per message, however long it is.
     await composer().pressSequentially(text, { delay: Math.min(35, 2000 / text.length) });
     await pause(page, 400);
-    await clickSlowly(page, page.getByRole('button', { name: 'Send' }));
+    await clickSlowly(page, page.getByRole('button', { name: attempt ? 'Submit attempt' : 'Send' }));
     await pause(page, 2800);
   });
   await moveTo(page, page.getByText('attempt logged'), { below: true });

@@ -523,6 +523,13 @@ def _usage_bind_off(monkeypatch):
     llm_usage.reset_usage_bind()
 
 
+@pytest.fixture(autouse=True)
+def _standard_grading(monkeypatch):
+    """Grade at the default strictness, whatever AA_GRADING_STRICTNESS the developer's .env
+    sets; a test that wants another level sets it itself."""
+    monkeypatch.setattr(llm_usage.settings, "grading_strictness", "standard")
+
+
 @pytest.fixture
 def session(_usage_bind_off):
     engine = create_engine(

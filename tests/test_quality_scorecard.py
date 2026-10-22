@@ -20,7 +20,6 @@ from adaptive_academy.engine import scorecard
 from adaptive_academy.engine.grade_gate import checked_completion
 from adaptive_academy.engine.output_checks import OUTCOME_RUBRIC, GradeCheckError
 from adaptive_academy.engine.solution_guard import (
-    ATTEMPT_UNVERIFIED,
     FALLBACK,
     REGENERATE,
     SolutionGuard,
@@ -381,14 +380,13 @@ def test_guard_numbers_from_the_real_solution_guard(session, world):
 
 
 def test_attempt_check_failures_never_inflate_the_screen_only_share(session, world):
-    # One turn: the tutor calls log_attempt three times with the guard model down (one failed
-    # attempt check, reused twice), then its reply is reviewed by the screen alone. Before,
-    # every one of those counted as guard:unavailable over a single check: 400%.
+    # One turn: the learner submits an attempt with the guard model down (the attempt check
+    # fails), then the tutor's reply is reviewed by the screen alone. The attempt outage has
+    # its own kind, so it never counts as a screen-only reply check.
     emit = _emitter(session, world["topic"])
     guard = SolutionGuard(concept="c", learner_text="I'd divide by 2 because...",
                           llm=_Boom(), emit=emit)
-    for _ in range(3):
-        assert guard.attempt_tool("tried") == (False, ATTEMPT_UNVERIFIED)
+    assert guard.confirm_attempt() is False and guard.attempt_check_failed
     guard.review("What would your first step be?")
     session.commit()
 
@@ -399,7 +397,7 @@ def test_attempt_check_failures_never_inflate_the_screen_only_share(session, wor
 
 def test_an_attempt_check_outage_alone_is_counted_without_reply_checks(session, world):
     emit = _emitter(session, world["topic"])
-    SolutionGuard(concept="c", learner_text="x", llm=_Boom(), emit=emit).attempt_tool("t")
+    SolutionGuard(concept="c", learner_text="x", llm=_Boom(), emit=emit).confirm_attempt()
     session.commit()
 
     g = _card(session)["windows"]["today"]["guard"]

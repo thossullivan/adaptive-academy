@@ -146,12 +146,17 @@ just eval-grading --live --limit 5   # a smoke run on the first five cases
 
 `just` loads `.env`, which is where the app's settings live. The eval uses the same ones:
 `AA_LLM_BACKEND` (`anthropic`, `openrouter` or `agent_sdk`), `AA_MODEL_REASONING` (the grader
-model; blank means the backend's default), the backend's key, and `AA_DAILY_BUDGET_USD`. To try
-another model for one run, set it on the command line:
+model; blank means the backend's default), the backend's key, `AA_DAILY_BUDGET_USD`, and
+`AA_GRADING_STRICTNESS` (the grading level; see [setup](../../docs/SETUP.md#grading-strictness)).
+To try another model for one run, set it on the command line:
 
 ```
 AA_LLM_BACKEND=openrouter AA_MODEL_REASONING=deepseek/deepseek-v4.1-flash-1017 just eval-grading --live
 ```
+
+To grade one run at another level without changing `.env`, pass `--strictness lenient`,
+`--strictness standard` or `--strictness strict`. The runner prints the level it grades at and
+where it came from (the option, or `AA_GRADING_STRICTNESS`) under the cost estimate.
 
 Other options: `--cases PATH`, `--out-dir PATH`, and `--scratch-db PATH`.
 
@@ -190,7 +195,7 @@ ignores prompt caching, so the real input cost is usually lower. For the 55 case
 
 | Model | Expected | At most (every grade regenerated once) |
 |---|---|---|
-| `claude-sonnet-5-5` | about $0.96 | about $2.09 |
+| `claude-sonnet-5-5` | about $0.98 | about $2.14 |
 | `deepseek/deepseek-v4.1-flash-1017` (OpenRouter) | price unknown | price unknown |
 
 A model that is not in `llm/pricing.py` gets no dollar estimate, only token counts. On OpenRouter
@@ -204,7 +209,9 @@ mastered were, and 2 more cases in that group got no grade at all.
 
 The JSON report has:
 
-* `meta`: model, backend, prompt tag, the output-check rules, the case file's hash, whether the
+* `meta`: model, backend, prompt tag (which names the grading level, for example
+  `assess.grade@v7:strict`), the grading level (`strictness`) and where it came from
+  (`strictness_source`), the output-check rules, the case file's hash, whether the
   run stopped early and why, the scratch database, the daily limit, and the unsure case ids;
 * `estimate`: what the runner printed before it started;
 * `metrics`: every metric above for the model, with case ids for both costly errors and the
@@ -223,4 +230,5 @@ wrong, fix the case (and say so in the commit), since the file is the eval.
 the eval's thresholds match the app's. `tests/test_grading_eval_cases.py` validates the case file.
 `tests/test_grading_eval_runner.py` runs the runner end to end with a scripted client: it refuses
 without `--live`, sends exactly the app's prompt, applies the app's caps, records usage in the
-scratch database only, honours the daily limit, and writes the report. None of them calls a model.
+scratch database only, honours the daily limit, grades at the level `--strictness` or the
+setting names, and writes the report. None of them calls a model.

@@ -84,6 +84,26 @@ in Docker too. If one isn't available to your key, set `AA_MODEL_REASONING` or
 `AA_MODEL_COPY` in `.env` and restart the API. Leave them blank to use the defaults of the
 backend you're on.
 
+## Grading strictness
+
+`AA_GRADING_STRICTNESS` sets how strict the grader is. Add it to `.env` and restart the API:
+
+```bash
+AA_GRADING_STRICTNESS=strict
+```
+
+- `lenient` gives credit for a key idea you show briefly or informally.
+- `standard` (the default) is the grading the rest of these docs describe.
+- `strict` gives credit only for a key idea you state or show clearly, and expects you to
+  explain how it works, not just name it.
+
+The level changes how the grader judges your answer, not the limits the code puts on the
+score: at most 0.70 with a key idea missing and at most 0.50 for a misconception, at every
+level. Each grade records the level it was made at (in its prompt tag, for example
+`assess.grade@v7:strict`), so grades made at different levels can be told apart. When the
+level isn't standard, the setup card says so. An unknown value grades at standard, and the
+setup card warns about it.
+
 ## OpenRouter
 
 To run on an OpenRouter key instead of an Anthropic one, add these to `.env` and restart:

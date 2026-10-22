@@ -1,10 +1,11 @@
 """The generation-first Tutor turn, run on the Claude subscription via the Agent SDK.
 
 Selected in agent_sdk mode (see api/routes_conversations.py). The whole turn is ONE SDK
-`query()` with two in-process tools — `log_attempt` and `reveal_solution` — where the
-attempt-gate is **code-enforced inside the reveal_solution handler** (the SDK's `can_use_tool`
-callback needs streaming-input mode; the in-handler gate is simpler and keeps the guardrail in
-code). The gate decision is the shared `reveal_gate` used by the raw-API tutor too.
+`query()` with one in-process tool, `reveal_solution`, where the attempt-gate is
+**code-enforced inside its handler** (the SDK's `can_use_tool` callback needs streaming-input
+mode; the in-handler gate is simpler and keeps the guardrail in code). The gate decision is
+the shared `reveal_gate` used by the raw-API tutor too. Only the learner opens the gate, with
+Submit attempt, checked before the query runs (engine/attempt.py), as on the API path.
 
 The Agent SDK runs the agent loop and executes the tools; we collect the final
 `ResultMessage.result` as the tutor's reply. Conversation history is flattened into the prompt
@@ -22,6 +23,7 @@ from claude_agent_sdk import (
 )
 from sqlmodel import Session
 
+from adaptive_academy.engine.attempt import AttemptOutcome, submit_attempt, with_attempt_note
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import index_message, memory_blocks_for_tutor
 from adaptive_academy.engine.solution_guard import (
@@ -30,7 +32,7 @@ from adaptive_academy.engine.solution_guard import (
     REGENERATE,
     SolutionGuard,
 )
-from adaptive_academy.engine.tools import LOG_ATTEMPT, reveal_gate
+from adaptive_academy.engine.tools import reveal_gate
 from adaptive_academy.engine.tutor import TurnResult, _FALLBACK
 from adaptive_academy.llm.agent_sdk_client import record_sdk_result
 from adaptive_academy.llm.registry import get_model
@@ -57,22 +59,6 @@ def _text_result(text: str, *, is_error: bool = False) -> dict:
     return out
 
 
-def log_attempt_result(convo: Conversation, args: dict, *, guard: SolutionGuard) -> dict:
-    """Tool body for log_attempt — records the learner's attempt only if the guard's attempt
-    check finds a real one in the learner's own message (engine/solution_guard.py
-    `attempt_tool`); otherwise the tool result tells the tutor to ask for their reasoning.
-    Extracted so the attempt-gate can be unit-tested without the live SDK. While the guard is
-    regenerating a withheld draft the attempt is deferred, not recorded: the tutor can't
-    unlock the gate mid-turn (run_tutor_turn_sdk records it after the turn if the reply
-    passed review). In a conversation already unlocked it is a plain "ok", no check. The
-    guard writes the events."""
-    recorded, payload = guard.attempt_tool(str(args.get("summary", "")),
-                                           attempt_logged=bool(convo.attempt_logged))
-    if recorded:
-        convo.attempt_logged = True
-    return _text_result(payload)
-
-
 def reveal_solution_result(convo: Conversation, emit, args: dict) -> dict:
     """Tool body for reveal_solution — the code-enforced attempt-gate. When blocked it
     returns the BLOCKED message (is_error) and NEVER the solution text."""
@@ -91,10 +77,12 @@ def run_tutor_turn_sdk(
     role: str = "reasoning",
     retriever: Retriever | None = None,
     guard_llm: LLMClient | None = None,
+    attempt: bool = False,
 ) -> TurnResult:
-    """One learner turn on the subscription. `guard_llm` is the solution guard's copy-role
-    client (api/deps.get_guard_llm); None runs the guard's deterministic screen only, and
-    then no log_attempt is ever recorded (the attempt check fails closed)."""
+    """One learner turn on the subscription. `attempt` is the Submit attempt button, checked
+    and recorded before the query runs (engine/attempt.py). `guard_llm` is the solution
+    guard's copy-role client (api/deps.get_guard_llm); None runs the guard's deterministic
+    screen only, and then no attempt is ever recorded (the check fails closed)."""
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:
@@ -102,7 +90,8 @@ def run_tutor_turn_sdk(
         session.add(ev)
         events.append(ev)
 
-    user_message = Message(conversation_id=convo.id, role="user", content=user_text)
+    user_message = Message(conversation_id=convo.id, role="user", content=user_text,
+                           is_attempt=True if attempt else None)
     session.add(user_message)
     session.flush()
     index_message(
@@ -130,33 +119,29 @@ def run_tutor_turn_sdk(
             concept,
             user_text,
         )
-    system = build_tutor_system_prompt(
+    prompt = format_history(convo)
+    # The guard also sees the tutor's last stored message (often the question answered).
+    previous_tutor = next((m.content for m in reversed(convo.messages) if m.role == "tutor"), "")
+    guard = SolutionGuard(concept=concept_name, learner_text=user_text, llm=guard_llm,
+                          emit=emit, previous_tutor=previous_tutor)
+    # Checked here, before (and outside) the SDK's event loop: the subscription guard client
+    # runs its own asyncio.run.
+    outcome: AttemptOutcome | None = None
+    if attempt:
+        outcome = submit_attempt(session, convo, user_message, guard, emit)
+    system = with_attempt_note(build_tutor_system_prompt(
         concept_name,
         levels,
         memory_block=memory_block,
         covered_block=covered_block,
-    )
-    prompt = format_history(convo)
-    # Built before the run so the log_attempt tool can see whether a regeneration is under
-    # way. The guard also sees the tutor's last stored message (often the question answered).
-    previous_tutor = next((m.content for m in reversed(convo.messages) if m.role == "tutor"), "")
-    guard = SolutionGuard(concept=concept_name, learner_text=user_text, llm=guard_llm,
-                          emit=emit, previous_tutor=previous_tutor)
-
-    @tool("log_attempt", LOG_ATTEMPT["description"], {"summary": str})
-    async def _log_attempt(args):  # noqa: ANN001
-        # The attempt check may call the subscription guard client, which runs its own
-        # asyncio.run and so can't run on this event loop: it runs in a worker thread. This
-        # loop waits for it, so the session is still used by one thread at a time, and it
-        # only adds rows / sets attributes there (no query, so no autoflush: F5 holds).
-        return await asyncio.to_thread(log_attempt_result, convo, args, guard=guard)
+    ), outcome)
 
     @tool("reveal_solution", "Reveal the full worked solution (only after an attempt)",
           {"text": str})
     async def _reveal_solution(args):  # noqa: ANN001
         return reveal_solution_result(convo, emit, args)
 
-    server = create_sdk_mcp_server("tutor", tools=[_log_attempt, _reveal_solution])
+    server = create_sdk_mcp_server("tutor", tools=[_reveal_solution])
 
     model = get_model(role)
 
@@ -167,7 +152,7 @@ def run_tutor_turn_sdk(
             options=ClaudeAgentOptions(
                 model=model, system_prompt=with_today(system),
                 mcp_servers={"tutor": server},
-                allowed_tools=["mcp__tutor__log_attempt", "mcp__tutor__reveal_solution"],
+                allowed_tools=["mcp__tutor__reveal_solution"],
                 permission_mode="bypassPermissions", max_turns=_MAX_TURNS,
                 setting_sources=[]),
         ):
@@ -181,7 +166,7 @@ def run_tutor_turn_sdk(
     emit("tutor:sdk", "subscription tutor turn")
     # Release the write lock before the SDK run (F5): pending events, flushed by the lazy
     # load in format_history, would otherwise hold it for the whole multi-turn query. The
-    # refresh reloads convo so the in-process tools only set attributes / add rows (no
+    # refresh reloads convo so the in-process tool only reads it and adds event rows (no
     # query, so no autoflush) until the reply is persisted below.
     session.commit()
     session.refresh(convo)
@@ -191,11 +176,6 @@ def run_tutor_turn_sdk(
         reply = _FALLBACK
     elif not convo.attempt_logged:
         reply = _guarded_reply(session, convo, guard, reply, prompt, _run)
-        # An attempt the regeneration logged counts only now, and only if its reply passed
-        # review: never mid-turn, and never for a turn that ended in the guard's fallback.
-        if guard.take_deferred_attempt():
-            convo.attempt_logged = True
-            session.add(convo)
 
     tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply)
     session.add(tutor_message)
@@ -209,7 +189,8 @@ def run_tutor_turn_sdk(
         retriever=retriever,
     )
     session.commit()
-    return TurnResult(reply=reply, events=events, memory=memory_hits)
+    return TurnResult(reply=reply, events=events, memory=memory_hits,
+                      attempt_outcome=outcome.status if outcome else None)
 
 
 def _guarded_reply(session: Session, convo: Conversation, guard: SolutionGuard, draft: str,
@@ -218,12 +199,12 @@ def _guarded_reply(session: Session, convo: Conversation, guard: SolutionGuard, 
 
     A withheld draft gets ONE regeneration: a second query whose prompt is the same flattened
     history with the draft and the correction appended (append-only, like the API path).
-    During that run log_attempt is deferred (so reveal_solution stays gated), and its reply
-    is always checked; a second leak stores GUARD_FALLBACK. Only the returned text is ever
-    stored.
+    Nothing in that run can log an attempt (only Submit attempt can, before the turn), so
+    reveal_solution stays gated and its reply is always checked; a second leak stores
+    GUARD_FALLBACK. Only the returned text is ever stored.
     """
     # Release the write lock before the check (F5): it may make a model call, and the
-    # in-process tools may have left events pending.
+    # in-process tool may have left events pending.
     session.commit()
     decision = guard.review(draft)
     if decision == PASS:

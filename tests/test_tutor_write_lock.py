@@ -76,23 +76,24 @@ def test_no_write_lock_is_held_during_any_tutor_model_call(file_engine):
     with Session(engine) as session:
         convo = _seed(session)
         llm = _ProbingLLM(path, [
-            LLMResponse(tool_calls=[ToolCall(id="t1", name="log_attempt",
-                                             input={"summary": "tried QK^T"})]),
-            LLMResponse(tool_calls=[ToolCall(id="t2", name="reveal_solution",
-                                             input={"text": "ANSWER"})]),
+            LLMResponse(tool_calls=[ToolCall(id="t1", name="reveal_solution",
+                                             input={"text": "BLOCKED?"})]),
+            LLMResponse(text="Why divide at all?"),
         ])
-        # The solution guard's attempt check, a model call too, confirms the attempt.
-        guard = _ProbingLLM(path, [LLMResponse(text=json.dumps(
-            {"gives_away_solution": False, "learner_attempted": True, "reason": "r"}))])
-        result = run_tutor_turn(session, convo, "my attempt: softmax(QK^T)V", llm,
-                                guard_llm=guard)
+        # A submitted attempt: the solution guard's attempt check, a model call too, finds
+        # no attempt, so the reveal is blocked and the reply is reviewed (a third call).
+        verdict = LLMResponse(text=json.dumps(
+            {"gives_away_solution": False, "learner_attempted": False, "reason": "r"}))
+        guard = _ProbingLLM(path, [verdict, verdict])
+        result = run_tutor_turn(session, convo, "is it softmax?", llm, guard_llm=guard,
+                                attempt=True)
 
         assert llm.lock_free == [True, True]
-        assert guard.lock_free == [True]
-        assert result.reply == "ANSWER"
+        assert guard.lock_free == [True, True]
+        assert result.reply == "Why divide at all?"
         kinds = [e.kind for e in result.events]
         assert kinds.count("llm_call") == 2  # the trace is still written
-        assert "tool:log_attempt" in kinds
+        assert "attempt:rejected" in kinds
 
 
 def test_tutor_events_are_persisted_after_the_turn(file_engine):

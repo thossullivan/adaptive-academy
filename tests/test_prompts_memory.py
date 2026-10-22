@@ -21,7 +21,7 @@ def _hit(text: str, source_ref: str, *, kind: str = "vault_note") -> Hit:
 
 
 def test_memory_prompt_versions_and_delimiter_sentences():
-    assert prompts.TUTOR_BASE.tag == "tutor.base@v4"
+    assert prompts.TUTOR_BASE.tag == "tutor.base@v5"
     assert prompts.PF_GENERATE.tag == "practice.pf_generate@v3"
     assert prompts.ROLEPLAY_DIRECTOR.tag == "roleplay.director@v2"
     assert prompts.PAPER_PROBE_DIRECTOR.tag == "paper_probe.director@v2"

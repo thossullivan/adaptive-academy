@@ -33,7 +33,8 @@ There's also a [phone layout](docs/images/phone-today.png).
 ## What it does
 
 - Builds a study plan for a topic, or for a longer goal split into milestones.
-- Tutors you with questions and hints until you've made an attempt.
+- Tutors you with questions and hints until you submit an attempt of your own (the app checks
+  that it has some reasoning in it).
 - Checks what you know in several ways: explaining it in your own words, recalling it days
   later, how sure you were, teaching it back, and things you build. A concept counts as solid
   only when these agree.

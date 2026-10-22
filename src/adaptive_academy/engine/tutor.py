@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session
 
+from adaptive_academy.engine.attempt import AttemptOutcome, submit_attempt, with_attempt_note
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import index_message, memory_blocks_for_tutor
 from adaptive_academy.engine.solution_guard import (
@@ -18,8 +19,8 @@ from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
 from adaptive_academy.prompts import TUTOR_GUARD_CORRECTION, build_tutor_system_prompt
 
 _MAX_STEPS = 6
-# Steps a regeneration is always left, however late the withheld draft came: two tool steps
-# and the reply.
+# Steps a regeneration is always left, however late the withheld draft came: a tool step or
+# two (a blocked reveal) and the reply.
 _REGEN_STEPS = 3
 _FALLBACK = "Let's slow down — tell me what you've tried so far, and we'll work from there."
 _REFUSAL = (
@@ -33,6 +34,8 @@ class TurnResult:
     reply: str
     events: list[AgentEvent]
     memory: list[Hit] = field(default_factory=list)
+    # engine/attempt.py's outcome when the learner pressed Submit attempt, else None.
+    attempt_outcome: str | None = None
 
 
 def _history(convo: Conversation) -> list[dict]:
@@ -48,10 +51,13 @@ def run_tutor_turn(
     *,
     retriever: Retriever | None = None,
     guard_llm: LLMClient | None = None,
+    attempt: bool = False,
 ) -> TurnResult:
-    """One learner turn. `guard_llm` is the solution guard's copy-role client
-    (api/deps.get_guard_llm); None runs the guard's deterministic screen only, and then no
-    log_attempt is ever recorded (the attempt check fails closed)."""
+    """One learner turn. `attempt` is the Submit attempt button: the message is checked and
+    recorded as an attempt before the tutor runs (engine/attempt.py). `guard_llm` is the
+    solution guard's copy-role client (api/deps.get_guard_llm); None runs the guard's
+    deterministic screen only, and then no attempt is ever recorded (the check fails
+    closed)."""
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:
@@ -60,7 +66,8 @@ def run_tutor_turn(
         events.append(ev)
 
     # Persist the incoming user message.
-    user_message = Message(conversation_id=convo.id, role="user", content=user_text)
+    user_message = Message(conversation_id=convo.id, role="user", content=user_text,
+                           is_attempt=True if attempt else None)
     session.add(user_message)
     session.flush()
     index_message(
@@ -87,13 +94,6 @@ def run_tutor_turn(
             concept,
             user_text,
         )
-    system = build_tutor_system_prompt(
-        concept.name if concept else "",
-        levels,
-        memory_block=memory_block,
-        covered_block=covered_block,
-    )
-
     messages = _history(convo)
     reply_text = ""
     # The guard also sees the tutor's last stored message: often the question being answered.
@@ -101,6 +101,15 @@ def run_tutor_turn(
                            if m["role"] == "assistant"), "")
     guard = SolutionGuard(concept=concept.name if concept else "", learner_text=user_text,
                           llm=guard_llm, emit=emit, previous_tutor=previous_tutor)
+    outcome: AttemptOutcome | None = None
+    if attempt:
+        outcome = submit_attempt(session, convo, user_message, guard, emit)
+    system = with_attempt_note(build_tutor_system_prompt(
+        concept.name if concept else "",
+        levels,
+        memory_block=memory_block,
+        covered_block=covered_block,
+    ), outcome)
 
     step = 0
     max_steps = _MAX_STEPS
@@ -131,12 +140,11 @@ def run_tutor_turn(
             reply_text = resp.text
             if not reply_text.strip():
                 emit("empty_reply", f"stop_reason={resp.stop_reason}")
-            elif guard.regenerating or not convo.attempt_logged:
-                # The solution guard: a reply finalised before any attempt is logged (this
-                # turn's log_attempt included) must not hand over the answer. A regenerated
-                # reply is always reviewed (it was pre-attempt, and log_attempt is deferred
-                # while regenerating). Release the write lock first (F5): the check may make
-                # a model call.
+            elif not convo.attempt_logged:
+                # The solution guard: a reply finalised before any attempt is logged must not
+                # hand over the answer. Only the learner's Submit attempt, before the tutor
+                # ran, can log one, so a regenerated reply is always reviewed too. Release the
+                # write lock first (F5): the check may make a model call.
                 session.commit()
                 decision = guard.review(reply_text)
                 if decision == REGENERATE:
@@ -148,7 +156,7 @@ def run_tutor_turn(
                     messages.append({"role": "user", "content": str(TUTOR_GUARD_CORRECTION)})
                     reply_text = ""
                     # A late draft still leaves the regeneration room for a tool step or two
-                    # (a deferred log_attempt, a blocked reveal) before its reply.
+                    # (a blocked reveal) before its reply.
                     max_steps = max(max_steps, step + _REGEN_STEPS)
                     continue
                 if decision == FALLBACK:
@@ -160,7 +168,7 @@ def run_tutor_turn(
         tool_results = []
         revealed_text: str | None = None
         for call in resp.tool_calls:
-            ok, payload = _execute_tool(session, convo, call, emit, guard)
+            ok, payload = _execute_tool(convo, call, emit)
             tool_results.append(
                 {"type": "tool_result", "tool_use_id": call.id, "content": payload}
             )
@@ -181,12 +189,6 @@ def run_tutor_turn(
             emit("max_steps_exhausted")
         reply_text = _FALLBACK
 
-    # An attempt the regeneration logged counts only now, and only if its reply passed
-    # review: never mid-turn, and never for a turn that ended in the guard's fallback.
-    if guard.take_deferred_attempt():
-        convo.attempt_logged = True
-        session.add(convo)
-
     # Persist the tutor reply.
     tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply_text)
     session.add(tutor_message)
@@ -200,7 +202,8 @@ def run_tutor_turn(
         retriever=retriever,
     )
     session.commit()
-    return TurnResult(reply=reply_text, events=events, memory=memory_hits)
+    return TurnResult(reply=reply_text, events=events, memory=memory_hits,
+                      attempt_outcome=outcome.status if outcome else None)
 
 
 def _assistant_tool_blocks(resp: LLMResponse) -> list[dict]:
@@ -222,29 +225,11 @@ def _assistant_tool_blocks(resp: LLMResponse) -> list[dict]:
 
 
 def _execute_tool(
-    session: Session,
     convo: Conversation,
     call: ToolCall,
     emit: Callable[..., None],
-    guard: SolutionGuard,
 ) -> tuple[bool, str]:
     tier = TIERS.get(call.name, "auto")
-
-    if call.name == "log_attempt":
-        # The tutor's say-so is not enough: the guard's attempt check must find a real
-        # attempt in the learner's own message (engine/solution_guard.py). While a withheld
-        # draft is being rewritten the attempt is deferred instead (recorded after the turn
-        # if the reply passes review), so reveal_solution stays gated either way until then.
-        # A conversation already unlocked needs no check. Release the write lock first (F5):
-        # the check may make a model call.
-        session.commit()
-        recorded, payload = guard.attempt_tool(call.input.get("summary", ""),
-                                               attempt_logged=convo.attempt_logged)
-        if recorded and not convo.attempt_logged:
-            convo.attempt_logged = True
-            session.add(convo)
-            session.commit()
-        return True, payload
 
     if call.name == "reveal_solution":
         # Non-gated tiers are always permitted; gated reveal goes through the attempt-gate.
@@ -252,5 +237,7 @@ def _execute_tool(
         emit(f"tool:reveal_solution:{'allowed' if allowed else 'blocked'}")
         return allowed, msg
 
+    # Anything else, including a log_attempt the model invents from an older transcript, is
+    # unknown: the tutor has no way to log an attempt.
     emit(f"tool:{call.name}:unknown")
     return False, f"unknown tool {call.name}"

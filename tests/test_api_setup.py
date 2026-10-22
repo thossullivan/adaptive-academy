@@ -309,3 +309,48 @@ def test_llm_route_on_openrouter_without_key_is_legible_503(client, session, mon
     assert r.status_code == 503
     assert "No OPENROUTER_API_KEY is set" in r.json()["detail"]
     assert r.json()["category"] == "auth"
+
+
+# --- grading strictness (AA_GRADING_STRICTNESS) ------------------------------------------
+
+def _strictness_body(client, monkeypatch, raw: str, backend: str | None = None) -> dict:
+    from adaptive_academy.settings import settings
+
+    if backend is None:
+        monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    else:
+        monkeypatch.setenv("AA_LLM_BACKEND", backend)
+    monkeypatch.setattr(settings, "grading_strictness", raw)
+    return client.get("/api/setup").json()
+
+
+def test_setup_reports_standard_strictness_by_default(client, monkeypatch):
+    body = _strictness_body(client, monkeypatch, "standard")
+    assert body["grading_strictness"] == "standard"
+    assert body["setup_warnings"] == []
+
+
+@pytest.mark.parametrize("backend", [None, "agent_sdk", "openrouter"])
+@pytest.mark.parametrize("raw, level", [("strict", "strict"), (" Lenient ", "lenient")])
+def test_setup_reports_the_configured_strictness(client, monkeypatch, backend, raw, level):
+    if backend == "openrouter":
+        monkeypatch.setenv("OPENROUTER_API_KEY", OR_SECRET)
+    body = _strictness_body(client, monkeypatch, raw, backend)
+    assert body["grading_strictness"] == level
+    assert not any("AA_GRADING_STRICTNESS" in w for w in body.get("setup_warnings", []))
+
+
+@pytest.mark.parametrize("backend", [None, "agent_sdk"])
+def test_setup_warns_about_an_unknown_strictness(client, monkeypatch, backend):
+    body = _strictness_body(client, monkeypatch, "harsh", backend)
+    assert body["grading_strictness"] == "standard"
+    (warning,) = [w for w in body["setup_warnings"] if "AA_GRADING_STRICTNESS" in w]
+    assert "'harsh'" in warning and "standard" in warning
+    assert "—" not in warning
+
+
+def test_setup_strictness_warning_does_not_echo_a_key(client, monkeypatch):
+    r_body = _strictness_body(client, monkeypatch, SECRET)
+    assert SECRET not in str(r_body) and "SUPERSECRET" not in str(r_body)
+    assert any("AA_GRADING_STRICTNESS" in w for w in r_body["setup_warnings"])

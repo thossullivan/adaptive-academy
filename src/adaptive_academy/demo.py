@@ -24,6 +24,7 @@ from sqlmodel import Session, SQLModel, col, select
 
 from adaptive_academy.engine import graph
 from adaptive_academy.engine.assess import GRADING_KINDS, level_from_score
+from adaptive_academy.engine.attempt import ACCEPTED, OUTCOME_DETAILS, SUBMITTED_DETAIL
 from adaptive_academy.engine.curriculum import load_bearing_concepts
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import (
@@ -35,6 +36,7 @@ from adaptive_academy.engine.memory import (
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
+    Attempt,
     Concept,
     ConceptEdge,
     Conversation,
@@ -59,7 +61,6 @@ from adaptive_academy.prompts import (
     ASSESS_ARTIFACT,
     CURRICULUM,
     DECAY_RECALL,
-    GRADE,
     PF_CONSOLIDATE,
     PF_GENERATE,
     REMEDIATE,
@@ -67,7 +68,10 @@ from adaptive_academy.prompts import (
     RETENTION,
     RUBRIC,
     TEACH,
+    TUTOR_ATTEMPT_ACCEPTED,
     TUTOR_BASE,
+    TUTOR_SOLUTION_GUARD,
+    grade_prompt,
 )
 
 DEMO_TITLE = "Build LLMs from scratch (demo)"
@@ -425,7 +429,9 @@ PROBES: list[_Probe] = [
 ]
 
 # Which prompt grades each probe kind in the real app (every other kind goes through
-# assess_concept's GRADE), so the demo rows carry the prompt_tag a real grade would.
+# assess_concept's GRADE, rendered at the default strictness), so the demo rows carry the
+# prompt_tag a real grade would.
+_GRADE = grade_prompt()
 _GRADED_BY = {"teach": TEACH, "productive_failure": PF_CONSOLIDATE,
               "artifact_review": ASSESS_ARTIFACT}
 
@@ -462,14 +468,15 @@ DECAY_DUE = [
     ("causal", 1.0),
 ]
 
-# Tutor sessions: (concept key, when, attempt summary, messages). Each message is
-# (role, text, minutes after the conversation started).
+# Tutor sessions: (concept key, when, messages). Each message is (role, text, minutes after the
+# conversation started). Role "attempt" is a learner message sent with Submit attempt: it is
+# stored as a user message marked is_attempt, with an accepted Attempt row.
 CHAIN_MESSAGES = [
     ("user", "For c = a * b, why is dc/da equal to b? It feels like I'm memorizing it.", 0),
     ("tutor", "Try it numerically before I say anything: nudge a by a small h, keep b fixed, "
               "and see how much c moves. What do you get, divided by h?", 1),
-    ("user", "Attempt: c(a + h) - c(a) = (a + h)b - ab = hb, and dividing by h gives b. So the "
-             "local derivative is just the other input.", 5),
+    ("attempt", "c(a + h) - c(a) = (a + h)b - ab = hb, and dividing by h gives b. So the "
+                "local derivative is just the other input.", 5),
     ("tutor", "Exactly, and you derived it rather than recalled it. In backward() that node "
               "multiplies the upstream gradient by b for a, and by a for b — the chain rule is "
               "that product, applied node by node.", 6),
@@ -485,10 +492,10 @@ TUTOR_MESSAGES = [
     ("tutor", "Exactly — you've found the problem. Renormalizing afterwards is equivalent to "
               "something you can do in one step. What value could you put in the logits so "
               "that the softmax itself gives those positions zero weight?", 7),
-    ("user", "Attempt: set the masked logits to -inf. exp(-inf) = 0, so the softmax gives them "
-             "zero weight and the remaining weights still sum to 1. In code: "
-             "scores.masked_fill(mask == 0, float('-inf')) before the softmax.", 12),
-    ("tutor", "That's the mechanism. Since you've logged a real attempt, here's the full "
+    ("attempt", "Set the masked logits to -inf. exp(-inf) = 0, so the softmax gives them "
+                "zero weight and the remaining weights still sum to 1. In code: "
+                "scores.masked_fill(mask == 0, float('-inf')) before the softmax.", 12),
+    ("tutor", "That's the mechanism. Since you've submitted a real attempt, here's the full "
               "picture: masking with −∞ before the softmax is the same as renormalizing over "
               "the allowed positions, but it's one fused, numerically clean step. One thing to "
               "test in your implementation: the first row has a single unmasked entry, so its "
@@ -496,8 +503,8 @@ TUTOR_MESSAGES = [
 ]
 
 TUTOR_SESSIONS = [
-    ("chain", _ago(20, 5), "worked dc/da from a finite difference", CHAIN_MESSAGES),
-    ("causal", _ago(3, 1), "masked logits set to -inf before the softmax", TUTOR_MESSAGES),
+    ("chain", _ago(20, 5), CHAIN_MESSAGES),
+    ("causal", _ago(3, 1), TUTOR_MESSAGES),
 ]
 
 
@@ -687,7 +694,7 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
             item_id=items[probe.item[0]][probe.item[1]].id if probe.item else None,
             # The current tag of the prompt that grades this kind in the real app, the same
             # one the trace below stamps for this row.
-            prompt_tag=_GRADED_BY.get(probe.kind, GRADE).tag,
+            prompt_tag=_GRADED_BY.get(probe.kind, _GRADE).tag,
         )
         session.add(a)
         session.flush()
@@ -706,7 +713,7 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
                      topic_id=tid)
         else:
             emit(when, "assess:probe", probe.kind, topic_id=tid)
-            emit(when, "prompt", GRADE.tag, topic_id=tid)
+            emit(when, "prompt", _GRADE.tag, topic_id=tid)
             hard = [g for g in probe.gaps if g.startswith("omitted required element")]
             if hard:
                 emit(when, "assess:rules", f"{len(hard)} hard gap(s)", topic_id=tid)
@@ -766,8 +773,8 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
         index_question(session, text=prompt.prompt, source_ref=f"recallprompt:{prompt.id}",
                        topic_id=tid, concept_id=concepts[key].id)
 
-    # Tutor: Socratic conversations in which the learner logged an attempt before the reveal.
-    for key, ago, attempt, script in TUTOR_SESSIONS:
+    # Tutor: Socratic conversations in which the learner submitted an attempt before the reveal.
+    for key, ago, script in TUTOR_SESSIONS:
         convo_at = at(ago)
         tutor_concept = concepts[key]
         convo = Conversation(topic_id=tid, concept_id=tutor_concept.id, attempt_logged=True,
@@ -779,22 +786,34 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
         levels = compute_levels(KnowledgeEstimate(concept_id=tutor_concept.id, level=level))
         for role, content, minutes in script:
             when = convo_at + timedelta(minutes=minutes)
-            message = Message(conversation_id=convo.id, role=role, content=content,
+            is_attempt = role == "attempt"
+            message = Message(conversation_id=convo.id, role="tutor" if role == "tutor" else "user",
+                              content=content, is_attempt=True if is_attempt else None,
                               created_at=when)
             session.add(message)
             session.flush()
             index_message(session, message, concept_id=tutor_concept.id, topic_id=tid,
                           levels=levels if role == "tutor" else None)
-            if role == "user":
-                emit(when, "levels",
-                     f"assistance={levels.assistance} challenge={levels.challenge}",
+            if role == "tutor":
+                continue
+            emit(when, "levels", f"assistance={levels.assistance} challenge={levels.challenge}",
+                 conversation_id=convo.id)
+            if is_attempt:
+                # As engine/attempt.py records it: checked, accepted, then the tutor runs.
+                session.add(Attempt(conversation_id=convo.id, concept_id=tutor_concept.id,
+                                    message_id=message.id, accepted=True, created_at=when))
+                emit(when, "attempt:submitted", SUBMITTED_DETAIL, conversation_id=convo.id)
+                emit(when, "prompt", TUTOR_SOLUTION_GUARD.tag, conversation_id=convo.id)
+                emit(when, "guard:attempt_checked", "source=model attempted=true",
                      conversation_id=convo.id)
-                emit(when, "prompt", TUTOR_BASE.tag, conversation_id=convo.id)
-                emit(when, "llm_call", "step=1", conversation_id=convo.id)
-                if content.startswith("Attempt:"):
-                    emit(when, "tool:log_attempt", attempt, conversation_id=convo.id)
-                    emit(when, "llm_call", "step=2", conversation_id=convo.id)
-                    emit(when, "tool:reveal_solution:allowed", conversation_id=convo.id)
+                emit(when, "attempt:accepted", OUTCOME_DETAILS[ACCEPTED],
+                     conversation_id=convo.id)
+                emit(when, "prompt", TUTOR_ATTEMPT_ACCEPTED.tag, conversation_id=convo.id)
+            emit(when, "prompt", TUTOR_BASE.tag, conversation_id=convo.id)
+            emit(when, "llm_call", "step=1", conversation_id=convo.id)
+            if is_attempt:
+                emit(when, "tool:reveal_solution:allowed", conversation_id=convo.id)
+                emit(when, "llm_call", "step=2", conversation_id=convo.id)
 
     # The trace, written in time order so its ids read chronologically.
     for when, fields in sorted(events, key=lambda e: e[0]):

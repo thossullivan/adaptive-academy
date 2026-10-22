@@ -85,3 +85,125 @@ test('the first Send creates exactly one conversation and a retry reuses it', as
   expect(new Set(sends).size).toBe(1);
   await expect(page.getByText('no attempt yet')).toBeVisible();
 });
+
+// ── The Attempt button ──────────────────────────────────────────────────────────────────────
+// The e2e API runs keyless, so these serve the conversation and each reply from the test. The
+// API's own checks (engine/attempt.py) are covered by tests/test_attempt_button.py.
+
+type SendBody = { content: string; attempt: boolean };
+
+/** Serve the conversation and answer each send with `reply(body)`; returns the bodies sent. */
+async function mockTutor(page: Page, reply: (body: SendBody) => Record<string, unknown>): Promise<SendBody[]> {
+  const sent: SendBody[] = [];
+  await page.route('**/api/conversations', (r) =>
+    r.request().method() === 'POST'
+      ? r.fulfill({
+          json: {
+            id: 997,
+            concept_id: r.request().postDataJSON().concept_id,
+            attempt_logged: false,
+            assistance_level: 'medium',
+            challenge_level: 'medium',
+            messages: []
+          }
+        })
+      : r.fallback()
+  );
+  await page.route('**/api/conversations/997/messages', async (r) => {
+    const body = r.request().postDataJSON() as SendBody;
+    sent.push(body);
+    await r.fulfill({
+      json: {
+        reply: 'What made you pick that?',
+        attempt_logged: false,
+        attempt_outcome: null,
+        assistance_level: 'medium',
+        challenge_level: 'medium',
+        events: [],
+        memory: [],
+        ...reply(body)
+      }
+    });
+  });
+  return sent;
+}
+
+test('Submit attempt sends the message as an attempt and the header turns to attempt logged', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const sent = await mockTutor(page, (b) =>
+    b.attempt
+      ? { reply: 'That holds up. Here is the worked solution.', attempt_logged: true, attempt_outcome: 'accepted' }
+      : {}
+  );
+  await page.goto(`/topics/${topic.id}/tutor`);
+  await settle(page);
+
+  const input = page.getByRole('textbox', { name: 'Message the tutor' });
+  const submit = page.getByRole('button', { name: 'Submit attempt' });
+  const sendButton = page.getByRole('button', { name: 'Send' });
+  // Both actions wait for a message.
+  await expect(submit).toBeDisabled();
+  await expect(sendButton).toBeDisabled();
+
+  await input.fill('Why scale the scores at all?');
+  await sendButton.click();
+  await expect(page.getByText('What made you pick that?')).toBeVisible();
+  await expect(page.getByText('no attempt yet')).toBeVisible();
+
+  await input.fill('I divide by sqrt(d_k) because the variance of the dot product grows with d_k.');
+  await submit.click();
+  await expect(page.getByText('That holds up. Here is the worked solution.')).toBeVisible();
+  await expect(page.getByText('attempt logged')).toBeVisible();
+  await expect(page.getByText('your attempt', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('attempt-note')).toHaveCount(0);
+  expect(sent.map((b) => b.attempt)).toEqual([false, true]);
+});
+
+test('an attempt that is not logged gets a kind note and the gate stays shut', async ({ page }) => {
+  const topic = await seededTopic(page);
+  await mockTutor(page, () => ({
+    reply: 'Tell me how you got there: what would your first step be?',
+    attempt_outcome: 'rejected'
+  }));
+  await page.goto(`/topics/${topic.id}/tutor`);
+  await settle(page);
+
+  await page.getByRole('textbox', { name: 'Message the tutor' }).fill('is it 42?');
+  await page.getByRole('button', { name: 'Submit attempt' }).click();
+  await expect(page.getByText('what would your first step be?')).toBeVisible();
+  await expect(page.getByTestId('attempt-note')).toHaveText(
+    'Not logged as an attempt yet. Add your reasoning or a first step, then submit again.'
+  );
+  await expect(page.getByText('no attempt yet')).toBeVisible();
+});
+
+test('keyboard: Enter sends, Ctrl+Enter submits an attempt, Shift+Enter adds a line', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const sent = await mockTutor(page, (b) => (b.attempt ? { attempt_logged: true, attempt_outcome: 'accepted' } : {}));
+  await page.goto(`/topics/${topic.id}/tutor`);
+  await settle(page);
+
+  const input = page.getByRole('textbox', { name: 'Message the tutor' });
+  await expect(page.getByRole('button', { name: 'Submit attempt' })).toHaveAttribute(
+    'aria-keyshortcuts',
+    'Control+Enter Meta+Enter'
+  );
+  await input.focus();
+  await page.keyboard.type('a question');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('on two lines');
+  await expect(input).toHaveValue('a question\non two lines');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => sent.length).toBe(1);
+  await expect(input).toBeEnabled();
+
+  await input.focus();
+  await page.keyboard.type('my attempt: divide by sqrt(d_k), the dot products grow with d_k');
+  await page.keyboard.press('Control+Enter');
+  await expect.poll(() => sent.length).toBe(2);
+  expect(sent).toEqual([
+    { content: 'a question\non two lines', attempt: false },
+    { content: 'my attempt: divide by sqrt(d_k), the dot products grow with d_k', attempt: true }
+  ]);
+  await expect(page.getByText('attempt logged')).toBeVisible();
+});

@@ -16,6 +16,7 @@ from adaptive_academy.engine import graph
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
+    Attempt,
     Chunk,
     Concept,
     ConceptEdge,
@@ -36,7 +37,7 @@ from adaptive_academy.models import (
     TopicIntent,
     Track,
 )
-from adaptive_academy.prompts import ASSESS_ARTIFACT, GRADE, PF_CONSOLIDATE, TEACH
+from adaptive_academy.prompts import ASSESS_ARTIFACT, grade_prompt, PF_CONSOLIDATE, TEACH
 
 NOW =datetime(2026, 10, 19, 15, 30, 0)
 
@@ -135,7 +136,7 @@ def test_build_demo_has_data_for_every_page(session):
     grading_prompt = {"teach": TEACH, "productive_failure": PF_CONSOLIDATE,
                       "artifact_review": ASSESS_ARTIFACT}
     for a in assessments:
-        assert a.prompt_tag == grading_prompt.get(a.kind, GRADE).tag, a.kind
+        assert a.prompt_tag == grading_prompt.get(a.kind, grade_prompt()).tag, a.kind
     traced = {e.detail for e in _rows(session, AgentEvent) if e.kind == "prompt"}
     assert {a.prompt_tag for a in assessments} <= traced
 
@@ -145,6 +146,24 @@ def test_build_demo_has_data_for_every_page(session):
     assert len(convos) == 2
     assert all(c.attempt_logged and c.topic_id == tid for c in convos)
     assert len(_rows(session, Message)) >= 8
+
+    # Each conversation's attempt was submitted with the Attempt button: its message is
+    # marked, and an accepted Attempt row points at it, traced like a live turn.
+    attempts = _rows(session, Attempt)
+    assert len(attempts) == len(convos)
+    marked = [m for m in _rows(session, Message) if m.is_attempt]
+    assert {a.message_id for a in attempts} == {m.id for m in marked}
+    for a in attempts:
+        message = session.get(Message, a.message_id)
+        convo = session.get(Conversation, a.conversation_id)
+        assert a.accepted is True and message.role == "user"
+        assert (message.conversation_id, a.concept_id) == (convo.id, convo.concept_id)
+        assert not message.content.startswith("Attempt:")
+    traced = [(e.conversation_id, e.kind) for e in _rows(session, AgentEvent)]
+    for convo in convos:
+        assert (convo.id, "attempt:submitted") in traced
+        assert (convo.id, "attempt:accepted") in traced
+        assert (convo.id, "tool:log_attempt") not in traced
 
     # Trace: topic-level and conversation-level agent events.
     events = _rows(session, AgentEvent)

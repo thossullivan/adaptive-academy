@@ -15,8 +15,10 @@ def test_prompt_is_a_str_with_metadata():
 def test_registry_prompts_have_tags():
     # v2 injection clause, v3 bands + mechanism cap, v4 expected formulas judged by meaning,
     # v5 possibly-missing items and possible misconceptions judged by meaning, v6 every
-    # rubric item judged by the grader (missing_required / misconceptions_committed)
-    assert GRADE.tag == "assess.grade@v6"
+    # rubric item judged by the grader (missing_required / misconceptions_committed), v7 an
+    # equivalent formulation covers an item, and the strictness block (rendered per level,
+    # tagged "assess.grade@v7:<level>": tests/test_grading_strictness.py)
+    assert GRADE.tag == "assess.grade@v7"
     assert STORY.tag == "story.compose@v1"
     # The skeptical-grader phrasing the assessor relies on is preserved.
     assert "SKEPTICAL grader" in GRADE

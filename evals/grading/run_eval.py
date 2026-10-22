@@ -55,6 +55,12 @@ EXIT_STOPPED = 3
 
 _APP_PREFIX = "adaptive_academy"
 
+# prompts.GRADING_STRICTNESS_LEVELS, copied: the arguments are parsed before the app may be
+# imported (isolate_app_database). tests/test_grading_eval_runner.py checks they match.
+STRICTNESS_LEVELS = ("lenient", "standard", "strict")
+STRICTNESS_SETTING = "AA_GRADING_STRICTNESS"
+STRICTNESS_OPTION = "--strictness"
+
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -69,6 +75,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
                         "every run today (default: results/usage.db, gitignored)")
     p.add_argument("--limit", type=int, default=None,
                    help="run only the first N cases (a smoke run)")
+    p.add_argument(STRICTNESS_OPTION, choices=STRICTNESS_LEVELS, default=None,
+                   help=f"grade at this level for this run (default: {STRICTNESS_SETTING}, "
+                        "else standard)")
     return p.parse_args(argv)
 
 
@@ -108,32 +117,52 @@ def check_scratch_db(path: Path) -> str | None:
     if tables - {"llmusage"}:
         return (f"{path} holds other tables ({', '.join(sorted(tables)[:3])}...): it looks "
                 "like an app database. Pass a new file, or leave --scratch-db out.")
-    if "llmusage" in tables:
-        # The file outlives schema changes (create_all never adds a column), and an old
-        # table would silently drop usage rows, so the daily limit would stop holding.
-        from adaptive_academy.models import LLMUsage
+    return None
 
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
-            have = {r[1] for r in conn.execute("PRAGMA table_info(llmusage)")}
-        if have != {c.name for c in LLMUsage.__table__.columns}:
-            return (f"{path} was made by an older version of the app (its usage table has "
-                    "different columns). Delete it and run again; it only holds eval usage.")
+
+def check_scratch_columns(path: Path) -> str | None:
+    """Why an existing scratch database's usage table can't be used, or None. The file
+    outlives schema changes (create_all never adds a column), and an old table would
+    silently drop usage rows, so the daily limit would stop holding. It imports the app's
+    model, so it runs only after isolate_app_database (check_scratch_db must not)."""
+    if not path.exists():
+        return None
+    import sqlite3
+
+    from adaptive_academy.models import LLMUsage
+
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(llmusage)")}
+    if have and have != {c.name for c in LLMUsage.__table__.columns}:
+        return (f"{path} was made by an older version of the app (its usage table has "
+                "different columns). Delete it and run again; it only holds eval usage.")
     return None
 
 
 # ── Prompt and estimate ──────────────────────────────────────────────────────
 
-def grade_request_for(case: Case):
+def grade_request_for(case: Case, strictness: str | None = None):
     """The request the app would send for this case (assess.grade_request), built only from
-    what the app sends: no id, category, question, truth or note."""
+    what the app sends: no id, category, question, truth or note. `strictness`: the grading
+    level (None: the app's AA_GRADING_STRICTNESS)."""
     from adaptive_academy.engine.assess import grade_request
 
     return grade_request(case.concept, case.kind, list(case.criteria), case.reference,
                          case.answer, must_include=list(case.required),
-                         weak_signs=list(case.misconceptions))
+                         weak_signs=list(case.misconceptions), strictness=strictness)
 
 
-def estimate(cases: list[Case], model: str) -> dict[str, Any]:
+def resolve_strictness(option: str | None) -> tuple[str, str]:
+    """The level this run grades at, and where it came from: the --strictness option, else
+    the app's setting (an unknown value there is standard, as in the app)."""
+    if option is not None:
+        return option, STRICTNESS_OPTION
+    from adaptive_academy.engine.assess import current_grading_strictness
+
+    return current_grading_strictness(), STRICTNESS_SETTING
+
+
+def estimate(cases: list[Case], model: str, strictness: str | None = None) -> dict[str, Any]:
     """Tokens and dollars for one run, from llm/pricing. `expected`: one call per case;
     `upper`: every case regenerated once (two calls, the second carrying the first answer
     and the correction turn). Prompt caching of the shared system prompt is ignored, so
@@ -142,7 +171,7 @@ def estimate(cases: list[Case], model: str) -> dict[str, Any]:
 
     input_tokens = 0
     for case in cases:
-        req = grade_request_for(case)
+        req = grade_request_for(case, strictness)
         input_tokens += math.ceil((len(req.system) + len(req.user)) / CHARS_PER_TOKEN)
     n = len(cases)
     expected = {"calls": n, "input_tokens": input_tokens,
@@ -207,9 +236,11 @@ def _usage_since(bind, last_id: int, *, newest_only: bool = False,
     return rows, (rows[-1].id if rows else last_id)
 
 
-def run_case(case: Case, llm, session) -> tuple[metrics.Prediction, dict[str, Any]]:
-    """Grade one case through the app's path. Returns the prediction and its detail.
-    BudgetExceededError and MissingAPIKeyError propagate: they stop the run."""
+def run_case(case: Case, llm, session,
+             strictness: str | None = None) -> tuple[metrics.Prediction, dict[str, Any]]:
+    """Grade one case through the app's path, at `strictness` (None: the app's setting).
+    Returns the prediction and its detail. BudgetExceededError and MissingAPIKeyError
+    propagate: they stop the run."""
     from adaptive_academy.engine.assess import final_score, run_grader
     from adaptive_academy.engine.output_checks import match_items
     from adaptive_academy.llm.errors import classify_llm_error
@@ -218,7 +249,7 @@ def run_case(case: Case, llm, session) -> tuple[metrics.Prediction, dict[str, An
     from adaptive_academy.llm.usage import BudgetExceededError
 
     events: list[list[str]] = []
-    req = grade_request_for(case)
+    req = grade_request_for(case, strictness)
     started = time.monotonic()
     detail: dict[str, Any] = {"id": case.id, "concept": case.concept, "kind": case.kind,
                               "category": case.category}
@@ -300,6 +331,11 @@ def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False
         except RuntimeError as exc:
             out(f"refused: {exc}")
             return EXIT_REFUSED
+    if scratch_db is not None:
+        problem = check_scratch_columns(scratch_db)
+        if problem:
+            out(f"refused: {problem}")
+            return EXIT_REFUSED
 
     from adaptive_academy.llm.backends import (
         KEY_BILLED_BACKENDS,
@@ -308,10 +344,17 @@ def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False
     )
     from adaptive_academy.llm.registry import get_model
 
+    from adaptive_academy.engine.assess import grading_strictness_problem
+    from adaptive_academy.prompts import grade_prompt
+
     backend_name = current_backend_name()
     model = get_model("reasoning")
-    est = estimate(cases, model)
+    strictness, strictness_source = resolve_strictness(getattr(args, "strictness", None))
+    est = estimate(cases, model, strictness)
     out(format_estimate(est, backend_name))
+    out(f"Grading strictness: {strictness} ({strictness_source})")
+    if strictness_source == STRICTNESS_SETTING and grading_strictness_problem():
+        out(f"  {grading_strictness_problem()}")
     if not args.live or scratch_db is None:
         out("\nNot run: add --live to call the model (`just eval-grading --live`).")
         return EXIT_REFUSED
@@ -322,7 +365,6 @@ def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False
     from adaptive_academy.llm import usage
     from adaptive_academy.llm.keys import MissingAPIKeyError
     from adaptive_academy.models import LLMUsage
-    from adaptive_academy.prompts import GRADE
     from adaptive_academy.settings import settings
 
     scratch_db.parent.mkdir(parents=True, exist_ok=True)
@@ -379,7 +421,7 @@ def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False
                                     "outcome": "not_run"})
                     continue
                 try:
-                    pred, detail = run_case(case, llm, session)
+                    pred, detail = run_case(case, llm, session, strictness)
                 except (usage.BudgetExceededError, MissingAPIKeyError) as exc:
                     # Stopped inside the case (e.g. the limit refused its regeneration
                     # call): the calls it already made were billed, so they still count.
@@ -420,7 +462,9 @@ def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False
             d["unsure"] = case.unsure
     report = {
         "meta": {
-            "model": model, "backend": backend_name, "prompt_tag": GRADE.tag,
+            "model": model, "backend": backend_name,
+            "prompt_tag": grade_prompt(strictness).tag,
+            "strictness": strictness, "strictness_source": strictness_source,
             "rubric": GRADE_RUBRIC.name, "rules": list(GRADE_RUBRIC.ids),
             "cases_file": str(args.cases), "cases_sha256": hashlib.sha256(
                 Path(args.cases).read_bytes()).hexdigest(),

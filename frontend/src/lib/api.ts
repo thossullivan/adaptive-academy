@@ -130,11 +130,12 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ topic_id, concept_id })
     }).then(j<Conversation>),
-  sendMessage: (id: number, content: string) =>
+  /** `attempt`: the Submit attempt button (the message is checked as the learner's attempt). */
+  sendMessage: (id: number, content: string, attempt = false) =>
     fetch(`/api/conversations/${id}/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ content })
+      body: JSON.stringify({ content, attempt })
     }).then(j<SendResult>),
   createTopic: (body: CreateTopicBody) =>
     fetch('/api/topics', {

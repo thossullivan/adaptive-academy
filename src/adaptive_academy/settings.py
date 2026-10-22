@@ -46,6 +46,21 @@ class Settings(BaseSettings):
             return cls.model_fields[info.field_name].default
         return v.strip() if isinstance(v, str) else v
 
+    # --- Grading -------------------------------------------------------------------------
+    # How strict the grader is (env AA_GRADING_STRICTNESS): lenient, standard or strict,
+    # rendered into the GRADE prompt (prompts.grade_prompt). Kept as given, so a typo isn't a
+    # startup crash: engine/assess.current_grading_strictness() grades an unknown value at
+    # standard, and /api/setup warns about it (assess.grading_strictness_problem).
+    grading_strictness: str = "standard"
+
+    @field_validator("grading_strictness", mode="before")
+    @classmethod
+    def _blank_strictness_is_standard(cls, value):
+        # compose passes `${AA_GRADING_STRICTNESS:-}` through, so "unset" arrives as "".
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return "standard"
+        return value.strip() if isinstance(value, str) else value
+
     # --- Usage & cost --------------------------------------------------------------------
     # Daily spending limit for API-key model calls, in USD (env AA_DAILY_BUDGET_USD). Unset =
     # no limit. Checked before every API-key call against today's recorded spend (server's

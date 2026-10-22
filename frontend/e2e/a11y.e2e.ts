@@ -179,6 +179,16 @@ test('axe: a tutor reply with the agent trace open', async ({ page }) => {
   });
 });
 
+test('axe: a submitted attempt that was not logged, with its note', async ({ page }) => {
+  await mockTutor(page, { attempt_logged: false, attempt_outcome: 'rejected' });
+  await auditState(page, (id) => `/topics/${id}/tutor`, async () => {
+    await page.getByRole('textbox', { name: 'Message the tutor' }).fill('is it 42?');
+    await page.getByRole('button', { name: 'Submit attempt' }).click();
+    await expect(page.getByTestId('attempt-note')).toBeVisible();
+    await expect(page.getByText('your attempt', { exact: true })).toBeVisible();
+  });
+});
+
 test('axe: the OpenRouter missing-key card', async ({ page }) => {
   await mockSetup(page, openrouterMissingKey);
   await auditState(page, () => '/topics/new', async () => {
@@ -215,7 +225,7 @@ test('axe: the usage page with an experimental model row', async ({ page }) => {
 });
 
 /** A keyless tutor that answers: the conversation and one reply, served by the test. */
-async function mockTutor(page: Page) {
+async function mockTutor(page: Page, reply: Record<string, unknown> = {}) {
   await page.route('**/api/conversations', (r) =>
     r.request().method() === 'POST'
       ? r.fulfill({
@@ -232,7 +242,8 @@ async function mockTutor(page: Page) {
         assistance_level: 'medium',
         challenge_level: 'high',
         events: [{ kind: 'tool:reveal_solution', detail: 'blocked', created_at: new Date().toISOString().replace('Z', ''), count: 1 }],
-        memory: []
+        memory: [],
+        ...reply
       }
     });
   });

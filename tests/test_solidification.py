@@ -20,7 +20,7 @@ from adaptive_academy.models import (
     Topic,
     Track,
 )
-from adaptive_academy.prompts import GRADE, PF_CONSOLIDATE, TEACH
+from adaptive_academy.prompts import grade_prompt, PF_CONSOLIDATE, TEACH
 
 
 class FixedLLM:
@@ -106,7 +106,7 @@ def test_grade_decay_check_computes_decay_and_reschedules(session):
     assert prompt.last_result == "decayed"
     assert result.assessment.kind == "recall"
     # Recall is graded by assess_concept's GRADE, not the DECAY_RECALL probe text.
-    assert result.assessment.prompt_tag == GRADE.tag
+    assert result.assessment.prompt_tag == grade_prompt().tag
 
 
 # ─── Productive Failure ──────────────────────────────────────────────────────
