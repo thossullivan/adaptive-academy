@@ -1,58 +1,57 @@
-# Adaptive Academy
-
-**An open-source, local-first AI learning tool for serious self-directed adult learners — grounded in learning science, with an observable multi-agent spine instead of one opaque chatbot.**
+# How Adaptive Academy works
 
 ## The goal
 
-Most "AI tutors" optimize for a frictionless answer. That produces the *illusion* of
-competence: you feel like you understand because the model explained it well, but you can't
-reproduce it cold a week later. Adaptive Academy optimizes for the opposite — **durable,
-unassisted, delayed performance** — by refusing to hand you answers until you've generated an
-attempt, and by only calling a concept "solid" when several independent signals agree.
+Most AI tutors try to give you a smooth answer as fast as possible. That can make you feel like
+you understand something when you don't. The explanation was clear, but a week later you
+can't do it on your own.
 
-It exists to help people learn *deeply* by building and shipping, and to do it in the open. Your
-records stay on your machine; you bring your own Anthropic key.
+Adaptive Academy aims for the opposite: things you can still do later, without help. It does
+this in two ways. The tutor won't hand you the answer until you've tried. And a concept only
+counts as "solid" when several separate checks agree.
 
 ## What it does
 
-A complete learning loop, with every agent's work visible:
+The basic loop, with every agent's work visible:
 
-1. **Research** — a fan-out Researcher gathers and tiers real sources for a topic.
-2. **Curriculum** — a Director turns those into a phased track toward a "North Star" goal.
-3. **Tutor** — guides you Socratically, and **withholds full solutions until you've logged an
-   attempt** — enforced in code (a gated `reveal_solution` tool), not just asked for in a prompt.
-4. **Assess** — grades your work and feeds a competence model.
+1. **Research**: a Researcher searches from several angles at once and ranks real sources for
+   a topic.
+2. **Curriculum**: a Director turns those into a track, in phases, toward your goal.
+3. **Tutor**: asks you questions instead of lecturing, and won't show a full solution until
+   you've made an attempt. This is enforced in code (a gated `reveal_solution` tool), not just
+   asked for in the prompt.
+4. **Assess**: grades your work and updates what the app thinks you know.
 
-On top of that loop sit the research-grounded mechanics that make learning *stick*:
+On top of that loop:
 
-- **Anti-Goodhart competence triangulation** — a concept is "solid" only when multiple independent
-  signals agree: graded self-explanation, spaced decay/recall, calibration accuracy, teach-back,
-  and shipped artifacts. Never a single grade. (You can expand any concept to see *why* it got its
-  verdict.)
-- **Solidification features** — Decay Checks (spaced cold recall), Productive Failure (struggle
-  before instruction), a Calibration Loop (predict → confront the gap), and Teach-It (the protégé
-  effect).
-- **The Voyage** — a forgiving, game-like momentum layer ("wind" per topic + a cross-topic Fleet)
-  that models whether you *keep going*, derived from your real activity and kept deliberately
-  independent of competence, so a slump never reads as failure.
-- **Local-first interop** — ingest your Obsidian vault notes as grounding sources, and export
-  concepts/tracks back out as linked markdown.
-- **Memory & retrieval** — one local index (SQLite FTS5, optional `sqlite-vec` hybrid) over
-  vault notes, sources, papers, your answers, tutor turns, and generated questions; the Tutor
-  grounds on it and never restates what it already explained; generators reject near-duplicate
-  questions in code.
-- **Concept graph + Scout** — bi-temporal `ConceptEdge`s traversed with recursive CTEs (no graph
-  DB) drive remediation-by-ancestor and the map; a Scout turns frontier concepts, orphan terms,
-  unlinked notes, and paper "extend" answers into reviewable topic suggestions.
+- **Several checks, not one grade.** A concept is "solid" only when separate signals agree:
+  explaining it in your own words, recalling it later, how well your confidence matched your
+  grade, teaching it back, and things you build. Click any concept to see why it got its
+  verdict.
+- **Practice that makes it stick.** Decay checks (recall a concept cold, days later),
+  productive failure (try a problem before you're shown how), calibration (guess how sure you
+  are, then see the gap), and teach-back (explain it to someone else).
+- **The Voyage.** A light, game-like view of your momentum: "wind" per topic and a Fleet of all
+  your topics. It's based on your activity and kept separate from your grades on purpose, so a
+  slow week never looks like failing.
+- **Obsidian.** Use your vault notes as sources, and export concepts and tracks back as linked
+  markdown.
+- **Memory.** One local search index (SQLite full-text search, with optional vector search)
+  covers your notes, sources, papers, answers, tutor replies, and generated questions. The
+  tutor uses it and doesn't repeat what it already explained. Practice questions that are too
+  close to old ones are rejected in code.
+- **Concept graph and Scout.** Prerequisites between concepts are stored in SQLite and walked
+  with plain SQL, no graph database. When you're stuck, the app points you at the weakest
+  prerequisite. A Scout suggests new topics from gaps it notices, and you accept or dismiss
+  each one.
 
 ## Architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  SvelteKit frontend (Svelte 5 / Tailwind 4)                  │
-│  Dashboard · Today loop · Tutor · Practice · Teach ·         │
-│  Retention · Map · Story · Fleet/Wayfinder (the Voyage) ·    │
-│  Programs (multi-topic milestones + gates)                   │
+│  Dashboard · Today · Tutor · Practice · Teach · Retention ·  │
+│  Map · Story · Fleet/Wayfinder · Programs                    │
 └───────────────────────────┬──────────────────────────────────┘
                             │  REST (/api)
 ┌───────────────────────────┴──────────────────────────────────┐
@@ -61,52 +60,48 @@ On top of that loop sit the research-grounded mechanics that make learning *stic
 │  engine/   research · curriculum · tutor · assess ·          │
 │            decay · productive_failure · teach · momentum ·   │
 │            progress · remediate · retention · story · vault ·│
-│            memory (FTS5 + sqlite-vec hybrid, anti-repeat) ·  │
-│            graph (bi-temporal edges, recursive CTE) · scout  │
+│            memory · graph · scout                            │
 │                                                              │
-│  llm/      pluggable client registry — Anthropic SDK /       │
-│            agent-SDK / scripted (deterministic tests).       │
-│            Forced structured output; injection-demarcated.   │
+│  llm/      swappable model clients: Anthropic SDK,           │
+│            Agent SDK, or scripted (for tests)                │
 │                                                              │
-│  prompts.py  version-tagged prompt registry (poor-man's      │
-│              Langfuse) — every tag traced into AgentEvent    │
+│  prompts.py  every prompt, with a version tag that is        │
+│              recorded with each agent action                 │
 └───────────────────────────┬──────────────────────────────────┘
                             │
 ┌───────────────────────────┴──────────────────────────────────┐
-│  SQLite (WAL) via SQLModel + Alembic — single source of      │
-│  truth. Assessment table = unified record of every completed │
-│  learning action and the substrate for all 5 signals.        │
-│  AgentEvent table = the observability trace.                 │
+│  SQLite (WAL) via SQLModel + Alembic: the single source of   │
+│  truth. Assessment = every finished learning action, and     │
+│  the basis for all five signals. AgentEvent = the agent log. │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Key design commitments:**
+**Design rules:**
 
-- **State-driven, not call-driven** — agents coordinate through shared SQLite state (typed
-  SQLModel models), never direct calls. The `Assessment` table is the spine: every signal derives
-  from real, logged actions, which is what keeps the competence model honest.
-- **Observable by construction** — every agent action is traced (`AgentEvent`); "What the agents
-  did" is a first-class UI surface, not a debug log. Prompts are version-tagged so you can trace a
-  behavior back to the exact prompt that produced it.
-- **Pluggable LLM layer** — a client registry swaps the real Anthropic SDK for a scripted client,
-  so the whole agent crew is testable deterministically (the test suite runs with no live API
-  calls).
-- **Enforcement in code, not vibes** — the generation-first stance (withhold solutions,
-  SSRF-guarded artifact fetch, etc.) lives in code paths, so it holds even when a prompt is coaxed.
+- **Agents share state, they don't call each other.** They read and write the same SQLite
+  tables. Every signal comes from the `Assessment` table, which only holds things you actually
+  did. That's what keeps the "what you know" picture honest.
+- **You can see what happened.** Every agent action is logged (`AgentEvent`), and "What the
+  agents did" is part of the UI. Prompts carry version tags, so you can trace a behaviour back
+  to the prompt that caused it.
+- **Testable without an API key.** The model client can be swapped for a scripted one, so the
+  whole test suite runs without calling a real model.
+- **Rules live in code.** Holding back solutions and the safety checks on fetched links are
+  code paths, not prompt instructions, so they hold however a prompt is worded.
 
 ## Stack
 
-Python 3.12 · FastAPI · SQLModel · SQLite (WAL) · Alembic · Anthropic SDK ·
-SvelteKit 2 / Svelte 5 / Tailwind 4. Package manager `uv`, task runner `just`. Apache-2.0.
+Python 3.12, FastAPI, SQLModel, SQLite (WAL), Alembic, and the Anthropic SDK. SvelteKit 2,
+Svelte 5, and Tailwind 4. `uv` for packages and `just` for tasks. Apache-2.0.
 
-## Honest framing
+## Cost and privacy
 
-BYOK and multi-agent: a rich session spends real tokens (a few dollars), and while your *records*
-stay local, each AI call still goes to Anthropic. "Local-first" means your data lives on your
-machine — not that inference is offline. It's pre-1.0 and built in public.
+It runs on your own API key, and several agents work together, so a busy session costs real
+money ([Costs](COSTS.md)). Your records stay on your machine, but each AI request goes to
+Anthropic. It's pre-1.0.
 
 ---
 
-See [`README.md`](../README.md) for setup and run instructions, and
-[`docs/superpowers/specs/`](superpowers/specs/) for the design spec and learning-science evidence
-base.
+Setup is in the [README](../README.md). The design specs are in
+[`docs/superpowers/specs/`](superpowers/specs/), and the research behind them is in
+[`docs/research/`](research/).

@@ -1,208 +1,206 @@
 # Your first hour
 
-A walkthrough for a new user: look around the demo topic first (no API key needed), then start
-something of your own. It assumes the app is running; if it isn't, follow
+A walkthrough for new users. Look around the demo topic first (no API key needed), then start
+something of your own. This assumes the app is running. If it isn't, follow
 [Get started](../README.md#get-started) and come back.
 
-The app is at http://localhost:8000 under Docker, or http://localhost:5173 with `just dev`.
+The app is at http://localhost:8000 with Docker, or http://localhost:5173 with `just dev`.
 
 ## 1. Load the demo (no key needed)
 
 The demo is one example topic, "Build LLMs from scratch (demo)", with about three weeks of
-made-up activity: a researched reading list, a four-phase track, 15 concepts, graded
-assessments, tutor conversations and the agent trace. It is built in code, so it costs nothing
-and needs no key.
+made-up activity: a reading list, a four-phase track, 15 concepts, graded assessments, tutor
+conversations, and the agent log. It's built in code, so it costs nothing and needs no key.
 
-1. Open the app. On an empty install the home page offers **Start a program**,
+1. Open the app. On a fresh install the home page shows **Start a program**,
    **Start a topic**, and below them **Explore a demo topic →**.
-2. Click **Explore a demo topic →**. The dashboard of the demo opens. It carries a blue
-   **Demo** badge, and so does its entry in the topic switcher at the top of the sidebar.
+2. Click **Explore a demo topic →**. The demo's dashboard opens. It has a blue **Demo** badge,
+   and so does its entry in the topic switcher at the top of the sidebar.
 
-From a terminal, `just seed` adds the same demo topic (host installs only; in Docker use the
-button). With no key, a **Setup needed** card on the home page and the create forms says how to
-add one. Everything already recorded stays browsable.
+Without Docker, `just seed` adds the same demo from a terminal. In Docker, use the button.
+Until you add a key, a **Setup needed** card on the home page and the create forms tells you
+how. Everything already recorded can still be browsed.
 
 ## 2. Tour the demo
 
-Each of these is in the left sidebar. On a phone the sidebar is behind the menu button. Under
-the topic switcher it starts with **Today** and **Dashboard**, then three groups: *Learn*
-(Tutor, Practice, Assess, Teach), *Map & progress* (Track, Wayfinder, Constellation,
-Retention) and *Library* (Sources, Vault, Story), then *All topics* (Fleet, Programs).
-**Usage** and **Your data** sit at the bottom.
+Everything below is in the left sidebar. On a phone, the sidebar is behind the menu button.
+Under the topic switcher it starts with **Today** and **Dashboard**, then three groups:
+*Learn* (Tutor, Practice, Assess, Teach), *Map & progress* (Track, Wayfinder, Constellation,
+Retention), and *Library* (Sources, Vault, Story). Then comes *All topics* (Fleet, Programs).
+**Usage** and **Your data** are at the bottom.
 
-Browsing, ticking track items and rating flashcards work without a key. Anything that asks an
-agent to grade, tutor or generate (submitting an assessment, a decay check or a teach-back,
-sending a tutor message) needs one, and without it you get a message saying how to add it.
+You can browse, tick off track items, and rate flashcards without a key. Anything that asks an
+agent to grade, tutor, or write something needs one: submitting an assessment, a decay check,
+or a teach-back, or sending a tutor message. Without a key, you get a message saying how to
+add it.
 
 **Dashboard.** The overview of one topic. Look at:
 - The four numbers along the top: track progress, concepts **solid**, cards due for review,
-  and the mean score across probes.
+  and your average score.
 - **Where you stand**: every concept with its five signals (◆ grade, ↺ held on delayed recall,
-  ◷ calibrated, ◳ taught, ⚒ shipped) and its verdict. The shakiest concepts are listed first.
-  Click a concept to see which signals produced its verdict and what would move it up
+  ◷ calibrated, ◳ taught, ⚒ shipped) and its verdict. The weakest concepts come first. Click
+  a concept to see what its verdict is based on and what would raise it
   ([section 5](#5-how-a-concept-earns-solid) explains the rule).
-- **Calibration**: how your predicted confidence compared with your actual grade.
-- **Score trajectory**, **Build progress** per phase, and **Recent agent activity** (the last
-  events from the agent trace).
+- **Calibration**: how sure you said you were, compared with the grade you got.
+- **Score trajectory**, **Build progress** per phase, and **Recent agent activity** (the
+  latest entries from the agent log).
 
-**Today.** The daily loop, put together from where you are: **Warm up** (decay checks and
-flashcards that are due), **Build** (your next three track items), **Probe** (assess your
-shakiest load-bearing concept) and **Teach back** (work through that concept with the tutor).
-Each step has a button to the page that does it.
+**Today.** What to do next, based on where you are. **Warm up** (decay checks and flashcards
+that are due), **Build** (your next three track items), **Probe** (test your weakest important
+concept), and **Teach back** (work through that concept with the tutor). Each step has a
+button to the right page.
 
-**Wayfinder.** The track as a voyage: each phase is a waypoint with its "landfall" (the thing you
-ship at the end of it), "you are here" on the current phase, and your goal as the North Star.
-The wind line ("cruising", "last sailed …") reflects how steadily you've been working; it
-comes from your logged activity, not from your grades.
+**Wayfinder.** Your track drawn as a voyage. Each phase is a stop with its "landfall" (what you
+ship at the end of it), "you are here" marks the current phase, and your goal is the North
+Star. The wind line ("cruising", "last sailed …") shows how steadily you've been working. It
+comes from your activity, not your grades.
 
-**Track.** The phases and their items. Tick items off as you do them (this needs no key).
-Each phase ends in a deliverable with acceptance criteria; **⚒ Ship it for review** sends a
-link or text for an artifact review. Remediation steps the Assessor added are marked
+**Track.** The phases and their items. Tick items off as you go (no key needed). Each phase
+ends with something to build, with criteria for when it's done. **⚒ Ship it for review** sends
+a link or some text to be reviewed. Steps the Assessor added to fill gaps are marked
 **remediation**. **Export .md** downloads the track.
 
-**Tutor.** A Socratic tutor for one concept at a time; pick the concept at the top. The
-header shows the levels it is using (**assistance**, **challenge**, set from your knowledge
-estimate for that concept) and whether you've logged an attempt (**no attempt yet** /
-**attempt logged**). The page always opens a fresh session, so in the demo you see the empty
-state; sending a message needs a key. Nothing is saved until you send the first message, so
-opening the Tutor or switching concepts leaves no empty conversations behind. (The demo's two past tutor conversations are in its data,
-but the app has no view of past conversations yet.)
+**Tutor.** A tutor that works through one concept with you by asking questions. Pick the
+concept at the top. The header shows how much help it's giving (**assistance**), how hard it's
+pushing (**challenge**), and whether you've made an attempt yet (**no attempt yet** /
+**attempt logged**). The page always opens a new session, so in the demo it starts empty.
+Sending a message needs a key. Nothing is saved until you send something.
 
-**Assess.** Probes that make you produce an answer: **Self-explanation**, **Calibration**
-(predict your confidence first), **Artifact review** and **Source quiz**. Each one writes an
-assessment that feeds the verdicts. Self-explanation, calibration and the source quiz set the
-concept's ◆ grade; an artifact review lights the ⚒ shipped signal and leaves the grade alone,
-so a single review can't be both the grade and the evidence that backs it.
+**Assess.** Tests where you have to produce the answer yourself: **Self-explanation**,
+**Calibration** (say how sure you are first), **Artifact review**, and **Source quiz**. Each
+one is saved and feeds the verdicts. Self-explanation, calibration, and the source quiz set the
+concept's ◆ grade. An artifact review lights the ⚒ shipped signal but doesn't touch the grade,
+so one review can't count twice.
 
-**Practice.** Two kinds of deliberate practice: **Productive Failure** (attempt a novel
-problem before any method is shown, then **Commit & reveal →**) and **Calibration** (lock a
-confidence prediction, explain, then see the gap).
+**Practice.** Two kinds of practice. **Productive Failure**: try a new problem before you're
+shown how, then **Commit & reveal →**. **Calibration**: lock in how sure you are, explain, then
+see how far off you were.
 
-**Retention.** **Decay checks** (explain a concept from memory, graded), **Due now** flashcards
-(rate them **Again / Hard / Good / Easy**; no key needed), the whole deck, and the open-ended
-recall prompts.
+**Retention.** **Decay checks** (explain a concept from memory, graded), **Due now**
+flashcards (rate them **Again / Hard / Good / Easy**, no key needed), the whole deck, and
+open-ended recall prompts.
 
-**Sources.** The Researcher's foundation for the topic, the reading list you kept, and
-**What the agents did**: the trace of every agent step for this topic (prompt versions, tool
-calls, grades).
+**Sources.** The Researcher's summary of the topic, the reading list you kept, and **What the
+agents did**: a log of every agent step for this topic (prompt versions, tool calls, grades).
 
-**Constellation.** The concept graph. Each star is a concept, coloured by its verdict and
-sized by how load-bearing it is; lines are prerequisites. Click a star to highlight its
-prerequisite chain and jump to the tutor or an assessment for it.
+**Constellation.** The concept graph. Each star is a concept, coloured by its verdict and sized
+by how much else depends on it. Lines show prerequisites. Click a star to highlight what it
+depends on, and jump to the tutor or a test for it.
 
-**Teach.** Explain a concept as if to a sharp peer; the review says what landed and what a
-reader would still be confused by. A good review lights the ◳ taught signal.
+**Teach.** Explain a concept as if to a smart friend. The review says what came across and
+what would still confuse a reader. A good review lights the ◳ taught signal.
 
-**Story.** **The numbers behind the story** (progress, assessments, days active, and the
-concepts graded high, with how many have no grade yet) needs no key; **Compose my story** has
-an agent write a progress narrative from them. A concept nothing has graded counts as
-untested here, never as solid. (Story's "solid" means graded high; the dashboard's "concepts
-solid" is the stricter triangulated verdict from [section 5](#5-how-a-concept-earns-solid).)
+**Story.** **The numbers behind the story** (progress, assessments, days active, and concepts
+graded high, plus how many have no grade yet) works without a key. **Compose my story** has an
+agent write up your progress from those numbers. A concept with no grade counts as untested
+here, never as solid. (On this page "solid" just means graded high. The dashboard's "concepts
+solid" uses the stricter rule from [section 5](#5-how-a-concept-earns-solid).)
 
-**Fleet** and **Programs** (under *All topics*) cover all your topics and long-horizon programs.
-The demo has no program, so those pages stay mostly empty for now.
+**Fleet** and **Programs** (under *All topics*) cover all your topics and longer programs. The
+demo has no program, so those pages are mostly empty for now.
 
 ## 3. Add your key and start your own
 
-1. Set `ANTHROPIC_API_KEY=sk-ant-…` in `.env` and restart the API (`just down && just up`
-   for Docker, or stop and rerun `just dev`). The **Setup needed** card disappears.
-2. Decide between a topic and a program:
-   - **A topic** is one subject ("Build LLMs from scratch"). With the demo loaded, start one
-     from the topic switcher (**＋ New topic**); on an empty install, from **Start a topic**.
-     Fill in the topic, your goal (what "done" looks like), prior knowledge and time budget,
-     then **Research this topic →**.
-   - **A program** is a multi-month goal above topics ("PhD-level prep in custom LLMs"): go to
-     **Programs → New program**, describe it, **Create program**, then on the program page
-     **Run research**. Research drafts a
-     milestone map with candidate topics; edit or prune it and **Accept program**. Each
-     milestone then has **Start topic**, which creates its topic.
-3. **Research.** The Researcher searches the web from five angles in parallel (foundational
-   papers, canonical tutorials, key concepts, reference implementations, critiques), dedupes
-   and ranks what it found, and writes a short foundation. It is the slowest and most
-   expensive step; the form shows progress and moves you to **Sources** when it's done.
-4. **Curate.** On **Sources**, untick anything that doesn't earn its place, **Save reading
-   list**, then **Generate curriculum →**. Optionally **Generate quizzes** for source-grounded
-   questions (they power the **Source quiz** probe).
-5. **Curriculum.** The CurriculumDirector builds a phased track toward your goal, each phase
-   ending in a deliverable, plus the concept graph. You land on **Track**.
+1. Set `ANTHROPIC_API_KEY=sk-ant-…` in `.env` and restart (`just down && just up` with
+   Docker, or stop and rerun `just dev`). The **Setup needed** card goes away.
+2. Choose a topic or a program:
+   - **A topic** is one subject, like "Build LLMs from scratch". With the demo loaded, start
+     one from the topic switcher (**＋ New topic**). On a fresh install, use
+     **Start a topic**. Fill in the topic, your goal (what "done" looks like), what you
+     already know, and how much time you have. Then click **Research this topic →**.
+   - **A program** is a bigger goal made of several topics, like "PhD-level prep in custom
+     LLMs". Go to **Programs → New program**, describe it, click **Create program**, then
+     **Run research** on the program page. Research drafts a set of milestones with suggested
+     topics. Edit or trim it, then click **Accept program**. Each milestone then has a
+     **Start topic** button.
+3. **Research.** The Researcher searches the web from five angles at once (key papers,
+   tutorials, core concepts, reference code, critiques), removes duplicates, ranks what it
+   found, and writes a short summary. This is the slowest and most expensive step. The form
+   shows progress and takes you to **Sources** when it's done.
+4. **Curate.** On **Sources**, untick anything you don't want, click **Save reading list**, then
+   **Generate curriculum →**. You can also click **Generate quizzes** to make questions from
+   the sources (these feed the **Source quiz**).
+5. **Curriculum.** The CurriculumDirector builds a track toward your goal in phases, each
+   ending with something to build, plus the concept graph. You land on **Track**.
 
 ## 4. The daily loop
 
-Open **Today** and work top to bottom:
+Open **Today** and work from top to bottom:
 
 1. **Warm up**: answer the due decay checks from memory and rate the due cards.
 2. **Build**: do the next track item and tick it off.
-3. **Probe**: assess the concept Today names (**Assess →**). If the grade shows gaps,
-   **Remediate these gaps** adds targeted steps to your track.
-4. **Teach back**: work that concept through with the tutor (**Open tutor →**), or explain it
+3. **Probe**: test the concept Today names (**Assess →**). If the grade shows gaps,
+   **Remediate these gaps** adds steps to your track to fill them.
+4. **Teach back**: work through that concept with the tutor (**Open tutor →**), or explain it
    on **Teach**.
 
-### Why the tutor withholds the answer
+### Why the tutor holds back the answer
 
-The tutor's tools include `log_attempt` and `reveal_solution`. A full worked solution goes
-through `reveal_solution`, and the code refuses it until an attempt is logged for that
-conversation (`reveal_gate` in `src/adaptive_academy/engine/tools.py`). This is in code, not
-only in the prompt, so it holds however the request is phrased. Before an attempt you get
-questions and hints; once you've written a real attempt, the header turns to
-**attempt logged** and the tutor can open up the worked solution.
+The tutor has two tools, `log_attempt` and `reveal_solution`. A full worked solution can only
+come through `reveal_solution`, and the code blocks it until you've made an attempt in that
+conversation (`reveal_gate` in `src/adaptive_academy/engine/tools.py`). Because this is in the
+code and not just the prompt, it holds no matter how you ask. Before you try, you get
+questions and hints. Once you've written a real attempt, the header changes to
+**attempt logged** and the tutor can show the full solution.
 
-The reason is the evidence base the app is built on: generating an answer before being shown
-one (and failing productively) produces deeper learning than reading the answer first. After
-each turn, **what the agent did** under the message box lists the tool calls, including any
+The research behind the app says that trying to answer before you're shown how (even if you
+get it wrong) leads to deeper learning than reading the answer first. After each turn,
+**what the agent did** under the message box lists the tool calls, including any
 `tool:reveal_solution:blocked`.
 
 ## 5. How a concept earns "solid"
 
-A single grade can be gamed or lucky, so the dashboard and the Constellation combine
-independent signals instead (`frontend/src/lib/competence.ts`). For each concept they look at
-its latest assessment of each kind:
+One grade can be lucky, or gamed. So the dashboard and the Constellation look at several
+separate signals instead (`frontend/src/lib/competence.ts`). For each concept, they use the
+latest result of each kind:
 
-| Signal | Lit (supports) when | Fails when |
+| Signal | Counts for you when | Counts against you when |
 |---|---|---|
 | ◆ grade | the concept's estimate is medium or high | it is low |
 | ↺ decay | a delayed recall check scored 0.45 or more | it scored lower |
-| ◷ calibration | your predicted confidence was within 15 points of the grade | it was further off |
+| ◷ calibration | how sure you said you were was within 15 points of your grade | it was further off |
 | ◳ teaching | a teach-back scored 0.45 or more | it scored lower |
 | ⚒ shipping | an artifact review scored 0.45 or more | it scored lower |
 
-The grade is the estimate the Assessor stores when it grades a probe: a self-explanation,
-calibration or source-quiz assessment, a decay check, a roleplay or a paper probe. A new
-concept starts with a placeholder estimate from the curriculum, and teaching, productive
-failure and artifact reviews never change it, so until one of those graded probes exists the
-concept has **no grade**, whatever the placeholder says.
+The grade is the estimate the Assessor saves when it grades one of these: a self-explanation,
+calibration, or source quiz, a decay check, a roleplay, or a paper probe. A new concept gets a
+placeholder estimate from the curriculum. Teaching, productive failure, and artifact reviews
+never change the grade. So until one of the graded tests above exists, the concept has
+**no grade**, whatever the placeholder says.
 
 The verdict, checked in this order:
 
 - **untested**: no grade and no other signal yet.
-- **shaky**: the grade is low, or any signal failed.
-- **solid**: graded high **and** held on delayed recall, taught, or shipped. Calibration
-  alone isn't enough.
-- **verified**: graded medium or high and at least one other signal lit (calibration counts).
-- **unverified**: everything else, which is one of two cases: graded medium or high with
-  nothing corroborating it yet, or a signal lit (taught or shipped, say) with no grade yet.
+- **shaky**: the grade is low, or any signal counts against it.
+- **solid**: graded high **and** held up on delayed recall, taught, or shipped. Calibration on
+  its own isn't enough.
+- **verified**: graded medium or high, plus at least one other signal for it (calibration
+  counts here).
+- **unverified**: everything else. Either it's graded medium or high with nothing backing it
+  up yet, or a signal counts for it (taught or shipped, say) but there's no grade yet.
 
-So the way up is to come back to a concept cold (decay checks), teach it, or ship something
-that uses it. Programs use the same idea for their milestone gates: a milestone passes on
-delayed, unassisted recall **and** a graded artifact for its load-bearing concepts
-(**Check gate** on the program page shows the per-concept reasons).
+So to move a concept up, come back to it cold (decay checks), teach it, or build something
+with it. Programs use the same idea for milestones. A milestone passes when its important
+concepts hold up on delayed recall without help **and** have a graded artifact. **Check gate**
+on the program page shows the reasons for each concept.
 
 ## 6. Defending what you know: roleplay and paper probe
 
-Both live on a program's milestones and need the milestone's topic to be started:
+Both are on a program's milestones, and the milestone's topic has to be started first.
 
-- **Spar** generates a persona suited to the milestone (a skeptical buyer, a staff engineer
-  in a design review, a thesis committee) and questions you on it; the transcript is graded
-  per concept.
-- **Probe a paper** takes an arXiv URL or pasted text and asks structured critical-reading
-  questions for you to answer in your own words; each answer is graded per concept.
+- **Spar** creates a character that fits the milestone (a skeptical buyer, a staff engineer in
+  a design review, a thesis committee) who questions you. The conversation is graded per
+  concept.
+- **Probe a paper** takes an arXiv link or pasted text and asks you questions about it to
+  answer in your own words. Each answer is graded per concept.
 
-Both count as artifact evidence toward the milestone gate.
+Both count as artifact evidence for the milestone.
 
 ## 7. Cost and control
 
-Every model call is recorded locally with its tokens, web searches and list-price cost. The
-**Usage** page (at the bottom of the sidebar) shows today, the last 7 and 30 days and all time, broken down
-by feature and by model.
+Every AI call is recorded on your machine with its tokens, web searches, and cost at list
+price. The **Usage** page (bottom of the sidebar) shows today, the last 7 and 30 days, and all
+time, by feature and by model.
 
 From one measured run on `claude-sonnet-5-5` (2026-10-19):
 
@@ -213,28 +211,26 @@ From one measured run on `claude-sonnet-5-5` (2026-10-19):
 | One tutor turn (two model calls) | about $0.011–0.013 |
 | One research angle with 2 web searches | $0.081 |
 
-Topic research runs five angles, so it is the largest single item; tutoring and grading are
-cheap per turn. [Costs](COSTS.md) covers the rest.
+Topic research runs five angles, so it's the biggest single cost. Tutoring and grading are
+cheap per turn. [Costs](COSTS.md) has the rest.
 
-- **Cap it:** set `AA_DAILY_BUDGET_USD=5` (any amount) in `.env` and restart the API. Once
-  today's recorded spend reaches it, new API-key calls are refused with a message saying what
-  was spent. It is a soft cap: the call that crosses the limit can overshoot it. For a hard
-  ceiling, also set a spend limit on the key in the Anthropic Console.
-- **Use your Claude subscription instead:** set `AA_LLM_BACKEND=agent_sdk` in `.env` (host
-  installs only, not Docker). Calls then go through the Claude Agent SDK, which needs Claude
-  Code installed and logged in. It is slower, but there is no per-token billing; Usage shows
-  the SDK's own cost estimate, and the daily limit doesn't apply.
+- **Set a limit:** add `AA_DAILY_BUDGET_USD=5` (any amount) to `.env` and restart. Once
+  today's spend reaches it, new calls stop with a message saying what you spent. It's a soft
+  limit: the call that crosses it can go over. For a hard limit, also set a spend limit on the
+  key in the Anthropic Console.
+- **Use your Claude subscription instead:** set `AA_LLM_BACKEND=agent_sdk` in `.env` (without
+  Docker only). Calls then go through the Claude Agent SDK, which needs Claude Code installed
+  and logged in. It's slower, but you don't pay per token. Usage shows the SDK's own cost
+  estimate, and the daily limit doesn't apply.
 
 ## 8. Your data
 
 Your whole record is one SQLite file on your machine.
 
-- **Your data** (bottom of the sidebar): **Download backup (.db)** is a consistent snapshot
-  you can restore; **Download full record (.json)** is every table as JSON, for reading or
-  moving elsewhere.
-- From a terminal: `just backup` and `just export` write the same files to `backups/`.
-- Restoring a snapshot: see
-  [Back up and restore](BACKUP.md).
-- **Remove the demo** when you're done with it: open its dashboard and click **Remove demo**,
-  then **Yes, remove it**. It deletes the demo topic and everything that belongs to it, and
-  nothing else.
+- **Your data** (bottom of the sidebar): **Download backup (.db)** is a full copy you can
+  restore. **Download full record (.json)** is every table as JSON, for reading or moving
+  elsewhere.
+- From a terminal, `just backup` and `just export` save the same files to `backups/`.
+- To restore a backup, see [Back up and restore](BACKUP.md).
+- **Remove the demo** when you're done: open its dashboard, click **Remove demo**, then
+  **Yes, remove it**. This deletes the demo topic and everything in it, and nothing else.
