@@ -24,7 +24,6 @@ import math
 import os
 import re
 import sys
-import tempfile
 import time
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -37,6 +36,10 @@ from evals.grading.case_file import Case, CaseFileError, load_cases
 HERE = Path(__file__).resolve().parent
 DEFAULT_CASES = HERE / "cases.jsonl"
 DEFAULT_OUT_DIR = HERE / "results"
+# The eval's own usage record. A fixed path (not a temp dir per run), so AA_DAILY_BUDGET_USD
+# counts every eval run today, as the app's limit does; the results dir is gitignored and is
+# not the app's data directory.
+DEFAULT_SCRATCH_DB = HERE / "results" / "usage.db"
 
 # The cost estimate is rough on purpose and says so. Input: characters / 3.5 (English with
 # formulas tokenises a little denser than the usual 4). Output: thinking plus the JSON grade;
@@ -61,8 +64,9 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--cases", type=Path, default=DEFAULT_CASES, help="the case file")
     p.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR,
                    help="where the JSON report goes")
-    p.add_argument("--scratch-db", type=Path, default=None,
-                   help="SQLite file for usage rows (default: a new temp directory)")
+    p.add_argument("--scratch-db", type=Path, default=DEFAULT_SCRATCH_DB,
+                   help="SQLite file for usage rows; it persists so the daily limit counts "
+                        "every run today (default: results/usage.db, gitignored)")
     p.add_argument("--limit", type=int, default=None,
                    help="run only the first N cases (a smoke run)")
     return p.parse_args(argv)
@@ -75,9 +79,17 @@ def _app_imported() -> bool:
 def isolate_app_database(url: str) -> None:
     """Point the app's database setting at `url` before the app is imported, so nothing it
     builds at import time (db.engine, the default usage bind) names the real database.
-    Usage recording is also pointed at the scratch engine explicitly (run())."""
-    if not _app_imported():
-        os.environ["AA_DATABASE_URL"] = url
+    Usage recording is also pointed at the scratch engine explicitly (run()).
+
+    Raises RuntimeError when the app is already imported: settings and db.engine were built
+    from whatever AA_DATABASE_URL said then, and setting it now would change nothing."""
+    if _app_imported():
+        raise RuntimeError(
+            "adaptive_academy was already imported before the grading eval could point its "
+            "database at the scratch file, so the app's settings (and db.engine) may name "
+            "the real database. Run the eval as its own process (`just eval-grading`, or "
+            "`python -m evals.grading.run_eval`), not from code that imported the app first.")
+    os.environ["AA_DATABASE_URL"] = url
 
 
 def check_scratch_db(path: Path) -> str | None:
@@ -160,13 +172,21 @@ def format_estimate(est: dict[str, Any], backend: str) -> str:
 
 # ── One case ─────────────────────────────────────────────────────────────────
 
-def _usage_since(bind, last_id: int) -> tuple[list[Any], int]:
+def _usage_since(bind, last_id: int, *,
+                 newest_only: bool = False) -> tuple[list[Any], int]:
+    """Usage rows recorded after `last_id`, and the new last id. `newest_only`: just the
+    newest id (the starting point on a scratch database earlier runs wrote to)."""
+    from sqlalchemy import func
     from sqlmodel import Session, select
 
     from adaptive_academy.engine.trace_writer import TRACE_WRITER
     from adaptive_academy.models import LLMUsage
 
     TRACE_WRITER.flush()
+    if newest_only:
+        with Session(bind) as s:
+            newest = s.exec(select(func.max(LLMUsage.id))).one()
+        return [], int(newest or 0)
     with Session(bind) as s:
         rows = s.exec(select(LLMUsage).where(LLMUsage.id > last_id)
                       .order_by(LLMUsage.id)).all()
@@ -238,7 +258,10 @@ def _truth_dict(case: Case) -> dict[str, Any]:
     return {k: list(v) if isinstance(v, tuple) else v for k, v in t.items()}
 
 
-def run(args: argparse.Namespace, *, llm=None, out=print) -> int:
+def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False) -> int:
+    """`isolated`: the caller already pointed AA_DATABASE_URL away from the real database
+    before importing the app (the test suite does, in tests/_isolated_env.py). Otherwise the
+    app must not be imported yet, and run() isolates it (isolate_app_database)."""
     try:
         cases = load_cases(args.cases)
     except (OSError, CaseFileError) as exc:
@@ -252,15 +275,18 @@ def run(args: argparse.Namespace, *, llm=None, out=print) -> int:
 
     scratch_db: Path | None = None
     if args.live:
-        scratch_db = (args.scratch_db
-                      or Path(tempfile.mkdtemp(prefix="aa-grading-eval-")) / "usage.db").resolve()
+        scratch_db = Path(args.scratch_db or DEFAULT_SCRATCH_DB).resolve()
         problem = check_scratch_db(scratch_db)
         if problem:
             out(f"refused: {problem}")
             return EXIT_REFUSED
-        isolate_app_database(f"sqlite:///{scratch_db}")
-    else:
-        isolate_app_database("sqlite://")  # the estimate opens no database at all
+    if not isolated:
+        try:
+            # The estimate alone opens no database at all.
+            isolate_app_database(f"sqlite:///{scratch_db}" if scratch_db else "sqlite://")
+        except RuntimeError as exc:
+            out(f"refused: {exc}")
+            return EXIT_REFUSED
 
     from adaptive_academy.llm.backends import (
         KEY_BILLED_BACKENDS,
@@ -321,7 +347,8 @@ def run(args: argparse.Namespace, *, llm=None, out=print) -> int:
         preds: list[metrics.Prediction] = []
         details: list[dict[str, Any]] = []
         stopped: str | None = None
-        last_id = 0
+        # The scratch database persists across runs: count only this run's rows.
+        _, last_id = _usage_since(engine, 0, newest_only=True)
         with Session(engine) as session, usage.feature_context("eval_grading"):
             for i, case in enumerate(cases, start=1):
                 if stopped is None and limit is not None and key_billed:
@@ -339,11 +366,17 @@ def run(args: argparse.Namespace, *, llm=None, out=print) -> int:
                 try:
                     pred, detail = run_case(case, llm, session)
                 except (usage.BudgetExceededError, MissingAPIKeyError) as exc:
+                    # Stopped inside the case (e.g. the limit refused its regeneration
+                    # call): the calls it already made were billed, so they still count.
                     stopped = f"{type(exc).__name__}: {exc}"
-                    preds.append(metrics.Prediction(case.id, "not_run"))
+                    rows, last_id = _usage_since(engine, last_id)
+                    pred = _with_usage(metrics.Prediction(case.id, "not_run"), rows)
+                    preds.append(pred)
                     details.append({"id": case.id, "concept": case.concept,
                                     "kind": case.kind, "category": case.category,
-                                    "outcome": "not_run"})
+                                    "outcome": "not_run", "stopped_in_case": True,
+                                    "calls": pred.calls, "cost_usd": pred.cost_usd,
+                                    "unpriced_calls": pred.unpriced_calls})
                     continue
                 rows, last_id = _usage_since(engine, last_id)
                 pred = _with_usage(metrics.Prediction(

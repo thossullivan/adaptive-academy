@@ -7,7 +7,10 @@ lands in the scratch database, and the report has every number the README promis
 """
 
 import json
+import os
+import shutil
 import sqlite3
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -79,6 +82,13 @@ def _args(tmp_path, cases, *extra):
                                 *extra])
 
 
+def _run(args, **kwargs):
+    """run() in this process, where tests/_isolated_env.py already pointed the app's database
+    at a temp directory before the app was imported (so the runner's own isolation, which
+    must run before that import, is skipped)."""
+    return run_eval.run(args, isolated=True, **kwargs)
+
+
 def _responses():
     return [
         _grade(0.9),
@@ -93,7 +103,7 @@ def _responses():
 def test_without_live_it_prints_the_estimate_and_calls_nothing(tmp_path, small_cases):
     llm = ScriptedLLMClient([])
     lines: list[str] = []
-    code = run_eval.run(_args(tmp_path, small_cases), llm=llm, out=lines.append)
+    code = _run(_args(tmp_path, small_cases), llm=llm, out=lines.append)
     assert code == run_eval.EXIT_REFUSED
     text = "\n".join(lines)
     assert "Cost estimate for 5 cases on claude-sonnet-5-5" in text
@@ -117,7 +127,7 @@ def test_the_estimate_says_when_a_model_has_no_price():
 def test_live_run_writes_a_report_scored_with_the_apps_caps(tmp_path, small_cases):
     llm = _BilledClient(_responses())
     lines: list[str] = []
-    code = run_eval.run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lines.append)
+    code = _run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lines.append)
     assert code == run_eval.EXIT_OK, "\n".join(lines)
 
     (report_path,) = (tmp_path / "out").glob("*-claude-sonnet-5-5.json")
@@ -158,7 +168,7 @@ def test_live_run_writes_a_report_scored_with_the_apps_caps(tmp_path, small_case
 def test_the_runner_sends_exactly_the_apps_prompt_and_nothing_from_the_truth(tmp_path,
                                                                              small_cases):
     llm = _BilledClient(_responses())
-    run_eval.run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lambda _: None)
+    _run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lambda _: None)
     cases = load_cases(small_cases)
     first = llm.calls[0]
     req = grade_request(cases[0].concept, cases[0].kind, list(cases[0].criteria),
@@ -196,7 +206,7 @@ def test_it_refuses_an_app_database_as_scratch(tmp_path, small_cases):
     lines: list[str] = []
     args = run_eval.parse_args(["--cases", str(small_cases), "--out-dir",
                                 str(tmp_path / "out"), "--scratch-db", str(db), "--live"])
-    assert run_eval.run(args, llm=llm, out=lines.append) == run_eval.EXIT_REFUSED
+    assert _run(args, llm=llm, out=lines.append) == run_eval.EXIT_REFUSED
     assert "app database" in "\n".join(lines)
     assert llm.calls == []
 
@@ -205,7 +215,7 @@ def test_the_daily_limit_refuses_a_run_it_cannot_afford(tmp_path, small_cases, m
     monkeypatch.setattr(llm_usage.settings, "daily_budget_usd", 0.0001)
     llm = ScriptedLLMClient([])
     lines: list[str] = []
-    code = run_eval.run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lines.append)
+    code = _run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lines.append)
     assert code == run_eval.EXIT_REFUSED
     assert "AA_DAILY_BUDGET_USD" in "\n".join(lines)
     assert llm.calls == []
@@ -229,7 +239,7 @@ def test_the_daily_limit_stops_a_run_midway_and_says_so(tmp_path, small_cases, m
     monkeypatch.setattr(llm_usage.settings, "daily_budget_usd", 0.15)
     llm = _Expensive(_responses())
     lines: list[str] = []
-    code = run_eval.run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lines.append)
+    code = _run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lines.append)
     assert code == run_eval.EXIT_STOPPED, "\n".join(lines)
     (report_path,) = (tmp_path / "out").glob("*.json")
     report = json.loads(report_path.read_text())
@@ -243,13 +253,107 @@ def test_live_without_a_key_is_refused_before_any_case(tmp_path, small_cases):
     # No client injected: the runner builds the app's own (api/deps.get_llm), and the
     # conftest has scrubbed every provider key, so it must refuse rather than run.
     lines: list[str] = []
-    code = run_eval.run(_args(tmp_path, small_cases, "--live"), out=lines.append)
+    code = _run(_args(tmp_path, small_cases, "--live"), out=lines.append)
     assert code == run_eval.EXIT_REFUSED
     assert "ANTHROPIC_API_KEY" in "\n".join(lines)
     assert not (tmp_path / "out").exists()
 
 
-def test_main_refuses_without_live(tmp_path, small_cases, capsys):
+# ── the scratch database persists, so the daily limit is per day ─────────────
+
+def test_the_default_scratch_db_is_a_fixed_gitignored_path_in_results():
+    args = run_eval.parse_args([])
+    assert args.scratch_db == run_eval.DEFAULT_SCRATCH_DB
+    assert run_eval.DEFAULT_SCRATCH_DB == ROOT / "evals" / "grading" / "results" / "usage.db"
+    if shutil.which("git") is None:
+        pytest.skip("needs git")
+    out = subprocess.run(["git", "check-ignore", "-q", str(run_eval.DEFAULT_SCRATCH_DB)],
+                         cwd=ROOT, capture_output=True, check=False)
+    if out.returncode == 128:
+        pytest.skip("not a git checkout")
+    assert out.returncode == 0, "evals/grading/results/usage.db must be gitignored"
+
+
+def test_a_second_run_on_the_same_scratch_db_counts_only_its_own_calls(tmp_path, small_cases):
+    for _ in range(2):
+        code = _run(_args(tmp_path, small_cases, "--live"), llm=_BilledClient(_responses()),
+                    out=lambda _: None)
+        assert code == run_eval.EXIT_OK
+    reports = sorted((tmp_path / "out").glob("*.json"))
+    assert reports  # two runs in the same second share a name; the last one is kept
+    report = json.loads(reports[-1].read_text())
+    assert report["metrics"]["cost"]["calls"] == 6  # not 12: the first run's rows are old
+    with sqlite3.connect(tmp_path / "scratch" / "usage.db") as conn:
+        assert conn.execute("SELECT count(*) FROM llmusage").fetchone() == (12,)
+
+
+def test_the_daily_limit_counts_earlier_runs_on_the_same_day(tmp_path, small_cases,
+                                                             monkeypatch):
+    monkeypatch.setattr(run_eval, "EST_OUTPUT_TOKENS", 1)
+    monkeypatch.setattr(run_eval, "CHARS_PER_TOKEN", 1e9)
+    assert _run(_args(tmp_path, small_cases, "--live"), llm=_BilledClient(_responses()),
+                out=lambda _: None) == run_eval.EXIT_OK
+    spent = 6 * (1000 * 2.0 + 100 * 10.0) / 1e6
+    monkeypatch.setattr(llm_usage.settings, "daily_budget_usd", spent)
+    lines: list[str] = []
+    llm = _BilledClient(_responses())
+    assert _run(_args(tmp_path, small_cases, "--live"), llm=llm,
+                out=lines.append) == run_eval.EXIT_REFUSED
+    assert "refused" in "\n".join(lines) and llm.calls == []
+    # A fresh scratch database has no spend today, so the same limit lets the run start.
+    fresh = run_eval.parse_args(["--cases", str(small_cases), "--out-dir",
+                                 str(tmp_path / "out2"), "--scratch-db",
+                                 str(tmp_path / "fresh" / "usage.db"), "--live"])
+    assert _run(fresh, llm=_BilledClient(_responses()), out=lambda _: None) in (
+        run_eval.EXIT_OK, run_eval.EXIT_STOPPED)
+
+
+def test_a_budget_stop_inside_a_case_still_counts_that_cases_first_call(tmp_path,
+                                                                       small_cases):
+    # The real client checks the limit before every call, so the limit can stop a case on
+    # its regeneration call, after the first call was billed and recorded.
+    class _StopsOnRegeneration(_BilledClient):
+        def complete(self, system, messages, tools):
+            if len(messages) > 1:  # the GRADE_CORRECTION turn: a regeneration
+                raise llm_usage.BudgetExceededError(1.0, 1.0)
+            return super().complete(system, messages, tools)
+
+    llm = _StopsOnRegeneration([LLMResponse(text="not json", stop_reason="end_turn")])
+    code = _run(_args(tmp_path, small_cases, "--live"), llm=llm, out=lambda _: None)
+    assert code == run_eval.EXIT_STOPPED
+    (report_path,) = (tmp_path / "out").glob("*.json")
+    report = json.loads(report_path.read_text())
+    first = report["cases"][0]
+    one_call = (1000 * 2.0 + 100 * 10.0) / 1e6
+    assert first["outcome"] == "not_run" and first["calls"] == 1
+    assert first["cost_usd"] == pytest.approx(one_call)
+    assert report["metrics"]["cost"]["total_usd"] == pytest.approx(one_call)
+    assert report["metrics"]["cost"]["calls"] == 1
+    assert report["meta"]["stopped"].startswith("BudgetExceededError")
+
+
+# ── the app's database is isolated before the app is imported ────────────────
+
+def test_isolation_raises_once_the_app_is_imported():
+    # In this process the app is already imported (tests/conftest.py), so setting
+    # AA_DATABASE_URL now could not reach db.engine: it must fail loudly, not do nothing.
+    with pytest.raises(RuntimeError, match="already imported"):
+        run_eval.isolate_app_database("sqlite://")
+
+
+def test_main_refuses_when_the_app_was_imported_first(tmp_path, small_cases, capsys):
     code = run_eval.main(["--cases", str(small_cases), "--out-dir", str(tmp_path / "o")])
     assert code == run_eval.EXIT_REFUSED
-    assert "Not run" in capsys.readouterr().out
+    assert "already imported" in capsys.readouterr().out
+
+
+def test_main_in_a_fresh_process_prints_the_estimate_and_refuses_without_live(tmp_path,
+                                                                              small_cases):
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join([str(ROOT), str(ROOT / "src")])}
+    out = subprocess.run(
+        [sys.executable, "-m", "evals.grading.run_eval", "--cases", str(small_cases),
+         "--out-dir", str(tmp_path / "o")],
+        cwd=tmp_path, env=env, capture_output=True, text=True, check=False, timeout=120)
+    assert out.returncode == run_eval.EXIT_REFUSED, out.stderr
+    assert "Cost estimate for 5 cases" in out.stdout and "Not run" in out.stdout
+    assert not (tmp_path / "o").exists()

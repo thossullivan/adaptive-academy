@@ -52,8 +52,8 @@ so a number is never read alone:
 | `cap_everything` | every required element named missing and every misconception committed, then the app's ceilings |
 
 On the frozen set they read as follows. `always_high_no_caps` scores 34 of 34 on false mastery and
-0 on false caps. `cap_everything` is nearly the reverse: 53 of 53 false caps, 100% recall on both
-item lists at 35% and 11% precision, and still 2 false masteries (two wrong source-quiz answers,
+0 on false caps. `cap_everything` is nearly the reverse: 52 of 52 false caps, 100% recall on both
+item lists at 36% and 12% precision, and still 2 false masteries (two wrong source-quiz answers,
 where no misconceptions are sent, so the cap stops at exactly 0.70). `always_medium` and
 `always_low` score zero on both costly errors, because they never grade high and never name
 anything; they pay for it with 0% recall and 36% and 53% band accuracy. So the costly-error
@@ -102,15 +102,21 @@ has an `unsure` note. `tests/test_grading_eval_cases.py` checks all of this.
 
 ### Labels to read with care
 
-Seven cases carry an `unsure` note, and the report lists them in `meta.unsure_case_ids`:
+Eight cases carry an `unsure` note, and the report lists them in `meta.unsure_case_ids`:
 
 * `gd-very-short-formula` and `mle-very-short`: an element is credited through notation alone
   (`η` in the update, `P(data | θ)`). The prompt says notation counts.
 * `bp-very-short-label`, `l2-very-short`, `bayes-very-short`: an element is labelled missing
   although its name appears ("chain rule", "weight decay", "/ evidence"). A grader that credits
   the name loses a little recall and is never charged a false cap.
-* `bayes-commits-inverse`: the proportionality element is labelled covered because the formula
-  is written out, although the answer misreads it.
+* `bayes-commits-inverse`: the answer's one error (the posterior is the test's accuracy) matches
+  both known misconceptions, the inverse fallacy and dropping the prior, so both are labelled
+  committed. The label was corrected after the first live run: it had credited the
+  proportionality element because the formula is written out, and had not charged dropping the
+  prior. The grader was right on both.
+* `gd-quiz-partial-overshoot`: the first key point bundles overshoot with "along steep
+  directions". The answer covers overshoot only, so it stays labelled covered, but a grader that
+  names it missing for the absent qualifier is within its instructions.
 * `bp-fluent-no-stored-activations`: the missing element (stored activations) is a rubric
   detail; whether it should cost the 0.70 cap is the rubric's choice, not the grader's.
 
@@ -156,18 +162,25 @@ copied into the eval, so a change to the prompt or the checks shows up in the ne
 
 ### Where things are written
 
-* Usage rows go to a scratch SQLite database, a new temp directory by default (the path is in the
-  report). The runner refuses a `--scratch-db` that holds anything but usage rows, so it can never
-  write to the app's database.
+* Usage rows go to the eval's own SQLite database, `results/usage.db` by default (the path is in
+  the report). It is kept between runs, so the daily limit counts every eval run today, and it is
+  ignored by git and separate from the app's data. Delete it to start the record over. The runner
+  refuses a `--scratch-db` that holds anything but usage rows, so it can never write to the app's
+  database.
 * The report goes to `results/<timestamp>-<model>.json`. That directory is ignored by git.
+* The runner must be its own process (`just eval-grading`): it points the app's database setting
+  at the scratch file before it imports the app, and refuses to run if something imported the
+  app first.
 
 ### The daily limit
 
 With `AA_DAILY_BUDGET_USD` set, the runner refuses to start when the expected cost plus the
 eval spend already recorded today in the scratch database is over the limit, and it checks the
 limit again before every case, stopping the run (exit code 3) once the recorded spend reaches it.
-Cases it did not reach are reported as `not_run`. The limit counts the eval's own spend only, not
-what the app spent today.
+The client checks it before every call too, so a run can also stop inside a case, on its
+regeneration call; that case's first call still counts in the report's cost. Cases it did not
+finish are reported as `not_run`. The limit counts the eval's own spend only (every run today on
+the same scratch database), not what the app spent today.
 
 ## What it costs
 
