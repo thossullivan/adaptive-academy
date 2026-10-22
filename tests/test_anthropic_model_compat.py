@@ -219,7 +219,7 @@ def test_complete_json_retry_respects_the_daily_budget(session, api_key, monkeyp
 
     checks: list = []
     monkeypatch.setattr("adaptive_academy.llm.anthropic_client.check_budget",
-                        lambda model=None: checks.append(model))
+                        lambda model=None, **_kw: checks.append(model))
     calls: list = []
     _fake_anthropic(monkeypatch, "anthropic_client",
                     [_resp(_text("prose")), _resp(_tool_use("emit", {"answer": "a"}))], calls)
@@ -418,7 +418,7 @@ def test_researcher_continues_a_paused_turn_until_it_finishes(session, api_key, 
 
     checks: list = []
     monkeypatch.setattr("adaptive_academy.llm.anthropic_researcher.check_budget",
-                        lambda model=None: checks.append(model))
+                        lambda model=None, **_kw: checks.append(model))
     payload = '[{"title": "T", "url": "https://example.org/final"}]'
     first = _resp(_thinking(), _text("Searching."), _search_block("srvtoolu_1"),
                   stop_reason="pause_turn",

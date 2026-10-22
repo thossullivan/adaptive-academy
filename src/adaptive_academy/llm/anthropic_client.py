@@ -1,10 +1,18 @@
+import os
 from typing import Any
 
 import httpx
 import pydantic
-from anthropic import Anthropic
+from anthropic import Anthropic, omit
 
-from adaptive_academy.llm.keys import require_anthropic_api_key
+from adaptive_academy.llm.backends import (
+    Backend,
+    anthropic_base_url,
+    api_backend,
+    request_extra_body,
+)
+from adaptive_academy.llm.keys import require_api_key
+from adaptive_academy.llm.model_catalog import capabilities, replayable
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.strict_schema import to_strict_schema
 from adaptive_academy.llm.today import today_line
@@ -14,7 +22,7 @@ from adaptive_academy.llm.types import (
     StructuredOutputError,
     ToolCall,
 )
-from adaptive_academy.llm.usage import BACKEND_ANTHROPIC, check_budget, record_usage
+from adaptive_academy.llm.usage import check_budget, record_usage
 from adaptive_academy.prompts import STRUCTURED_TOOL_INSTRUCTION, STRUCTURED_TOOL_RETRY
 
 
@@ -38,6 +46,36 @@ def cached_system(system: str, date_line: str) -> list[dict[str, Any]]:
     ]
 
 
+_CREDENTIAL_HEADERS = ("x-api-key", "authorization")
+
+
+def sdk_client_kwargs(backend: Backend) -> dict[str, Any]:
+    """Credential and endpoint arguments for `Anthropic(...)` on this backend.
+
+    Anthropic: `api_key=` (sent as x-api-key) and an explicit endpoint, api.anthropic.com or a
+    non-OpenRouter proxy from ANTHROPIC_BASE_URL. OpenRouter: its base URL and the key as
+    `auth_token=` (sent as `Authorization: Bearer`). An Anthropic credential must never reach
+    OpenRouter, from either backend. Passing any credential explicitly stops the SDK
+    reading ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN (and an explicit base_url beats
+    ANTHROPIC_BASE_URL); the header overrides below also neutralise an x-api-key or
+    Authorization that ANTHROPIC_CUSTOM_HEADERS would merge in, in whatever spelling.
+    tests/test_openrouter_backend.py checks the headers on the wire.
+    """
+    key = require_api_key(backend)
+    if not backend.bearer_auth:
+        # Always an explicit endpoint: api.anthropic.com, or a proxy in ANTHROPIC_BASE_URL,
+        # never openrouter.ai (see anthropic_base_url).
+        return {"api_key": key, "base_url": anthropic_base_url()}
+    headers: dict[str, Any] = {"X-Api-Key": omit}
+    for line in os.environ.get("ANTHROPIC_CUSTOM_HEADERS", "").split("\n"):
+        name = line.split(":", 1)[0].strip()
+        if name.lower() in _CREDENTIAL_HEADERS:
+            # The SDK's own Authorization (from auth_token) is spelled exactly so; keep that
+            # one ours and drop every other spelling, so no second value is merged in.
+            headers[name] = f"Bearer {key}" if name == "Authorization" else omit
+    return {"auth_token": key, "base_url": backend.base_url, "default_headers": headers}
+
+
 def content_block_to_param(block: Any) -> dict[str, Any]:
     """One response content block as a request param, unchanged.
 
@@ -53,12 +91,16 @@ def content_block_to_param(block: Any) -> dict[str, Any]:
 
 
 class AnthropicLLMClient:
-    """Sync, non-streaming Anthropic client implementing the LLMClient protocol.
+    """Sync, non-streaming Anthropic SDK client implementing the LLMClient protocol.
 
     Works unchanged on claude-sonnet-5-5 / claude-haiku-5-5 (the defaults) and on the older
     claude-sonnet-4-6 / claude-haiku-4-5: no sampling params, no prefill, no `thinking` field
     (each model runs its default — adaptive on the 5.5 models), no forced tool_choice, and
     responses are read by block type so `thinking` blocks are skipped.
+
+    The backend (llm/backends.py) picks the endpoint and credential: the Anthropic API, or
+    OpenRouter's Anthropic-format Messages endpoint. Per-model differences (strict tools,
+    thinking replay) come from llm/model_catalog.py.
     """
 
     def __init__(
@@ -79,10 +121,12 @@ class AnthropicLLMClient:
         # on a MockTransport to replay API responses through the real SDK, and
         # scripts/record_response_fixtures.py one with a capture hook. The app passes
         # nothing and gets the SDK's default client.
-        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3,
+        self._backend = api_backend()
+        self._client = Anthropic(**sdk_client_kwargs(self._backend), max_retries=3,
                                  http_client=http_client)
         self._role = role
         self._model = get_model(role)
+        self._caps = capabilities(self._model)
         self._max_tokens = max_tokens
         # The date is fixed for this client's life. Thinking blocks echoed in a tool loop
         # are bound to the system prompt they were made under, so a loop that crossed
@@ -92,8 +136,12 @@ class AnthropicLLMClient:
 
     def _record(self, resp: Any, operation: str) -> None:
         # Recorded as soon as the call returns: it was billed even if parsing fails below.
-        record_usage(backend=BACKEND_ANTHROPIC, model=self._model, role=self._role,
+        record_usage(backend=self._backend.name, model=self._model, role=self._role,
                      operation=operation, usage=getattr(resp, "usage", None))
+
+    def _check_budget(self) -> None:
+        check_budget(self._model, reports_cost=self._backend.reports_cost,
+                     backend=self._backend.name)
 
     def complete(
         self,
@@ -108,7 +156,7 @@ class AnthropicLLMClient:
             # request, so the next step or turn reads everything before it from cache. Not on
             # a one-off single message: the write premium would buy nothing.
             request["cache_control"] = EPHEMERAL
-        check_budget(self._model)
+        self._check_budget()
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -116,6 +164,7 @@ class AnthropicLLMClient:
             messages=messages,
             tools=tools,
             **request,
+            **request_extra_body(self._backend),
         )
         self._record(resp, "complete")
         text_parts: list[str] = []
@@ -130,7 +179,9 @@ class AnthropicLLMClient:
         return LLMResponse(
             text="".join(text_parts),
             tool_calls=tool_calls,
-            raw_content=[content_block_to_param(b) for b in resp.content],
+            # Echoed back in a tool loop: thinking blocks stay for models that replay them.
+            raw_content=replayable(self._model,
+                                   [content_block_to_param(b) for b in resp.content]),
             stop_reason=getattr(resp, "stop_reason", None),
         )
 
@@ -145,17 +196,19 @@ class AnthropicLLMClient:
         """Strict tool use → schema-valid JSON (no fences, preamble, or shape drift).
 
         Forced tool_choice is a 400 on Claude Sonnet 5.5, so this uses tool_choice=auto with
-        a `strict: true` tool (supported on every model this app configures) and tells the
-        model to answer through the tool. `auto` lets the model reply in text instead; that
-        gets one corrective retry (a second, separately recorded call), then a
-        StructuredOutputError (a ValueError; the API maps it to a legible 502).
+        a `strict: true` tool (on every model the catalog says supports it: all Claude models)
+        and tells the model to answer through the tool. `auto` lets the model reply in text
+        instead; that gets one corrective retry (a second, separately recorded call), then a
+        StructuredOutputError (a ValueError; the API maps it to a legible 502). An
+        experimental model gets the same strict-shaped schema without the `strict` flag.
         """
-        tool = {
+        tool: dict[str, Any] = {
             "name": tool_name,
             "description": "Emit the result as structured data matching the schema.",
             "input_schema": to_strict_schema(schema),
-            "strict": True,
         }
+        if self._caps.strict_tools:
+            tool["strict"] = True
         request = {
             "model": self._model,
             "max_tokens": self._max_tokens,
@@ -174,8 +227,9 @@ class AnthropicLLMClient:
                          "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}],
         ]
         for attempt in attempts:
-            check_budget(self._model)
-            resp = self._client.messages.create(messages=attempt, **request)
+            self._check_budget()
+            resp = self._client.messages.create(messages=attempt, **request,
+                                                **request_extra_body(self._backend))
             self._record(resp, "complete_json")
             stop_reason = getattr(resp, "stop_reason", None)
             if stop_reason in NO_RETRY_STOP_REASONS:

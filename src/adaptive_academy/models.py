@@ -507,19 +507,22 @@ class TopicSuggestion(SQLModel, table=True):
 
 
 class LLMUsage(SQLModel, table=True):
-    """One row per real model call: tokens, server-tool use, and list-price cost.
+    """One row per real model call: tokens, server-tool use, and cost.
 
     Written best-effort after the call returns (llm/usage.py), never inside the caller's
-    transaction. `cost_usd` is NULL when the model's price is unknown (llm/pricing.py). For
-    backend="agent_sdk" the cost is the Agent SDK's own estimate and is paid by the Claude
-    subscription, not the API key, so it never counts toward the daily spending limit.
+    transaction. `cost_usd` is the list-price cost, NULL when the model's price is unknown
+    (llm/pricing.py). `reported_cost_usd` is what the service itself reported charging
+    (OpenRouter's `usage.cost`), NULL where none is reported (the Anthropic API); when present
+    it is the cost used everywhere (llm/usage.py `effective_cost`). For backend="agent_sdk" the
+    cost is the Agent SDK's own estimate and is paid by the Claude subscription, not an API
+    key, so it never counts toward the daily spending limit.
     """
 
     __table_args__ = (Index("ix_llmusage_created_at", "created_at"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=_now)
-    backend: str  # anthropic | agent_sdk
+    backend: str  # anthropic | openrouter | agent_sdk
     model: str
     role: str = ""
     operation: str  # complete | complete_json | research_search | tutor_sdk
@@ -530,3 +533,4 @@ class LLMUsage(SQLModel, table=True):
     cache_read_input_tokens: int = 0
     web_search_requests: int = 0
     cost_usd: Optional[float] = None
+    reported_cost_usd: Optional[float] = None

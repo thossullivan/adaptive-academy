@@ -9,12 +9,14 @@ from adaptive_academy.llm.anthropic_client import (
     EPHEMERAL,
     cached_system,
     content_block_to_param,
+    sdk_client_kwargs,
 )
-from adaptive_academy.llm.keys import require_anthropic_api_key
+from adaptive_academy.llm.backends import api_backend, request_extra_body
+from adaptive_academy.llm.model_catalog import replayable, web_search_tool
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
 from adaptive_academy.llm.today import today_line
-from adaptive_academy.llm.usage import BACKEND_ANTHROPIC, check_budget, record_usage
+from adaptive_academy.llm.usage import check_budget, record_usage
 from adaptive_academy.prompts import RESEARCH_SEARCH
 
 logger = logging.getLogger(__name__)
@@ -48,7 +50,11 @@ def parse_sources_json(text: str) -> list[RawSource]:
 
 
 class AnthropicResearcherClient:
-    """Real fan-out subagent: one Anthropic Messages call with the web_search tool."""
+    """Real fan-out subagent: one Messages call with a server-side web search tool.
+
+    Anthropic's `web_search_20250305` for Claude (directly or through OpenRouter), OpenRouter's
+    `openrouter:web_search` for other models (llm/model_catalog.py).
+    """
 
     def __init__(
         self,
@@ -67,7 +73,8 @@ class AnthropicResearcherClient:
         # happen inside messages.create and their usage is never reported back, so a
         # retried search is recorded (and counted against the daily limit) only once.
         # `http_client`: test seam only, as on AnthropicLLMClient.
-        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=2,
+        self._backend = api_backend()
+        self._client = Anthropic(**sdk_client_kwargs(self._backend), max_retries=2,
                                  http_client=http_client)
         self._role = role
         self._model = get_model(role)
@@ -78,14 +85,14 @@ class AnthropicResearcherClient:
         self._today = today_line()
 
     def search(self, brief: SearchBrief) -> list[RawSource]:
-        tools = [{"type": "web_search_20250305", "name": "web_search",
-                  "max_uses": self._max_searches}]
+        tools = [web_search_tool(self._model, self._max_searches)]
         user = {"role": "user", "content": brief.query}
         paused: list[dict] = []  # the still-open assistant turn, across pause_turn stops
         texts: list[str] = []
         for _ in range(1 + MAX_PAUSE_CONTINUATIONS):
             messages = [user, {"role": "assistant", "content": paused}] if paused else [user]
-            check_budget(self._model)
+            check_budget(self._model, reports_cost=self._backend.reports_cost,
+                         backend=self._backend.name)
             resp = self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
@@ -95,10 +102,11 @@ class AnthropicResearcherClient:
                 # Automatic caching as well: a pause_turn continuation re-sends the search
                 # results (large), and reads them from cache instead of paying full price.
                 cache_control=EPHEMERAL,
+                **request_extra_body(self._backend),
             )
             # usage.server_tool_use.web_search_requests is billed per search on top of
             # tokens; every continuation is its own billed call, so its own row.
-            record_usage(backend=BACKEND_ANTHROPIC, model=self._model, role=self._role,
+            record_usage(backend=self._backend.name, model=self._model, role=self._role,
                          operation="research_search", usage=getattr(resp, "usage", None))
             # By type: thinking, server_tool_use and web_search_tool_result blocks skipped.
             texts.append(
@@ -107,7 +115,8 @@ class AnthropicResearcherClient:
                 break
             # The server-side search loop paused a long turn: send the paused content back
             # unchanged so the model continues the same turn.
-            paused = [*paused, *(content_block_to_param(b) for b in resp.content)]
+            paused = [*paused, *replayable(
+                self._model, [content_block_to_param(b) for b in resp.content])]
         else:
             logger.warning("research search for angle %r still paused after %d "
                            "continuations; using the text so far", brief.angle,

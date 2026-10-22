@@ -541,15 +541,17 @@ def test_agent_sdk_calls_are_not_blocked_by_the_limit(session, monkeypatch):
     assert resp.text == "subscription ok"
 
 
-def test_budget_read_failure_fails_open(api_key, monkeypatch, caplog):
-    # A broken usage store must not take every LLM feature down with it.
+def test_budget_read_failure_fails_closed(api_key, monkeypatch, caplog):
+    # With a limit set, an unreadable usage store must not mean unlimited spend: refuse,
+    # legibly (a host db behind the migrations is the usual cause).
     monkeypatch.setattr(usage.settings, "daily_budget_usd", 1.0)
 
     def broken():
         raise RuntimeError("db gone")
 
     monkeypatch.setattr(usage, "spent_today_usd", broken)
-    usage.check_budget()  # does not raise
+    with pytest.raises(usage.BudgetUnreadableError):
+        usage.check_budget()
     assert "budget" in caplog.text.lower()
 
 

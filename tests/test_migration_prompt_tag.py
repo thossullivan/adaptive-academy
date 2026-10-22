@@ -53,7 +53,7 @@ def test_prompt_tag_migration_upgrades_populated_database_and_downgrades(tmp_pat
             "'p', 'r', 'v', 0.7, '[]', 1, 0.2, '2026-10-02')"))
     engine.dispose()
 
-    upgraded = _alembic(url, "upgrade", "head")
+    upgraded = _alembic(url, "upgrade", PROMPT_TAG_REVISION)
     assert upgraded.returncode == 0, upgraded.stderr
     engine = create_engine(url)
     columns = {c["name"]: c for c in inspect(engine).get_columns("assessment")}

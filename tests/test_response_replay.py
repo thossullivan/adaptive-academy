@@ -71,7 +71,9 @@ class Replay:
         self.requests: list[httpx.Request] = []
 
     def _handle(self, request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST" and request.url.path == "/v1/messages"
+        # /v1/messages on the Anthropic API, /api/v1/messages on OpenRouter.
+        assert request.method == "POST" and request.url.path in ("/v1/messages",
+                                                                 "/api/v1/messages")
         self.requests.append(request)
         index = len(self.requests) - 1
         if index >= len(self.names):
@@ -125,6 +127,11 @@ def test_every_fixture_is_labelled_and_parses_as_a_response_body():
         assert doc.get("_source") in ("documented", "recorded"), path.name
         assert isinstance(doc.get("_note"), str) and doc["_note"], path.name
         body = {k: v for k, v in doc.items() if not k.startswith("_")}
+        if "type" not in body and "error" in body:
+            # OpenRouter's own error body: {error: {code, message, metadata}}, no `type`.
+            assert body["error"]["code"] == doc["_status"] >= 400, path.name
+            assert body["error"]["message"], path.name
+            continue
         assert body["type"] in ("message", "error"), path.name
         if body["type"] == "error":
             assert doc["_status"] >= 400 and body["error"]["type"], path.name
@@ -372,3 +379,64 @@ def test_researcher_overloaded_retries_twice_then_maps_to_overloaded(api_key):
         _researcher(replay).search(SearchBrief(angle="a", query="q"))
     assert classify_llm_error(caught.value) == "overloaded"
     assert len(replay.requests) == 3  # 1 + max_retries=2 on the researcher
+
+
+# --- OpenRouter (AA_LLM_BACKEND=openrouter): the same clients, OpenRouter's responses -------
+
+OPENROUTER_KEY = "sk-or-v1-test-not-a-real-key"
+
+
+@pytest.fixture
+def openrouter_key(monkeypatch):
+    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", OPENROUTER_KEY)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key")
+    monkeypatch.setattr(registry._settings.settings, "reasoning_model", "")
+    monkeypatch.setattr(registry._settings.settings, "daily_budget_usd", None)
+
+
+def test_openrouter_reply_records_the_reported_cost(session, openrouter_key):
+    from adaptive_academy.llm.usage import usage_summary
+
+    replay = Replay("openrouter_message_cost")
+    resp = _llm(replay).complete("SYS", [USER], TOOLS)
+    fixture = _body("openrouter_message_cost")
+    assert resp.text == fixture["content"][1]["text"]
+    # Claude through OpenRouter: thinking blocks come back for replay, exactly as received.
+    assert _canonical(resp.raw_content) == _canonical(fixture["content"])
+
+    [request] = replay.requests
+    assert request.url == "https://openrouter.ai/api/v1/messages"
+    assert request.headers["authorization"] == f"Bearer {OPENROUTER_KEY}"
+    assert "x-api-key" not in request.headers
+    sent = replay.bodies[0]
+    assert sent["model"] == "anthropic/claude-sonnet-5.5"
+    assert sent["provider"] == {"data_collection": "deny"}
+
+    [row] = _usage_rows(session)
+    assert (row.backend, row.model, row.operation) == (
+        "openrouter", "anthropic/claude-sonnet-5.5", "complete")
+    assert (row.input_tokens, row.output_tokens) == (412, 236)
+    assert row.cache_creation_input_tokens == 1500
+    assert row.reported_cost_usd == pytest.approx(fixture["usage"]["cost"])
+    # The slug's Anthropic list price is kept as the fallback; the reported cost wins.
+    assert row.cost_usd == pytest.approx(0.006934)
+    today = usage_summary(session)["totals"]["today"]
+    assert today["cost_usd"] == pytest.approx(0.0069354)
+    assert today["api_cost_usd"] == pytest.approx(0.0069354)
+    assert today["unpriced_calls"] == 0
+
+
+def test_openrouter_402_is_out_of_credits_and_not_retried(session, openrouter_key):
+    replay = Replay("openrouter_error_402_payment_required", repeat_last=True)
+    with pytest.raises(anthropic.APIStatusError) as caught:
+        _llm(replay).complete("SYS", [USER], [])
+    exc = caught.value
+    assert exc.status_code == 402
+    assert exc.body == _body("openrouter_error_402_payment_required")
+    failure = describe_llm_error(exc)
+    assert (failure.category, failure.status_code) == ("out_of_credits", 502)
+    assert failure.detail.startswith("Your OpenRouter account is out of credits.")
+    assert "OpenRouter said: Insufficient credits" in failure.detail
+    assert len(replay.requests) == 1  # a 402 is not a wait-and-retry case
+    assert _usage_rows(session) == []

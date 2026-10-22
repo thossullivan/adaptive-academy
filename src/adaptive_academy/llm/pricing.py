@@ -55,11 +55,26 @@ PRICES: dict[str, ModelPricing] = {
 _DATED_SNAPSHOT = re.compile(r"-\d{8}$")
 
 
+def anthropic_model_id(model: str) -> str:
+    """The Anthropic API id for a model name: OpenRouter's slug for a Claude model
+    (`anthropic/claude-sonnet-5.5`, a `~anthropic/…` alias, a `:variant` suffix) becomes
+    `claude-sonnet-5-5`; any other id is returned unchanged."""
+    name = (model or "").strip()
+    lowered = name.lower().lstrip("~")
+    if not lowered.startswith("anthropic/"):
+        return name
+    slug = lowered.split("/", 1)[1].split(":", 1)[0]
+    return slug.replace(".", "-")
+
+
 def price_for(model: str) -> ModelPricing | None:
-    """The price entry for a model id; dated snapshots (…-20251001) fall back to the alias."""
+    """The price entry for a model id; dated snapshots (…-20251001) fall back to the alias,
+    and OpenRouter slugs for Claude models use the Anthropic list price (the fallback when
+    OpenRouter doesn't report a call's cost)."""
     if not model:
         return None
-    return PRICES.get(model) or PRICES.get(_DATED_SNAPSHOT.sub("", model))
+    name = anthropic_model_id(model)
+    return PRICES.get(name) or PRICES.get(_DATED_SNAPSHOT.sub("", name))
 
 
 def cost_usd(
