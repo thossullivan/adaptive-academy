@@ -40,6 +40,7 @@ cd frontend
 npx playwright install chromium   # once
 npm run test:e2e
 npm run screenshots               # regenerate the README images in docs/images/
+npm run demo-video                # re-record the README video (needs ffmpeg)
 ```
 
 ## How we work
@@ -58,7 +59,9 @@ npm run screenshots               # regenerate the README images in docs/images/
 5. **New features** go in new `engine/` modules, with their own version-tagged prompts in
    `prompts.py`. Don't rework existing ones to fit.
 6. **UI changes** need a Playwright test, and the page must not scroll sideways at 390px wide.
-7. **Open a PR** that says why you made the change. The PR template has a checklist. Backend,
+7. **Docs use plain words.** Short sentences, no em dashes or exclamation marks.
+   `tests/test_docs_style.py` checks the public docs.
+8. **Open a PR** that says why you made the change. The PR template has a checklist. Backend,
    frontend, and e2e tests must pass.
 
 ## Bigger features

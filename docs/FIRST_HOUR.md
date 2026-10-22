@@ -208,7 +208,7 @@ From one measured run on `claude-sonnet-5-5` (2026-10-19):
 |---|---|
 | One scout ranking (structured output) | $0.005 |
 | One full curriculum track | $0.028 |
-| One tutor turn (two model calls) | about $0.011–0.013 |
+| One tutor turn (two model calls) | about $0.011 to $0.013 |
 | One research angle with 2 web searches | $0.081 |
 
 Topic research runs five angles, so it's the biggest single cost. Tutoring and grading are
