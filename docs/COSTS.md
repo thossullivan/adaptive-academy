@@ -27,11 +27,26 @@ It's a soft limit based on recorded spend, not a hard billing cap:
   started are cancelled.
 - When the Anthropic SDK retries a call by itself (after a timeout, say), the app isn't told.
   Those rare retries aren't counted.
-- The app can't price a model it doesn't know. While a limit is set, calls to such a model are
-  refused, and the setup check and the Usage page warn you. Pick a model from the price list or
-  remove the limit.
+- The app can't price a model it doesn't know. On the Anthropic backend, while a limit is set,
+  calls to such a model are refused, and the setup check and the Usage page warn you. Pick a
+  model from the price list or remove the limit.
+- If the app can't read today's spend (for example, the database needs
+  `uv run alembic upgrade head`), it refuses calls while a limit is set, rather than letting
+  them through uncounted.
 
-For a hard limit, also set a spend limit on the key in the Anthropic Console.
+For a hard limit, also set a spend limit on the key in the Anthropic Console or OpenRouter.
+
+## On OpenRouter
+
+OpenRouter reports what it charged for each call, fees included, and the app records that
+instead of its own price list. So the daily limit works for any model, priced or not.
+
+- If OpenRouter ever leaves out the cost for a model the app has no price for, that model is
+  refused under the limit for the rest of the day. It clears at midnight, or after one call
+  made with the limit unset.
+- OpenRouter doesn't enforce the cap on web searches for non-Claude models. A research step
+  asks for at most 5 searches, but OpenRouter runs 6 to 10. They're billed and counted like
+  any other spend.
 
 ## Use a Claude subscription instead
 

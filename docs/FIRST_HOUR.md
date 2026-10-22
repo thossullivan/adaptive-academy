@@ -143,6 +143,12 @@ code and not just the prompt, it holds no matter how you ask. Before you try, yo
 questions and hints. Once you've written a real attempt, the header changes to
 **attempt logged** and the tutor can show the full solution.
 
+The tutor could still write the answer in an ordinary reply, so every reply before an
+attempt is checked too (`engine/solution_guard.py`). A second, cheap model call reads the
+draft and asks: does this hand over the answer, or only ask and hint? If it gives the answer
+away, you never see it: the tutor is asked once more for a question or a hint, and if that
+also gives it away, you get a fixed prompt to share your first step instead.
+
 The research behind the app says that trying to answer before you're shown how (even if you
 get it wrong) leads to deeper learning than reading the answer first. After each turn,
 **what the agent did** under the message box lists the tool calls, including any
@@ -161,6 +167,12 @@ latest result of each kind:
 | ◷ calibration | how sure you said you were was within 15 points of your grade | it was further off |
 | ◳ teaching | a teach-back scored 0.45 or more | it scored lower |
 | ⚒ shipping | an artifact review scored 0.45 or more | it scored lower |
+
+How a single answer is graded: each concept has a short rubric with the key ideas an answer
+must cover and the common misconceptions. The grader reads your answer, judges each key idea
+by meaning (any wording or notation counts), and names the ones you missed and any
+misconception you actually committed (quoting one to reject it doesn't count). The code then
+caps the score: at most 0.70 if a key idea is missing, at most 0.50 for a misconception.
 
 The grade is the estimate the Assessor saves when it grades one of these: a self-explanation,
 calibration, or source quiz, a decay check, a roleplay, or a paper probe. A new concept gets a
