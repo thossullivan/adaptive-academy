@@ -152,6 +152,13 @@ def run_tutor_turn_sdk(
             options=ClaudeAgentOptions(
                 model=model, system_prompt=with_today(system),
                 mcp_servers={"tutor": server},
+                # tools=[] turns off ALL of Claude Code's built-in tools (Bash, Read,
+                # Write, Edit, WebFetch, ...). Without it the CLI gets its default set,
+                # and with bypassPermissions the tutor could run them: rewrite the
+                # database to open the reveal gate, or act on instructions planted in an
+                # ingested vault note or web source. allowed_tools only auto-approves; it
+                # does not restrict. The in-process MCP tool is unaffected.
+                tools=[],
                 allowed_tools=["mcp__tutor__reveal_solution"],
                 permission_mode="bypassPermissions", max_turns=_MAX_TURNS,
                 setting_sources=[]),

@@ -7,8 +7,9 @@ so the output is the same RawSource shape the fan-out orchestrator already expec
 
 agent_sdk mode is fully subscription-only (create_app drops ANTHROPIC_API_KEY), so this needs
 no key juggling. `permission_mode="bypassPermissions"` is required or WebSearch waits on an
-approval prompt and hangs; it is safe because `allowed_tools=["WebSearch"]` exposes only that
-one tool.
+approval prompt and hangs. It is safe only because `tools=["WebSearch"]` limits the CLI to that
+one built-in tool: `allowed_tools` merely auto-approves, and without `tools` the CLI offers its
+whole default set (Bash, Read, Write, ...), which bypassPermissions would then run.
 """
 
 import asyncio
@@ -38,6 +39,9 @@ class AgentSDKResearcherClient:
             prompt=web_query,
             options=ClaudeAgentOptions(
                 model=self._model, system_prompt=with_today(RESEARCH_SEARCH),
+                # Only web search: without `tools` the CLI offers its whole default set
+                # (Bash, Read, Write, ...), and bypassPermissions would let it run them.
+                tools=["WebSearch"],
                 allowed_tools=["WebSearch"],
                 max_turns=self._max_turns, setting_sources=[],
                 permission_mode="bypassPermissions"),

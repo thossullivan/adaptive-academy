@@ -67,10 +67,11 @@ class AgentSDKLLMClient:
 
     def _options(self, system: str) -> ClaudeAgentOptions:
         # setting_sources=[] isolates the call from the project's CLAUDE.md/skills so they
-        # don't leak into LLM prompts; max_turns=1 + no tools = a single completion.
+        # don't leak into LLM prompts; tools=[] (no built-in tools at all) + max_turns=1 = a
+        # single completion.
         return ClaudeAgentOptions(
             model=self._model, system_prompt=with_today(system),
-            allowed_tools=[], max_turns=1, setting_sources=[])
+            tools=[], allowed_tools=[], max_turns=1, setting_sources=[])
 
     async def _run(self, system: str, prompt: str) -> tuple[str, str | None]:
         text, stop_reason = "", None

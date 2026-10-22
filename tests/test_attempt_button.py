@@ -365,6 +365,8 @@ def _sdk_turn(session, monkeypatch, *, learner, guard_llm, attempt, attempt_logg
 
     async def fake_query(prompt, options):
         seen["allowed_tools"] = options.allowed_tools
+        seen["tools"] = options.tools
+        seen["permission_mode"] = options.permission_mode
         seen["system"] = options.system_prompt
         revealed = await captured["reveal_solution"].handler({"text": SECRET})
         yield _FakeResult(SECRET if not revealed.get("is_error") else HINT)
@@ -384,6 +386,9 @@ def test_sdk_the_tutor_has_only_the_reveal_tool(session, monkeypatch):
                                      guard_llm=ScriptedLLMClient([_verdict(attempted=False)]))
     assert set(captured) == {"reveal_solution"}
     assert seen["allowed_tools"] == ["mcp__tutor__reveal_solution"]
+    # Security: with bypassPermissions, `tools` must turn off every built-in Claude Code tool
+    # (Bash, Read, Write, ...). allowed_tools alone only auto-approves; it doesn't restrict.
+    assert seen["permission_mode"] == "bypassPermissions" and seen["tools"] == []
 
 
 def test_sdk_an_accepted_attempt_opens_the_gate(session, monkeypatch):
