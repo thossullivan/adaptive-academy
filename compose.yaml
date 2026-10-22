@@ -13,8 +13,12 @@ services:
       AA_MODEL_REASONING: ${AA_MODEL_REASONING:-}
       AA_MODEL_COPY: ${AA_MODEL_COPY:-}
       # Optional daily spending limit (USD); blank = no limit. "Today" is the container's
-      # day, which is UTC unless you also pass TZ.
+      # day, which is UTC unless TZ is set.
       AA_DAILY_BUDGET_USD: ${AA_DAILY_BUDGET_USD:-}
+      # Optional IANA time zone from .env (e.g. America/Los_Angeles) for "today" in the
+      # spending limit and in the date the agents are told; blank = UTC. The base image
+      # ships tzdata, so any zone name works.
+      TZ: ${TZ:-}
       # The app runs as this uid/gid (not root) and owns /data. On Linux, set them to your
       # own ids in .env (AA_UID=$(id -u), AA_GID=$(id -g)) so vault exports are yours.
       AA_UID: ${AA_UID:-1000}

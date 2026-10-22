@@ -17,19 +17,21 @@ _NO_RETRY_STOP_REASONS = ("max_tokens", "refusal", "model_context_window_exceede
 
 # Prompt caching (claude-api skill, shared/prompt-caching.md). The prefix renders tools ->
 # system -> messages, and a breakpoint on the last stable system block caches tools + system
-# together. Today's date goes in its own block AFTER that breakpoint, so the cached prefix
-# survives midnight. A prefix shorter than the model's minimum (512 tokens on Sonnet/Haiku
-# 5.5, 1024 on Sonnet 4.6, 4096 on Haiku 4.5) is silently not cached: no error and no write
-# charge, so the marker is sent regardless and a short prompt just doesn't cache. Default
-# 5-minute TTL; llm/usage.py prices the cache reads and writes each response reports.
+# together. Today's date goes in its own block AFTER that breakpoint, so a new day leaves the
+# tools + system cache entry valid; the conversation cache (the automatic breakpoint, which
+# sits after the date) does start over on a new day. A prefix shorter than the model's
+# minimum (512 tokens on Sonnet/Haiku 5.5, 1024 on Sonnet 4.6, 4096 on Haiku 4.5) is silently
+# not cached: no error and no write charge, so the marker is sent regardless and a short
+# prompt just doesn't cache. Default 5-minute TTL; llm/usage.py prices the cache reads and
+# writes each response reports.
 EPHEMERAL = {"type": "ephemeral"}
 
 
-def cached_system(system: str) -> list[dict[str, Any]]:
-    """System blocks: the stable text with a cache breakpoint, then today's date (no marker)."""
+def cached_system(system: str, date_line: str) -> list[dict[str, Any]]:
+    """System blocks: the stable text with a cache breakpoint, then the date (no marker)."""
     return [
         {"type": "text", "text": system, "cache_control": EPHEMERAL},
-        {"type": "text", "text": today_line()},
+        {"type": "text", "text": date_line},
     ]
 
 
@@ -68,6 +70,11 @@ class AnthropicLLMClient:
         self._role = role
         self._model = get_model(role)
         self._max_tokens = max_tokens
+        # The date is fixed for this client's life. Thinking blocks echoed in a tool loop
+        # are bound to the system prompt they were made under, so a loop that crossed
+        # midnight with a fresh date would be rejected (400). Clients are built per request
+        # (api/deps.py), so the next request gets the new day.
+        self._today = today_line()
 
     def _record(self, resp: Any, operation: str) -> None:
         # Recorded as soon as the call returns: it was billed even if parsing fails below.
@@ -91,7 +98,7 @@ class AnthropicLLMClient:
         resp = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
-            system=cached_system(system),
+            system=cached_system(system, self._today),
             messages=messages,
             tools=tools,
             **request,
@@ -141,7 +148,8 @@ class AnthropicLLMClient:
             # Tools + system are cached; the corrective retry re-sends them unchanged. No
             # automatic breakpoint: the user message is one-off and a retry is rare.
             "system": cached_system(
-                f"{system}\n\n{STRUCTURED_TOOL_INSTRUCTION.format(tool_name=tool_name)}"),
+                f"{system}\n\n{STRUCTURED_TOOL_INSTRUCTION.format(tool_name=tool_name)}",
+                self._today),
             "tools": [tool],
             "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
         }

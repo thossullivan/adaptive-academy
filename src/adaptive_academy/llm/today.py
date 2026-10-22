@@ -3,10 +3,12 @@
 A model with no date in its context guesses one (a sibling project's tutor once wrote "Today
 is Thursday" on a Friday). Each client appends `today_line()` at the END of its system text,
 after everything stable, so the stable part stays a cacheable prefix (llm/anthropic_client.py
-puts its cache breakpoint before this line).
+puts its cache breakpoint before this line). The API-key clients read it once, when built,
+so a tool loop never sees two dates.
 
 "Today" is the server's local calendar day, like the daily spending limit (llm/usage.py): UTC
-in the Docker image unless TZ is set. Tests patch `local_now`.
+in the Docker image unless TZ is set in .env (compose.yaml passes it through). Tests patch
+`local_now`.
 """
 
 from datetime import datetime

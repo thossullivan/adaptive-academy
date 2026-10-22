@@ -12,6 +12,7 @@ from adaptive_academy.llm.anthropic_client import (
 from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
+from adaptive_academy.llm.today import today_line
 from adaptive_academy.llm.usage import BACKEND_ANTHROPIC, check_budget, record_usage
 from adaptive_academy.prompts import RESEARCH_SEARCH
 
@@ -62,6 +63,9 @@ class AnthropicResearcherClient:
         self._model = get_model(role)
         self._max_tokens = max_tokens
         self._max_searches = max_searches
+        # Fixed for this client's life (built per request): a pause_turn continuation echoes
+        # thinking blocks bound to the system prompt, so the date must not change mid-loop.
+        self._today = today_line()
 
     def search(self, brief: SearchBrief) -> list[RawSource]:
         tools = [{"type": "web_search_20250305", "name": "web_search",
@@ -75,7 +79,7 @@ class AnthropicResearcherClient:
             resp = self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
-                system=cached_system(RESEARCH_SEARCH),
+                system=cached_system(RESEARCH_SEARCH, self._today),
                 tools=tools,  # same tools: a paused turn may end on a not-yet-run search
                 messages=messages,
                 # Automatic caching as well: a pause_turn continuation re-sends the search

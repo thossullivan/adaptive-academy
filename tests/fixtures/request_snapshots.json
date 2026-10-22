@@ -5,8 +5,16 @@
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 20000,
-      "system_sha256": "97e6a218e0b744cd0c2e366e3a795aab291ce5c360bb5230037558de77351ccc",
-      "system_chars": 665,
+      "system": [
+        {
+          "sha256": "19889164fe20f8bbb1c38ed8ce62a63de79fbee9be95b59163afc3da3f67d4a8",
+          "chars": 627
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
       "tools": [],
       "tool_choice": null,
       "message_roles": [
@@ -23,8 +31,16 @@
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 20000,
-      "system_sha256": "6180f0bde142507ba316efd16bb029624c1859303ef7952862fdad8563a52c8b",
-      "system_chars": 2037,
+      "system": [
+        {
+          "sha256": "5c465941979c061e48cd7d45f19bbcce6127cca1fbbfae4ccce004a9474120a6",
+          "chars": 1999
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
       "tools": [],
       "tool_choice": null,
       "message_roles": [
@@ -43,8 +59,16 @@
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 20000,
-      "system_sha256": "997c37be9493a0d333c48245ec11e9bcb18b0b49eb7966cd883b8644a3c70dd7",
-      "system_chars": 1663,
+      "system": [
+        {
+          "sha256": "a8e3b421beebbdcfc6bcf680321a622ce3bea061c1e26c07212aeda2cb1078ba",
+          "chars": 1625
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
       "tools": [
         {
           "name": "emit_track",
@@ -66,14 +90,50 @@
       ]
     }
   ],
+  "paper_probe_director": [
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "4c1226a605aee208a9072e432b75562d8f0f5da0ae812f94e1e3791edf154ef3",
+          "chars": 1322
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "b56783225929813e4a3eeebdb81776e55ed0b49624f791b2c8b16384b0064899",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
   "research_foundation": [
     {
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 20000,
-      "system_sha256": "83ce44d702df08e5d68a0f141567d4b7de496b376d3ceb04f46a911ac034387d",
-      "system_chars": 842,
+      "system": [
+        {
+          "sha256": "db9a65ed9131d10c17894e97b378b49bf78c4b9a8bf82f132e99dac285994d94",
+          "chars": 804
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
       "tools": [],
       "tool_choice": null,
       "message_roles": [
@@ -92,8 +152,16 @@
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 16000,
-      "system_sha256": "312d92896411c096384b1a021026c089765ba5a821c1d11aebbf201d568407c0",
-      "system_chars": 408,
+      "system": [
+        {
+          "sha256": "a01661e763c523c678088eba0c4e1ec8392855b60d4e9d32ebe6ba13a86e7e01",
+          "chars": 370
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
       "tools": [
         {
           "name": "web_search",
@@ -113,14 +181,107 @@
       ]
     }
   ],
+  "roleplay_persona": [
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "1ad5cc5fc6c4976c0aab0b312ec06b9c1e4e7afd004f29a57128c436fc988479",
+          "chars": 844
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "329ddae1ffecd7da4933322ca1d4e73f02ea9a51465c91ab2bee0e496f2ef1c1",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "1ad5cc5fc6c4976c0aab0b312ec06b9c1e4e7afd004f29a57128c436fc988479",
+          "chars": 844
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "03a0646e0386bd9e1368f929b11e256de1fe5b0bb7b919862848da79ecca37ad",
+      "other_params": {},
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    }
+  ],
+  "teach_grade": [
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2978d964f39e10be59ecaebf0080cab05f3fa673c911f7a2ff80f3f52b475882",
+          "chars": 769
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "e1a0899cf2a126ac5b7a8a89a65f41cfb3790865888031617192e7f71fc60fcd",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
   "tutor_turn": [
     {
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 20000,
-      "system_sha256": "4f62af2d468c249136d566319bd00a538d86ba056ef5241a7f6b0e76d835428b",
-      "system_chars": 2387,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
       "tools": [
         {
           "name": "log_attempt",
@@ -149,8 +310,16 @@
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 20000,
-      "system_sha256": "4f62af2d468c249136d566319bd00a538d86ba056ef5241a7f6b0e76d835428b",
-      "system_chars": 2387,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
       "tools": [
         {
           "name": "log_attempt",
@@ -181,8 +350,16 @@
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
       "max_tokens": 20000,
-      "system_sha256": "4f62af2d468c249136d566319bd00a538d86ba056ef5241a7f6b0e76d835428b",
-      "system_chars": 2387,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
       "tools": [
         {
           "name": "log_attempt",

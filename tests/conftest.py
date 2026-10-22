@@ -1,4 +1,7 @@
+import asyncio
 import ipaddress
+import os
+import shlex
 import sys
 from typing import NoReturn
 
@@ -13,8 +16,23 @@ from adaptive_academy.llm import usage as llm_usage
 
 try:  # The Agent SDK (subscription backend) spawns the `claude` CLI from this transport.
     from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
-except ImportError:  # pragma: no cover - the SDK is a declared dependency
-    SubprocessCLITransport = None
+except ImportError as exc:  # a declared dependency: a move must not silently drop the stub
+    raise ImportError(
+        "network guard: claude_agent_sdk no longer provides "
+        "claude_agent_sdk._internal.transport.subprocess_cli.SubprocessCLITransport. Update "
+        "that import in tests/conftest.py to the SDK's CLI transport, so tests cannot spawn "
+        "the `claude` CLI (which would fall back to the developer's keychain login)."
+    ) from exc
+
+try:
+    from anthropic._base_client import BaseClient as _AnthropicBaseClient
+except ImportError:  # pragma: no cover - only makes blocked calls fail fast, see below
+    _AnthropicBaseClient = None
+
+try:
+    import uvloop
+except ImportError:  # pragma: no cover - uvicorn[standard] ships it except on Windows
+    uvloop = None
 
 # --- Network guard ---------------------------------------------------------------------------
 # The app degrades gracefully: a failed model call, fetch or embedder download is caught and
@@ -34,11 +52,34 @@ PROVIDER_ENV_VARS = (
 )
 
 # Loopback is allowed, so a proxy listening on it would forward traffic out. Env-configured
-# proxies are dropped for every guarded test; httpx and urllib then connect directly.
+# proxies are dropped for every guarded test, and NO_PROXY=* is set: a non-empty *_proxy env
+# also stops urllib's getproxies() falling back to the OS proxy (macOS System Settings,
+# Windows registry), which httpx and requests would otherwise use; both honour "*".
 PROXY_ENV_VARS = tuple(
     name for base in ("http_proxy", "https_proxy", "all_proxy") for name in (base, base.upper()))
+NO_PROXY_ENV_VARS = ("no_proxy", "NO_PROXY")
 
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"})
+
+# Child processes are outside the audit hook's reach, so programs that reach the network by
+# design are refused at spawn time (matched on the executable's basename). The suite's own
+# children (sys.executable for alembic and the guard's inner pytest, `uv run --offline`, the
+# POSIX shells running scripts/dev.sh) match none of these rules.
+_NETWORK_PROGRAMS = frozenset({
+    "claude", "node", "npx", "npm", "pnpm", "yarn", "bun", "deno", "curl", "wget",
+    "ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet", "ftp", "gh", "docker",
+})
+_GIT_REMOTE_COMMANDS = frozenset({"clone", "fetch", "pull", "push", "ls-remote", "submodule"})
+_GIT_VALUE_OPTIONS = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                                "--exec-path", "--config-env"})
+_PIP_NETWORK_COMMANDS = frozenset({"install", "download", "wheel"})
+_SHELLS = frozenset({"sh", "bash", "dash", "zsh", "ksh"})
+_SHELL_SEPARATORS = frozenset({"&&", "||", ";", "|", "&"})
+_SPAWN_EVENTS = frozenset({"subprocess.Popen", "os.posix_spawn", "os.exec", "os.spawn",
+                           "os.system"})
+_AUDIT_PREFIXES = ("socket.", "subprocess.", "os.")  # cheap pre-filter: hooks see every event
+_UVLOOP_TARGET = ("uvloop event loop (its sockets bypass the audit hook, so the guard cannot "
+                  "see them; use the default asyncio loop)")
 
 
 class NetworkBlockedError(ConnectionError):
@@ -56,8 +97,11 @@ class _NetworkGuard:
         self.allowed = False
         self.attempts: dict[str | None, list[str]] = {}
 
-    def block(self, target: str) -> NoReturn:
+    def record(self, target: str) -> None:
         self.attempts.setdefault(self.nodeid, []).append(target)
+
+    def block(self, target: str) -> NoReturn:
+        self.record(target)
         raise NetworkBlockedError(f"network access is blocked in tests: {target}")
 
 
@@ -94,28 +138,122 @@ def _target(host: object, port: object) -> str:
     return f"{_host_text(host)}:{port}" if port not in (None, 0, "") else _host_text(host)
 
 
+def _program(path: object) -> str:
+    name = os.path.basename(os.fsdecode(path)).lower()
+    for suffix in (".exe", ".cmd", ".bat"):
+        name = name.removesuffix(suffix)
+    return name
+
+
+def _env_flag(env: object, name: str) -> bool:
+    source = env if hasattr(env, "get") else os.environ
+    return str(source.get(name, "")).strip().lower() not in ("", "0", "false", "no")
+
+
+def _shell_network_command(command: object) -> str | None:
+    """The first network-capable command in a `sh -c` / os.system string, if any."""
+    try:
+        words = shlex.split(os.fsdecode(command))
+    except ValueError:
+        return None
+    argv: list[str] = []
+    for word in [*words, ";"]:
+        if word not in _SHELL_SEPARATORS:
+            argv.append(word)
+        elif argv:
+            if reason := _network_command(argv, None):
+                return reason
+            argv = []
+    return None
+
+
+def _network_command(argv: list, env: object) -> str | None:
+    """Why spawning argv would reach the network, or None for a local command."""
+    if not argv:
+        return None
+    program = _program(argv[0])
+    rest = [os.fsdecode(a) for a in argv[1:]]
+    if program in _SHELLS and len(rest) >= 2 and rest[0] == "-c":
+        return _shell_network_command(rest[1])
+    if program in _NETWORK_PROGRAMS:
+        return program
+    if program == "git":
+        words = iter(rest)
+        subcommand = ""
+        for word in words:
+            if word in _GIT_VALUE_OPTIONS:
+                next(words, None)  # `git -C path clone ...`: skip the option's value
+            elif not word.startswith("-"):
+                subcommand = word
+                break
+        return f"git {subcommand}" if subcommand in _GIT_REMOTE_COMMANDS else None
+    if program in ("uv", "uvx"):
+        offline = "--offline" in rest or _env_flag(env, "UV_OFFLINE")
+        return None if offline else f"{program} without --offline"
+    is_pip = program in ("pip", "pip3") or (
+        program.startswith("python") and "-m" in rest
+        and rest[rest.index("-m") + 1:rest.index("-m") + 2] == ["pip"])
+    if is_pip and _PIP_NETWORK_COMMANDS & set(rest):
+        return "pip install"
+    return None
+
+
+def _spawn_argv(event: str, args: tuple) -> tuple[list, object] | None:
+    """(argv, env) from a process-spawn audit event."""
+    if event == "subprocess.Popen":
+        executable, argv, _cwd, env = args
+        argv = list(argv) if isinstance(argv, list | tuple) else [argv]
+        return [executable or argv[0], *argv[1:]], env
+    if event in ("os.posix_spawn", "os.exec"):
+        path, argv, env = args
+        return [path, *list(argv)[1:]], env
+    if event == "os.spawn":
+        _mode, path, argv, env = args
+        return [path, *list(argv)[1:]], env
+    return None
+
+
 def _network_audit_hook(event: str, args: tuple) -> None:
     """Block at the socket layer, below every client library. CPython raises these audit
     events from C before any packet leaves, whatever imported `socket` how (`from socket
     import create_connection` included), and in every thread. In-process traffic never
     reaches a socket (TestClient is an httpx client on an in-process ASGI transport), and
-    loopback and Unix-domain sockets pass, so local servers and asyncio's self-pipe work."""
-    if _GUARD.allowed or not event.startswith("socket."):
+    loopback and Unix-domain sockets pass, so local servers and asyncio's self-pipe work.
+    Spawning a network-capable program is refused here too (subprocess, os.posix_spawn,
+    os.exec*, os.spawn*, os.system), since a child process's own sockets are invisible."""
+    if _GUARD.allowed or not event.startswith(_AUDIT_PREFIXES):
         return
-    if event in ("socket.getaddrinfo", "socket.gethostbyname", "socket.gethostbyaddr"):
+    if event in ("socket.getaddrinfo", "socket.gethostbyname"):
         # A name lookup asks a resolver, so it is outbound even if no connection follows.
         # A numeric address needs no lookup; its connect is checked below.
         host = args[0]
         if not _is_loopback(host) and _numeric_ip(_host_text(host)) is None:
             _GUARD.block(_target(host, args[1] if len(args) > 1 else None))
+    elif event in ("socket.gethostbyaddr", "socket.getnameinfo"):
+        # A reverse lookup sends a PTR query even for a numeric address.
+        host = args[0][0] if isinstance(args[0], tuple) else args[0]
+        if not _is_loopback(host):
+            _GUARD.block(f"{_host_text(host)} (reverse lookup)")
     elif event in ("socket.connect", "socket.sendto", "socket.sendmsg"):
         address = args[1]
         if (isinstance(address, tuple) and address
                 and isinstance(address[0], str | bytes) and not _is_loopback(address[0])):
             _GUARD.block(_target(address[0], address[1] if len(address) > 1 else None))
+    elif event in _SPAWN_EVENTS:
+        if event == "os.system":
+            reason = _shell_network_command(args[0])
+        else:
+            argv, env = _spawn_argv(event, args) or ([], None)
+            reason = _network_command(argv, env)
+        if reason:
+            _GUARD.block(f"child process {reason}")
 
 
 sys.addaudithook(_network_audit_hook)  # audit hooks cannot be removed; the guard gates it
+
+
+def _uvloop_policy_active() -> bool:
+    return type(asyncio.get_event_loop_policy()).__module__.split(".")[0] == "uvloop"
 
 
 def _blocked_message(nodeid: str, targets: list[str]) -> str:
@@ -124,9 +262,9 @@ def _blocked_message(nodeid: str, targets: list[str]) -> str:
         "The attempt was blocked, but the code under test may have caught the error and "
         "degraded gracefully, so the test body alone cannot be trusted to notice.\n"
         "Fix: run LLM calls through the scripted client (adaptive_academy.llm.scripted_client) "
-        "or a fake, or monkeypatch the call site (fetcher, resolver, embedder, SDK query) "
-        "with a stub. Only a test that deliberately exercises a guarded path with its own "
-        "stub may opt out with @pytest.mark.allow_network."
+        "or a fake, or monkeypatch the call site (fetcher, resolver, embedder, SDK query, "
+        "subprocess) with a stub. Only a test that deliberately exercises a guarded path with "
+        "its own stub may opt out with @pytest.mark.allow_network."
     )
 
 
@@ -151,6 +289,8 @@ def pytest_runtest_protocol(item, nextitem):
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_makereport(item, call):
     report = yield
+    if call.when in ("call", "teardown") and not _GUARD.allowed and _uvloop_policy_active():
+        _GUARD.record(_UVLOOP_TARGET)
     if call.when == "teardown":
         targets = _GUARD.attempts.pop(item.nodeid, None)
         if targets:
@@ -172,18 +312,34 @@ def pytest_sessionfinish(session, exitstatus):
             reporter.write_line(_blocked_message("(outside any test)", stray), red=True)
 
 
+def _caused_by_block(err: BaseException | None) -> bool:
+    seen: set[int] = set()
+    while err is not None and id(err) not in seen:
+        if isinstance(err, NetworkBlockedError):
+            return True
+        seen.add(id(err))
+        err = err.__cause__ or err.__context__
+    return False
+
+
 @pytest.fixture(autouse=True)
 def _no_real_network(request, monkeypatch):
     """No test reaches a real outside service; each attempt fails the test that made it.
 
-    Real sockets are blocked process-wide by `_network_audit_hook`: name lookups and
-    connections to any non-loopback host raise NetworkBlockedError (the Anthropic SDK's HTTP
-    transport, the SSRF-guarded fetch in engine/fetch.py and a fastembed model download all
-    end there). TestClient keeps working (in-process, no socket), as do loopback servers.
-    This fixture also stubs the Agent SDK's CLI transport, so `claude_agent_sdk.query()` and
-    `ClaudeSDKClient` cannot spawn the `claude` subprocess, whose own traffic the in-process
-    hook could not see. Tests that fake `query` at its call site are unaffected. Proxy env
-    vars are dropped too, since a proxy on loopback would carry traffic past the hook.
+    Real sockets are blocked process-wide by `_network_audit_hook`: forward and reverse name
+    lookups and connections to any non-loopback host raise NetworkBlockedError (the Anthropic
+    SDK's HTTP transport, the SSRF-guarded fetch in engine/fetch.py and a fastembed model
+    download all end there), and so does spawning a network-capable program (claude, node,
+    curl, git clone, uv without --offline, pip install, ...). TestClient keeps working
+    (in-process, no socket), as do loopback servers and the suite's own child processes.
+
+    This fixture adds what the hook cannot see: it stubs the Agent SDK's CLI transport, so
+    `claude_agent_sdk.query()` and `ClaudeSDKClient` cannot spawn the `claude` subprocess
+    (tests that fake `query` at its call site are unaffected); it blocks uvloop, whose
+    sockets raise no audit events (a uvloop policy left in place also fails the test); and it
+    drops proxy env vars and sets NO_PROXY=* so neither an env nor an OS proxy on loopback
+    can carry traffic past the hook. A blocked Anthropic call fails at once instead of
+    sleeping through its retries.
 
     Every attempt is recorded against the running test, and `pytest_runtest_makereport`
     fails that test at teardown, naming the host, even when the code under test caught the
@@ -197,13 +353,34 @@ def _no_real_network(request, monkeypatch):
         return
     for name in PROXY_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
-    if SubprocessCLITransport is None:
-        return
+    for name in NO_PROXY_ENV_VARS:
+        monkeypatch.setenv(name, "*")
 
     async def _blocked_connect(self):
         _GUARD.block("claude CLI subprocess (claude_agent_sdk transport)")
 
     monkeypatch.setattr(SubprocessCLITransport, "connect", _blocked_connect)
+
+    if uvloop is not None:
+        def _blocked_uvloop(*args, **kwargs):
+            for arg in args:  # uvloop.run(coro): don't leave the coroutine un-awaited
+                if asyncio.iscoroutine(arg):
+                    arg.close()
+            _GUARD.block(_UVLOOP_TARGET)
+
+        for name in ("new_event_loop", "run", "install"):
+            if hasattr(uvloop, name):
+                monkeypatch.setattr(uvloop, name, _blocked_uvloop)
+
+    if _AnthropicBaseClient is not None and hasattr(_AnthropicBaseClient,
+                                                    "_should_retry_exception"):
+        should_retry = _AnthropicBaseClient._should_retry_exception
+
+        def _no_retry_when_blocked(self, err):
+            return (False, None) if _caused_by_block(err) else should_retry(self, err)
+
+        monkeypatch.setattr(_AnthropicBaseClient, "_should_retry_exception",
+                            _no_retry_when_blocked)
 
 
 @pytest.fixture(autouse=True)

@@ -271,6 +271,28 @@ export type PaperProbe = {
   scorecard?: ScorecardRow[] | null;
 };
 
+/** Category of a failed model call (llm/errors.py), sent beside `detail` on error JSON. */
+export type LLMErrorCategory =
+  | 'auth'
+  | 'permission'
+  | 'rate_limited'
+  | 'overloaded'
+  | 'out_of_credits'
+  | 'model_unavailable'
+  | 'network'
+  | 'refusal'
+  | 'cut_off'
+  | 'invalid_output'
+  | 'budget'
+  | 'agent_sdk'
+  | 'unknown';
+
+/** An API error body. `category` is present only on failed model calls. */
+export interface ApiErrorBody {
+  detail?: unknown; // a string for app errors; FastAPI validation errors send a list
+  category?: LLMErrorCategory;
+}
+
 /** GET /api/usage — recorded model-call usage and the daily spending limit. */
 export interface UsageTotals {
   calls: number;

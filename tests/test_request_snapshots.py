@@ -1,17 +1,21 @@
-"""Pin the exact request each real call surface sends to the Anthropic API.
+"""Pin the exact request the main call surfaces send to the Anthropic API.
 
-Any change to a prompt, a schema, a tool, the model, a parameter, or where the prompt-cache
-breakpoints sit changes tests/fixtures/request_snapshots.json, so it shows up as a reviewed
-diff instead of slipping through. Per call it records: the usage operation, role and model,
-max_tokens, a sha256 of the system text (and of the messages), each tool's name with a sha256
-of its full definition, tool_choice, any other request parameters, and every cache_control
-location.
+Pinned surfaces (see SURFACES below): a two-turn tutor conversation with a tool step, an
+assessment (rubric then grade), curriculum generation, a research search, the research
+foundation, a two-turn roleplay persona, a teach-back grade, and the paper-probe director.
+Other engine calls are not pinned here.
 
-The real call sites are driven end to end: the engine functions (tutor turn, assessment,
-curriculum, research search and foundation) run against the real AnthropicLLMClient /
-AnthropicResearcherClient from api/deps, whose SDK `messages.create` is replaced by a fake
-that records the kwargs and returns canned responses. No network. The date in the system
-prompt is frozen and the models are pinned to the defaults, so the hashes are stable.
+A change to any of their prompts, schemas, tools, the model, a parameter, or where the
+prompt-cache breakpoints sit changes tests/fixtures/request_snapshots.json, so it shows up
+as a reviewed diff instead of slipping through. Per call it records: the usage operation,
+role and model, max_tokens, a sha256 and length of EACH system block (so text moving across
+the cache breakpoint shows), a sha256 of the messages, each tool's name with a sha256 of its
+full definition, tool_choice, any other request parameters, and every cache_control location.
+
+The engine functions run against the real AnthropicLLMClient / AnthropicResearcherClient
+from api/deps, whose SDK `messages.create` is replaced by a fake that records the kwargs and
+returns canned responses. No network. The date in the system prompt is frozen and the models
+are pinned to the defaults, so the hashes are stable.
 
 After an intended change, regenerate the fixture and review its diff:
 
@@ -70,14 +74,14 @@ def _cache_locations(kw) -> list[str]:
 
 def _summarise(kw, usage_call) -> dict:
     system = kw.get("system")
-    system_text = system if isinstance(system, str) else "".join(b["text"] for b in system)
+    blocks = [system] if isinstance(system, str) else [b["text"] for b in system]
     return {
         "operation": usage_call["operation"],
         "role": usage_call["role"],
         "model": kw["model"],
         "max_tokens": kw["max_tokens"],
-        "system_sha256": _sha(system_text),
-        "system_chars": len(system_text),
+        # One entry per system block, in order: [stable text, today's date].
+        "system": [{"sha256": _sha(text), "chars": len(text)} for text in blocks],
         "tools": [{"name": t.get("name"), "type": t.get("type", "custom"),
                    "sha256": _sha(_strip_cache_control(t))} for t in kw.get("tools") or []],
         "tool_choice": kw.get("tool_choice"),
@@ -252,12 +256,89 @@ def _research_foundation(session, rec):
                           deps.get_llm())
 
 
+def _milestone(session, concept_name):
+    """A program milestone with one load-bearing concept (roleplay / paper probe need it)."""
+    from adaptive_academy.models import Milestone, Program, ProgramTopicLink
+
+    program = Program(title="PhD", goal_statement="g")
+    session.add(program)
+    session.commit()
+    milestone = Milestone(program_id=program.id, title="Transformers",
+                          success_criteria="explain and critique the paper")
+    session.add(milestone)
+    session.commit()
+    topic = Topic(title="Transformers")
+    session.add(topic)
+    session.commit()
+    track = Track(topic_id=topic.id, title="tr")
+    session.add(track)
+    session.commit()
+    concept = Concept(track_id=track.id, name=concept_name, is_load_bearing=True)
+    session.add(concept)
+    session.commit()
+    session.add(KnowledgeEstimate(concept_id=concept.id, level="low"))
+    session.add(ProgramTopicLink(milestone_id=milestone.id, topic_id=topic.id,
+                                 status="started"))
+    session.commit()
+    return program, milestone, concept
+
+
+def _roleplay_persona(session, rec):
+    # The other multi-turn caller of `complete` (no tools): the second turn resends history.
+    from adaptive_academy.engine.roleplay import run_roleplay_turn
+    from adaptive_academy.models import RoleplaySession
+
+    program, milestone, _ = _milestone(session, "SPIN questioning")
+    rp = RoleplaySession(program_id=program.id, milestone_id=milestone.id, status="active",
+                         persona_brief={"persona": "Skeptical VP of Engineering",
+                                        "goal": "avoid committing", "situation": "cold call",
+                                        "hidden_objections": ["already have a vendor"],
+                                        "win_conditions": ["agree to a technical eval"],
+                                        "difficulty": "high"})
+    session.add(rp)
+    session.commit()
+    rec.queue += [_text("Who is this, and why now?"), _text("We already have a vendor.")]
+    llm = deps.get_llm()
+    run_roleplay_turn(session, rp, "Hi, I'm calling about your build pipeline.", llm=llm)
+    run_roleplay_turn(session, rp, "What does a slow build cost your team?", llm=llm)
+
+
+def _teach(session, rec):
+    from adaptive_academy.engine.teach import grade_teaching
+
+    _, concept = _concept(session)
+    rec.queue.append(_text(json.dumps({"score": 0.7, "feedback": "clear",
+                                       "strengths": ["intuition"], "gaps": ["scaling"]})))
+    grade_teaching(session, concept, "Each token asks every other token how relevant it is.",
+                   llm=deps.get_llm())
+
+
+def _paper_probe_director(session, rec):
+    from adaptive_academy.engine.paper_probe import direct
+    from adaptive_academy.models import PaperProbe
+
+    program, milestone, concept = _milestone(session, "Self-attention")
+    probe = PaperProbe(program_id=program.id, milestone_id=milestone.id,
+                       paper_title="Attention Is All You Need",
+                       paper_text="We propose the Transformer, based solely on attention.",
+                       source="arxiv", status="drafting")
+    session.add(probe)
+    session.commit()
+    rec.queue.append(_text(json.dumps({"questions": [
+        {"axis": "method", "prompt": "How are attention weights computed?",
+         "concept_ids": [concept.id]}]})))
+    direct(session, probe, llm=deps.get_llm())
+
+
 SURFACES = {
     "tutor_turn": _tutor_turn,
     "assessment_grade": _assessment_grade,
     "curriculum_generation": _curriculum,
     "research_search": _research_search,
     "research_foundation": _research_foundation,
+    "roleplay_persona": _roleplay_persona,
+    "teach_grade": _teach,
+    "paper_probe_director": _paper_probe_director,
 }
 
 

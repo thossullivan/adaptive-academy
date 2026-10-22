@@ -5,7 +5,7 @@ Friday). The line is appended at the END of the system text so everything before
 stable, cacheable prefix. The clock is `llm.today.local_now`, patched here; no network.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -200,3 +200,106 @@ def test_tutor_sdk_ends_its_system_prompt_with_today(friday, session, monkeypatc
     mod.run_tutor_turn_sdk(session, convo, "explain softmax")
     assert seen["system"].endswith(f"\n\n{LINE}")
     assert seen["system"].count("Today's date is") == 1
+
+
+# --- one date per client: a loop that crosses midnight keeps its system prompt ------------
+#
+# Thinking blocks echoed inside a tool loop (tutor) or a pause_turn loop (researcher) are
+# bound to the system prompt they were produced under. If the date line changed mid-loop, the
+# API would reject the echoed block (400, "bound to a different conversation"). Clients are
+# built per request (api/deps.py), so the date is fixed when the client is built.
+
+
+def _midnight_clock(monkeypatch):
+    """A clock at 23:59 that jumps a day forward on every model call (via `tick`)."""
+    moments = [datetime(2026, 10, 22, 23, 59, tzinfo=timezone.utc)]
+    monkeypatch.setattr(today, "local_now", lambda: moments[-1])
+
+    def tick():
+        moments.append(moments[-1] + timedelta(days=1))
+
+    return tick
+
+
+def _ticking_anthropic(monkeypatch, module, responses, calls, tick):
+    queue = list(responses)
+
+    class _Messages:
+        def create(self, **kw):
+            calls.append(kw)
+            tick()
+            return queue.pop(0)
+
+    class _FakeAnthropic:
+        def __init__(self, *a, **kw):
+            self.messages = _Messages()
+
+    monkeypatch.setattr(f"adaptive_academy.llm.{module}.Anthropic", _FakeAnthropic)
+
+
+def _date_block(kw) -> str:
+    return kw["system"][-1]["text"]
+
+
+THURSDAY_LINE = "Today's date is 2026-10-22 (Thursday)."
+
+
+def test_tutor_tool_loop_keeps_one_date_across_midnight(session, api_key, monkeypatch):
+    from adaptive_academy.engine.tutor import run_tutor_turn
+    from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
+    from adaptive_academy.models import Concept, Conversation, Topic, Track
+
+    tick = _midnight_clock(monkeypatch)
+    topic = Topic(title="T")
+    session.add(topic)
+    session.commit()
+    track = Track(topic_id=topic.id, title="tr")
+    session.add(track)
+    session.commit()
+    concept = Concept(track_id=track.id, name="softmax")
+    session.add(concept)
+    session.commit()
+    convo = Conversation(topic_id=topic.id, concept_id=concept.id)
+    session.add(convo)
+    session.commit()
+
+    tool = SimpleNamespace(type="tool_use", id="toolu_1", name="log_attempt",
+                           input={"summary": "s"})
+    calls: list = []
+    _ticking_anthropic(monkeypatch, "anthropic_client",
+                       [_resp(tool, stop_reason="tool_use"), _resp(_text("Next step?"))],
+                       calls, tick)
+    run_tutor_turn(session, convo, "softmax normalises", AnthropicLLMClient())
+
+    assert len(calls) == 2
+    assert {_date_block(kw) for kw in calls} == {THURSDAY_LINE}
+    assert calls[1]["system"] == calls[0]["system"]
+
+
+def test_researcher_pause_loop_keeps_one_date_across_midnight(api_key, monkeypatch):
+    from adaptive_academy.llm.anthropic_researcher import AnthropicResearcherClient
+
+    tick = _midnight_clock(monkeypatch)
+    calls: list = []
+    _ticking_anthropic(monkeypatch, "anthropic_researcher",
+                       [_resp(_text("Searching."), stop_reason="pause_turn"),
+                        _resp(_text("More."), stop_reason="pause_turn"),
+                        _resp(_text("[]"))], calls, tick)
+    AnthropicResearcherClient().search(SearchBrief(angle="a", query="q"))
+
+    assert len(calls) == 3
+    assert {_date_block(kw) for kw in calls} == {THURSDAY_LINE}
+
+
+def test_a_client_built_after_midnight_tells_the_new_date(api_key, monkeypatch):
+    # Pinned per client, not per process: the next request's client gets the new day.
+    from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
+
+    tick = _midnight_clock(monkeypatch)
+    calls: list = []
+    _ticking_anthropic(monkeypatch, "anthropic_client",
+                       [_resp(_text("a")), _resp(_text("b"))], calls, tick)
+    AnthropicLLMClient().complete("S", [{"role": "user", "content": "x"}], [])
+    AnthropicLLMClient().complete("S", [{"role": "user", "content": "x"}], [])
+    assert _date_block(calls[0]) == THURSDAY_LINE
+    assert _date_block(calls[1]) == "Today's date is 2026-10-23 (Friday)."

@@ -91,11 +91,15 @@ describe('budgetFraction', () => {
 });
 
 describe('cacheShareLabel', () => {
-  it('rounds to a whole percent, floors tiny shares, and is null when unknown', () => {
+  it('floors to a whole percent, marks tiny shares, and is null when unknown', () => {
     expect(cacheShareLabel(0.6429)).toBe('64% cached');
+    expect(cacheShareLabel(0.6499)).toBe('64% cached');
+    expect(cacheShareLabel(0.29)).toBe('29% cached'); // not 28: 0.29 * 100 is 28.999…
+    expect(cacheShareLabel(0.995)).toBe('99% cached'); // never "100%" unless it all was
     expect(cacheShareLabel(0)).toBe('0% cached');
     expect(cacheShareLabel(1)).toBe('100% cached');
     expect(cacheShareLabel(0.001)).toBe('<1% cached');
+    expect(cacheShareLabel(0.009)).toBe('<1% cached');
     expect(cacheShareLabel(null)).toBeNull();
     expect(cacheShareLabel(undefined)).toBeNull();
   });
