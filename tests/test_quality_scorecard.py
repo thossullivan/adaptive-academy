@@ -6,12 +6,13 @@ written by the real emitters (engine/grade_gate.py, engine/solution_guard.py), s
 their wording that the scorecard can no longer read fails here.
 """
 
+import json
 import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from adaptive_academy.api.app import app
 from adaptive_academy.api.deps import get_session
@@ -20,7 +21,18 @@ from adaptive_academy.engine.grade_gate import checked_completion
 from adaptive_academy.engine.output_checks import OUTCOME_RUBRIC, GradeCheckError
 from adaptive_academy.engine.solution_guard import FALLBACK, REGENERATE, SolutionGuard
 from adaptive_academy.llm.types import LLMResponse, StructuredOutputError
-from adaptive_academy.models import AgentEvent, Assessment, Concept, LLMUsage, Topic, Track
+from adaptive_academy.engine.artifact import review_artifact
+from adaptive_academy.models import (
+    AgentEvent,
+    Assessment,
+    Concept,
+    Deliverable,
+    Item,
+    LLMUsage,
+    Phase,
+    Topic,
+    Track,
+)
 
 NOW = datetime.now(timezone.utc)
 WINDOWS = ("today", "last_7_days", "last_30_days", "all_time")
@@ -213,6 +225,71 @@ def test_cost_per_graded_assessment_has_no_value_without_both_sides(session, wor
     assert windows["last_7_days"]["grading"]["cost_per_assessment_usd"] is None
     # 30 days: one priced call and two assessments.
     assert windows["last_30_days"]["grading"]["cost_per_assessment_usd"] == pytest.approx(0.15)
+
+
+class _Fixed:
+    def __init__(self, text):
+        self._text = text
+
+    def complete(self, system, messages, tools):
+        return LLMResponse(text=self._text, stop_reason="end_turn")
+
+
+def _phase_with_concepts(session, n):
+    topic = Topic(title="Ship")
+    session.add(topic)
+    session.flush()
+    track = Track(topic_id=topic.id, title="t")
+    session.add(track)
+    session.flush()
+    phase = Phase(track_id=track.id, title="p", position=0)
+    session.add(phase)
+    session.flush()
+    names = [f"concept {i}" for i in range(n)]
+    session.add(Item(phase_id=phase.id, type="build", text="build", concept_refs=names))
+    for name in names:
+        session.add(Concept(track_id=track.id, name=name))
+    deliverable = Deliverable(phase_id=phase.id, kind="repo", text="attention.py",
+                              acceptance_criteria=["works"])
+    session.add(deliverable)
+    session.commit()
+    return deliverable
+
+
+def _review(verdict):
+    return json.dumps({"score": 0.7, "mechanism_present": True, "verdict": verdict,
+                       "gaps": ["one gap"]})
+
+
+def test_an_artifact_review_counts_once_however_many_concepts_it_covers(session, world):
+    # One grader call writes one artifact_review row per phase concept (engine/artifact.py).
+    # Two reviews of a 4-concept deliverable are 2 grades, not 8.
+    deliverable = _phase_with_concepts(session, 4)
+    review_artifact(session, deliverable, "", "def attention(): ...",
+                    llm=_Fixed(_review("Solid first cut.")))
+    review_artifact(session, deliverable, "", "def attention(): ...",
+                    llm=_Fixed(_review("Better: the mask is right now.")))
+    _usage(session, feature="deliverables", cost=0.10)
+    _usage(session, feature="deliverables", cost=0.10)
+    _usage(session, feature="assess", cost=0.10)
+    _assessment(session, world["real"])  # one ordinary grade, counted per row
+    session.commit()
+    assert len(session.exec(select(Assessment)).all()) == 9
+    g = _card(session)["windows"]["today"]["grading"]
+    assert g["graded_assessments"] == 3
+    assert g["cost_per_assessment_usd"] == pytest.approx(0.30 / 3)
+
+
+def test_identical_artifact_reviews_at_different_times_are_two_grades(session, world):
+    # Same deliverable, same pasted text, same verdict, written a minute apart: two calls.
+    for minutes in (1, 2):
+        for concept in ("real", "real"):
+            session.add(Assessment(
+                concept_id=world[concept], kind="artifact_review", prompt="Ship: x",
+                response="same", verdict="same", score=0.7,
+                created_at=NOW - timedelta(minutes=minutes)))
+    session.commit()
+    assert _card(session)["windows"]["today"]["grading"]["graded_assessments"] == 2
 
 
 def test_unpriced_grading_spend_gives_no_cost_per_assessment(session, world):

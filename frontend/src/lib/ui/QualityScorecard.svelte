@@ -98,8 +98,13 @@
           <p class="nums font-display text-3xl text-fg">{formatUnitCost(w.grading.cost_per_assessment_usd)}</p>
           <p class="mt-1 text-xs text-faint">
             {formatUsd(w.grading.cost_usd)} over {plural(w.grading.calls, 'call')} for
-            {plural(w.grading.graded_assessments, 'assessment')}.
+            {plural(w.grading.graded_assessments, 'grade')}.
           </p>
+          {#if w.grading.unpriced_calls > 0}
+            <p class="mt-1 text-xs text-faint" data-testid="quality-unpriced-note">
+              Leaves out {plural(w.grading.unpriced_calls, 'grading call')} with no known price.
+            </p>
+          {/if}
         {:else}
           <p class="text-sm text-faint" data-testid="quality-no-data">
             No data yet.
@@ -110,7 +115,8 @@
         {/if}
         <p class="mt-3 text-xs leading-relaxed text-muted">
           Everything spent on the features that grade your answers ({gradingNames}), divided by
-          the assessments they wrote. The demo topic is left out.
+          the grades they wrote. An artifact review counts once, however many concepts it covers.
+          The demo topic is left out.
         </p>
       </Card>
 
@@ -244,7 +250,8 @@
       Per call is the spend over the calls that had a price. Problems counts calls the model
       refused, answered with nothing, stopped because the answer ran too long, or answered in the
       wrong format for a step that needs structured output (counted even when the one retry fixed
-      it). Problems are recorded for calls made with an API key from this version on; older calls
+      it). A grade in the wrong format is counted under Grade checks above, not under Problems.
+      Problems are recorded for calls made with an API key from this version on; older calls
       and Claude subscription calls show "not recorded".
     </p>
   {/if}

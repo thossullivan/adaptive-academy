@@ -113,6 +113,23 @@ describe('QualityScorecard', () => {
     expect(body).toContain("The grading model's price is unknown.");
   });
 
+  it('says the cost per grade leaves out grading calls with no price', () => {
+    const grading = { ...busy.grading, calls: 9, unpriced_calls: 1 };
+    const { body } = render(QualityScorecard, { props: { report: report({ ...busy, grading }) } });
+    expect(body).toContain('$0.10');
+    expect(body).toContain('Leaves out 1 grading call with no known price.');
+    // All priced: no such note.
+    const priced = render(QualityScorecard, { props: { report: report(busy) } }).body;
+    expect(priced).not.toContain('no known price');
+  });
+
+  it('says grade format problems are in the grade checks, not under Problems', () => {
+    const { body } = render(QualityScorecard, { props: { report: report(busy) } });
+    expect(body).toContain(
+      'A grade in the wrong format is counted under Grade checks above, not under Problems.'
+    );
+  });
+
   it('reports a load failure without breaking', () => {
     const { body } = render(QualityScorecard, { props: { report: null, error: 'boom' } });
     expect(body).toContain("Couldn't load the scorecard: boom");

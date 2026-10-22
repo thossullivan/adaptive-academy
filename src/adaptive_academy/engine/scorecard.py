@@ -17,11 +17,18 @@ Per feature and per model (LLMUsage rows):
   cut_offs          outcome "cut_off": stopped at max_tokens or the context window.
   invalid_outputs   outcome "invalid_output": a structured answer that was not usable (not
                     the tool call, the wrong shape, or not JSON), counted per call, so it
-                    includes answers the one corrective retry then fixed.
+                    includes answers the one corrective retry then fixed. Only the
+                    structured-output path (complete_json) records it: graders call
+                    llm.complete and are checked afterwards (engine/grade_gate.py), so a grade
+                    in the wrong format shows under grading health (rule J1 and the rest),
+                    not here, where its call reads "ok".
 
 Grading (GRADING_FEATURES' usage, Assessment rows, and grade:* AgentEvents):
   cost_per_assessment_usd  all spend recorded under a grading feature, divided by the
-                    Assessment rows written in the window. A grading feature is one whose
+                    grades written in the window (graded_assessments: one per Assessment row,
+                    but one per grader call for artifact reviews; see _graded_assessments).
+                    Unpriced grading calls are left out of the spend; the page says so when
+                    there are any. A grading feature is one whose
                     route writes Assessment rows: assess (self-explanation, calibration,
                     source quiz), decay (recall), teach, productive_failure, deliverables
                     (artifact review), roleplay and paper_probe. Their other calls (a
@@ -140,17 +147,37 @@ def _usage_rows(session: Session, column, start: datetime | None) -> list[dict]:
     return items
 
 
+ARTIFACT_REVIEW = "artifact_review"
+
+
 def _graded_assessments(session: Session, start: datetime | None) -> int:
+    """Grades written in the window: one per Assessment row, except artifact reviews, which
+    count once per grader call. engine/artifact.review_artifact makes ONE grader call and
+    writes one artifact_review row per phase concept, all in one loop, so a deliverable that
+    covers 8 concepts would otherwise read as 8 grades. Those rows share the deliverable
+    prompt, the pasted response and the grader's verdict, and are written within the same
+    second; nothing else links them (no deliverable id on Assessment). So a review is
+    (prompt, response, verdict, created_at to the second). Two reviews of the same
+    deliverable and text stay apart by their verdict (the grader's own free text) or their
+    time. A loop that straddles a second boundary would count twice: rare, and it errs
+    toward a lower cost per grade only by that one review."""
     demo_concepts = (select(Concept.id)
                      .join(Track, Concept.track_id == Track.id)
                      .join(Topic, Track.topic_id == Topic.id)
                      .where(Topic.is_demo == True))  # noqa: E712 - SQL, not Python truth
-    return int(session.exec(
-        select(func.count(Assessment.id)).where(
+    is_review = Assessment.kind == ARTIFACT_REVIEW
+    review_key = func.json_array(Assessment.prompt, Assessment.response, Assessment.verdict,
+                                 func.strftime("%Y-%m-%d %H:%M:%S", Assessment.created_at))
+    row = session.exec(
+        select(
+            _count(~is_review).label("per_row"),
+            func.count(func.distinct(case((is_review, review_key)))).label("reviews"),
+        ).where(
             _since(Assessment.created_at, start),
             Assessment.concept_id.not_in(demo_concepts),
         )
-    ).one())
+    ).one()
+    return int(row.per_row) + int(row.reviews)
 
 
 def event_counts_statement(start: datetime | None):

@@ -54,6 +54,11 @@ test('the quality scorecard shows each number from the seeded events', async ({ 
 
   // Cost per grade: $0.06 of priced teach spend over the four seeded assessments.
   await expect(page.getByTestId('quality-cost-per-grade')).toContainText('$0.015');
+  // The unpriced assess call is left out of that figure, and the card says so.
+  await expect(page.getByTestId('quality-unpriced-note')).toHaveText(
+    'Leaves out 1 grading call with no known price.'
+  );
+  await expect(card).toContainText('A grade in the wrong format is counted under Grade checks above');
   const grading = page.getByTestId('quality-grading');
   await expect(grading).toContainText('0.50');
   await expect(grading).toContainText('2 of 4 grades failed a check');

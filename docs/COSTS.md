@@ -19,7 +19,9 @@ well spent. Pick a time window, and it shows:
 
 - **Cost per grade.** Everything spent on the features that grade your answers (assess,
   recall checks, teach, productive failure, artifact review, roleplay, paper probe), divided by
-  the assessments they wrote. The demo topic is left out.
+  the grades they wrote. An artifact review counts as one grade, however many concepts it
+  covers. Calls on a model with no known price are left out, and the card says so. The demo
+  topic is left out.
 - **Grade checks.** How often a grade failed one of its named checks and the model was asked
   once more, how many grades were rejected, and which checks fail most.
 - **Solution guard.** How often a tutor reply written before your first attempt gave the answer
@@ -27,6 +29,9 @@ well spent. Pick a time window, and it shows:
   model check failed and the keyword screen decided alone.
 - **Calls by feature and by model.** Calls, cost per call, and problems: calls the model
   refused, answered with nothing, cut off, or answered in the wrong format.
+
+A grade in the wrong format shows under grade checks, not under problems: graders are checked
+after the call, so the call itself reads as fine.
 
 Problems are recorded for API-key calls only, from this version on. Older calls and Claude
 subscription calls show "not recorded". The exact definitions are in
