@@ -6,8 +6,11 @@ and thinking blocks passed back unchanged in a tool loop. Through OpenRouter's M
 endpoint any model can be configured, and OpenRouter converts the request for it, but these
 three features are only known to hold for Claude. So:
 
-- `anthropic` (Claude: `claude-…` ids on the Anthropic API, `anthropic/claude-…` slugs on
-  OpenRouter): full support.
+- `anthropic` (Claude: `claude-…` ids on the Anthropic API, `anthropic/claude-…` slugs and
+  `~anthropic/…` aliases on OpenRouter): full support.
+- `anthropic-legacy` (Claude older than 4.5, e.g. claude-3-5-sonnet, claude-sonnet-4): the
+  same, except strict tool use, which those models don't support. Their structured output is
+  sent without `strict`, as for an experimental model, with the same one corrective retry.
 - everything else: allowed, but marked experimental. Its structured-output tool is sent
   without `strict` (the schema still shapes the answer, and a prose answer still gets the one
   corrective retry), research uses OpenRouter's own `openrouter:web_search` server tool, and
@@ -17,6 +20,7 @@ Add a family here (with what a live check showed) rather than branching on model
 client. `experimental` is the one source for the "Experimental" label in the UI.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,7 +46,18 @@ FAMILIES: dict[str, ModelCapabilities] = {
         thinking_replay=True,
         experimental=False,
     ),
+    "anthropic-legacy": ModelCapabilities(
+        family="anthropic-legacy",
+        strict_tools=False,
+        anthropic_web_search=True,
+        thinking_replay=True,
+        experimental=False,
+    ),
 }
+
+# Strict tool use arrived with the Claude 4.5 generation.
+STRICT_TOOLS_SINCE = (4, 5)
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
 
 OTHER = ModelCapabilities(
     family="other",
@@ -63,16 +78,30 @@ OPENROUTER_WEB_SEARCH_TYPE = "openrouter:web_search"
 THINKING_BLOCK_TYPES = frozenset({"thinking", "redacted_thinking"})
 
 
+def claude_version(name: str) -> tuple[int, int] | None:
+    """(major, minor) from a Claude model name, e.g. claude-sonnet-4-6 → (4, 6),
+    claude-3-5-sonnet-20241022 → (3, 5), claude-sonnet-5.5 → (5, 5); None when the name
+    carries no version (an alias such as claude-sonnet-latest)."""
+    parts = _DATE_SUFFIX.sub("", name.split(":", 1)[0].replace(".", "-")).split("-")
+    for i, part in enumerate(parts):
+        if part.isdigit() and len(part) <= 2:
+            nxt = parts[i + 1] if i + 1 < len(parts) else ""
+            minor = int(nxt) if nxt.isdigit() and len(nxt) <= 2 else 0
+            return int(part), minor
+    return None
+
+
 def family_of(model: str) -> str:
-    """The family key for a model id: a direct `claude-…` id or an OpenRouter
-    `vendor/model[:variant]` slug whose vendor is a known family."""
-    name = (model or "").strip().lower()
-    if "/" in name:
-        vendor = name.split("/", 1)[0]
-        return vendor if vendor in FAMILIES else OTHER.family
-    if name.startswith("claude-"):
-        return "anthropic"
-    return OTHER.family
+    """The family key for a model id: a direct `claude-…` id, or an OpenRouter
+    `vendor/model[:variant]` slug (a leading `~` marks an OpenRouter alias)."""
+    name = (model or "").strip().lower().lstrip("~")
+    vendor, _, rest = name.rpartition("/") if "/" in name else ("", "", name)
+    if vendor not in ("", "anthropic") or not rest.startswith("claude"):
+        return OTHER.family
+    version = claude_version(rest)
+    if version is not None and version < STRICT_TOOLS_SINCE:
+        return "anthropic-legacy"
+    return "anthropic"
 
 
 def capabilities(model: str) -> ModelCapabilities:
@@ -96,6 +125,13 @@ def replayable(model: str, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]
     if capabilities(model).thinking_replay:
         return blocks
     return [b for b in blocks if b.get("type") not in THINKING_BLOCK_TYPES]
+
+
+def is_openrouter_slug(model: str) -> bool:
+    """OpenRouter model ids are `vendor/model` (optionally `~vendor/model` or with a
+    `:variant` suffix)."""
+    vendor, _, rest = (model or "").strip().lstrip("~").partition("/")
+    return bool(vendor) and bool(rest)
 
 
 def experimental_models() -> list[str]:

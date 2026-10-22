@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   EXPERIMENTAL,
   SLUGS,
+  agentSdkInContainer,
+  mistypedBackend,
   mockOpenRouterUsage,
   mockSetup,
   openrouterExperimental,
@@ -82,4 +84,25 @@ test('no experimental label on the default backend', async ({ page }) => {
   await page.waitForLoadState('networkidle');
   await expect(page.getByTestId('experimental-label')).toHaveCount(0);
   await expect(page.getByTestId('setup-experimental')).toHaveCount(0);
+});
+
+test('agent_sdk in the container says what to change and blocks research', async ({ page }) => {
+  await mockSetup(page, agentSdkInContainer);
+  await page.goto('/topics/new');
+  const notice = page.getByTestId('setup-notice');
+  await expect(notice.getByRole('heading', { name: "The Claude subscription backend can't run here" })).toBeVisible();
+  await expect(notice).toContainText('this container');
+  await expect(notice).not.toContainText('cp .env.example .env');
+  await expect(page.getByRole('button', { name: /Research this topic/ })).toBeDisabled();
+  if (isPhone()) await noSidewaysScroll(page);
+});
+
+test('a mistyped AA_LLM_BACKEND gets its own setup card', async ({ page }) => {
+  await mockSetup(page, mistypedBackend);
+  await page.goto('/topics/new');
+  const card = page.getByTestId('setup-check');
+  await expect(card).toBeVisible();
+  await expect(card.getByTestId('setup-warning')).toContainText("'openroutr'");
+  await expect(page.getByTestId('setup-notice')).toHaveCount(0);
+  if (isPhone()) await noSidewaysScroll(page);
 });

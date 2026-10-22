@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -45,12 +46,19 @@ from adaptive_academy.api.routes_retention import (
 )
 from adaptive_academy.api.routes_roleplay import router as roleplay_router
 from adaptive_academy.api.routes_scout import router as scout_router
-from adaptive_academy.db import create_db_and_tables
-from adaptive_academy.llm.backends import use_agent_sdk
+from adaptive_academy.db import create_db_and_tables, db_revision_problem
+from adaptive_academy.llm.backends import (
+    AGENT_SDK_IN_CONTAINER_DETAIL,
+    agent_sdk_unavailable,
+    backend_setting_problem,
+    use_agent_sdk,
+)
 from adaptive_academy.llm.errors import describe_llm_error
 from adaptive_academy.llm.keys import MissingAPIKeyError
 from adaptive_academy.llm.types import AgentSDKError, StructuredOutputError
 from adaptive_academy.llm.usage import BudgetExceededError, feature_from_route, set_feature
+
+logger = logging.getLogger(__name__)
 
 # Every failure a model call can raise, mapped by llm/errors.py to {detail, category}:
 # upstream API errors, a missing key (503), the daily limit (429), Agent SDK failures,
@@ -83,6 +91,21 @@ def drop_api_key_if_agent_sdk() -> None:
     startup hook (not import time) so merely importing this module never mutates the env."""
     if use_agent_sdk():
         os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def setup_problems() -> list[str]:
+    """Configuration that will make model calls (or their accounting) fail, in plain words:
+    a mistyped AA_LLM_BACKEND, agent_sdk inside the container, a database behind the code."""
+    problems = [backend_setting_problem(), db_revision_problem()]
+    if agent_sdk_unavailable():
+        problems.append(AGENT_SDK_IN_CONTAINER_DETAIL)
+    return [p for p in problems if p]
+
+
+def log_setup_problems() -> None:
+    """Startup: say each problem once in the API log, where `just api` / `just logs` show it."""
+    for problem in setup_problems():
+        logger.warning("setup: %s", problem)
 
 
 def _mount_spa(app: FastAPI) -> None:
@@ -126,6 +149,7 @@ def create_app() -> FastAPI:
     def _startup() -> None:
         drop_api_key_if_agent_sdk()
         create_db_and_tables()
+        log_setup_problems()
 
     for exc_class in _LLM_FAILURES:
         app.add_exception_handler(exc_class, llm_failure_response)

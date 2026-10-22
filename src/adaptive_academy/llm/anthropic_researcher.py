@@ -91,7 +91,8 @@ class AnthropicResearcherClient:
         texts: list[str] = []
         for _ in range(1 + MAX_PAUSE_CONTINUATIONS):
             messages = [user, {"role": "assistant", "content": paused}] if paused else [user]
-            check_budget(self._model, reports_cost=self._backend.reports_cost)
+            check_budget(self._model, reports_cost=self._backend.reports_cost,
+                         backend=self._backend.name)
             resp = self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,

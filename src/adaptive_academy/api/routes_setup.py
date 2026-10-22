@@ -5,9 +5,17 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from adaptive_academy.llm.backends import BACKEND_AGENT_SDK, api_backend, current_backend_name
-from adaptive_academy.llm.keys import key_configured, missing_key_detail
-from adaptive_academy.llm.model_catalog import experimental_models
+from adaptive_academy.llm.backends import (
+    AGENT_SDK_IN_CONTAINER_DETAIL,
+    BACKEND_AGENT_SDK,
+    BACKEND_OPENROUTER,
+    agent_sdk_unavailable,
+    api_backend,
+    backend_setting_problem,
+    current_backend_name,
+)
+from adaptive_academy.llm.keys import key_problem, missing_key_detail
+from adaptive_academy.llm.model_catalog import experimental_models, is_openrouter_slug
 from adaptive_academy.llm.registry import MODEL_ENV_VARS, resolved_models
 from adaptive_academy.llm.usage import budget_warnings
 
@@ -24,15 +32,21 @@ class SetupOut(BaseModel):
     # The environment variable whose key is missing (ANTHROPIC_API_KEY / OPENROUTER_API_KEY),
     # or None when the backend has what it needs.
     missing_key: str | None = None
+    # When that variable is set but can't be used (e.g. it holds the other service's key), the
+    # reason in plain words; None when it is simply missing.
+    key_hint: str | None = None
     # Resolved model id per role (AA_MODEL_REASONING / AA_MODEL_COPY, else the default).
     models: dict[str, str]
     # Configured models that are not Anthropic Claude models (llm/model_catalog.py): allowed
     # through OpenRouter, but not verified with this app's tools.
     experimental_models: list[str] = []
     experimental_warning: str | None = None
-    # Configuration problems that don't stop the app but change what it will do (e.g. a
-    # daily limit that can't cap an unpriced model, so that model's calls are refused).
+    # Daily-limit problems that don't stop the app but change what it will do (e.g. a limit
+    # that can't cap an unpriced model, so that model's calls are refused).
     warnings: list[str] = []
+    # Other configuration that is probably a mistake: a mistyped AA_LLM_BACKEND, a model id
+    # that isn't an OpenRouter id on the OpenRouter backend.
+    setup_warnings: list[str] = []
 
 
 def _experimental_warning(models: dict[str, str], flagged: list[str]) -> str | None:
@@ -47,10 +61,27 @@ def _experimental_warning(models: dict[str, str], flagged: list[str]) -> str | N
     )
 
 
+def _setup_warnings(backend_name: str, models: dict[str, str]) -> list[str]:
+    out = [w for w in [backend_setting_problem()] if w]
+    if backend_name == BACKEND_OPENROUTER:
+        for role, model in models.items():
+            if not is_openrouter_slug(model):
+                out.append(
+                    f"{MODEL_ENV_VARS[role]} is '{model}', which is not an OpenRouter model id. "
+                    "OpenRouter ids look like vendor/model, for example "
+                    "anthropic/claude-sonnet-5.5. Change it in .env and restart the API.")
+    return out
+
+
 @router.get("", response_model=SetupOut)
 def get_setup() -> SetupOut:
     models = resolved_models()
     if current_backend_name() == BACKEND_AGENT_SDK:
+        if agent_sdk_unavailable():
+            # The container has no Claude Code: say so, and don't quietly use an API key.
+            return SetupOut(llm_backend="agent_sdk", provider="Claude subscription",
+                            llm_ready=False, message=AGENT_SDK_IN_CONTAINER_DETAIL,
+                            models=models)
         return SetupOut(
             llm_backend="agent_sdk",
             provider="Claude subscription",
@@ -71,12 +102,15 @@ def get_setup() -> SetupOut:
         "experimental_warning": _experimental_warning(models, flagged),
         # The daily limit only governs API-key calls, so its warnings belong here.
         "warnings": budget_warnings(),
+        "setup_warnings": _setup_warnings(backend.name, models),
     }
-    if key_configured(backend):
+    problem = key_problem(backend)
+    if problem is None:
         message = f"{backend.provider} API key configured."
         if backend.base_url:
             message += (f" Requests go through {backend.provider} to the model's provider. "
-                        "Only providers that don't store prompts are used.")
+                        "Providers that may train on your prompts are left out.")
         return SetupOut(llm_ready=True, message=message, **common)
-    return SetupOut(llm_ready=False, message=missing_key_detail(backend.key_env),
-                    missing_key=backend.key_env, **common)
+    hint = None if problem == missing_key_detail(backend.key_env) else problem
+    return SetupOut(llm_ready=False, message=problem, missing_key=backend.key_env,
+                    key_hint=hint, **common)

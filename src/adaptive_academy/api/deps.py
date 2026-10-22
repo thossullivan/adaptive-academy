@@ -11,6 +11,7 @@ from adaptive_academy.llm.anthropic_anchor import AnthropicAnchorClient
 from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
 from adaptive_academy.llm.anthropic_researcher import AnthropicResearcherClient
 from adaptive_academy.llm.backends import use_agent_sdk as _use_agent_sdk
+from adaptive_academy.llm.keys import require_usable_backend
 from adaptive_academy.llm.embedder_types import Embedder
 from adaptive_academy.llm.researcher_types import ResearcherClient
 from adaptive_academy.llm.retriever_types import Retriever
@@ -31,6 +32,10 @@ def use_agent_sdk() -> bool:
     Default is the API-key client, so nothing changes unless you set this. The other choice,
     AA_LLM_BACKEND=openrouter, keeps the API-key clients below and points them at OpenRouter
     (llm/backends.py), so it needs no branch here.
+
+    Inside the container agent_sdk can't run (no Claude Code there): it stays selected, so
+    nothing is quietly billed to an API key, and every LLM dependency below raises a legible
+    503 saying what to change (require_usable_backend).
     """
     return _use_agent_sdk()
 
@@ -42,6 +47,7 @@ def get_session() -> Iterator[Session]:
 
 def get_llm() -> LLMClient:
     if use_agent_sdk():
+        require_usable_backend()
         from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
         return AgentSDKLLMClient(role="reasoning")
     return AnthropicLLMClient(role="reasoning")
@@ -51,6 +57,7 @@ def get_guard_llm() -> LLMClient:
     """The tutor's solution guard (engine/solution_guard.py): a cheap structured check on
     the copy role (Haiku by default), on whichever backend the tutor itself uses."""
     if use_agent_sdk():
+        require_usable_backend()
         from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
         return AgentSDKLLMClient(role="copy")
     return AnthropicLLMClient(role="copy", max_tokens=GUARD_MAX_TOKENS)
@@ -59,6 +66,7 @@ def get_guard_llm() -> LLMClient:
 def get_researcher() -> ResearcherClient:
     # In agent_sdk mode, fan out via the SDK's WebSearch tool on the subscription.
     if use_agent_sdk():
+        require_usable_backend()
         from adaptive_academy.llm.agent_sdk_researcher import AgentSDKResearcherClient
         return AgentSDKResearcherClient(role="reasoning")
     return AnthropicResearcherClient(role="reasoning")
@@ -68,6 +76,7 @@ def get_anchor_client() -> AnchorClient:
     # Anchor generation is a no-tools structured call, so it can run on the subscription
     # by injecting the Agent SDK client into the (transport-agnostic) anchor client.
     if use_agent_sdk():
+        require_usable_backend()
         from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
         return AnthropicAnchorClient(llm=AgentSDKLLMClient(role="reasoning"))
     return AnthropicAnchorClient(role="reasoning")

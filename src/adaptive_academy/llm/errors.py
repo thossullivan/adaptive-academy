@@ -16,8 +16,9 @@ types arrive, and its errors map into the same categories: 402 (insufficient cre
 `payment_required` / `billing_error`) is out_of_credits, 429 is rate_limited, an unknown model
 slug is model_unavailable, and so is a 503 "no available model provider that meets your
 routing requirements" (OpenRouter docs, api_reference/errors-and-debugging): with the privacy
-preference in llm/backends.py, that means no provider for the model promises not to store
-prompts. The plain messages name the service in use and its key.
+preference in llm/backends.py, that means every provider for the model may train on prompts.
+The OpenRouter-only wording matches apply only while that backend is on. The plain messages
+name the service in use and its key.
 """
 
 import json
@@ -136,12 +137,13 @@ def model_unavailable_detail(exc: anthropic.APIStatusError, backend: Backend | N
     upstream = _upstream_message(exc)
     model = _model_in(upstream) or _model_in(text)
     setting = _setting_for(model)
-    if any(s in upstream.lower() for s in _NO_PROVIDER_TEXT):
-        return ("No provider on OpenRouter can serve this model while promising not to store "
-                "your prompts, which this app requires. "
+    openrouter = backend.name == BACKEND_OPENROUTER
+    if openrouter and any(s in upstream.lower() for s in _NO_PROVIDER_TEXT):
+        return ("No provider on OpenRouter can serve this model under this app's privacy "
+                "setting, which leaves out providers that may train on your prompts. "
                 f"Set {setting} in .env to another model and restart the API.")
     subject = f"The model '{model}'" if model else "The configured model"
-    if backend.name == BACKEND_OPENROUTER:
+    if openrouter:
         return (f"{subject} is not available on OpenRouter. Set {setting} in .env to an "
                 "OpenRouter model id (for example anthropic/claude-sonnet-5.5) and restart "
                 "the API.")
@@ -182,6 +184,9 @@ def _status_category(exc: anthropic.APIStatusError) -> str:
     status = exc.status_code
     kind = _error_type(exc)
     text = _upstream_message(exc).lower()
+    # OpenRouter's wordings for an unknown slug and an unmet routing (privacy) requirement.
+    openrouter_model_text = api_backend().name == BACKEND_OPENROUTER and any(
+        s in text for s in _UNKNOWN_MODEL_TEXT + _NO_PROVIDER_TEXT)
     if status == 401:
         return "auth"
     if (status == 402 or kind in ("billing_error", "payment_required")
@@ -189,7 +194,7 @@ def _status_category(exc: anthropic.APIStatusError) -> str:
         return "out_of_credits"
     if status == 403:
         return "permission"
-    if status == 404 or any(s in text for s in _UNKNOWN_MODEL_TEXT + _NO_PROVIDER_TEXT):
+    if status == 404 or openrouter_model_text:
         return "model_unavailable"
     if status == 429:
         return "rate_limited"

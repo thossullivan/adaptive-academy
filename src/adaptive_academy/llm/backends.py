@@ -13,11 +13,13 @@ picks up .env and tests can monkeypatch it. Differences between models (not serv
 llm/model_catalog.py.
 """
 
+import logging
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlsplit
 
 from adaptive_academy.settings import DEFAULT_MODEL_COPY, DEFAULT_MODEL_REASONING
 
@@ -30,13 +32,19 @@ BACKENDS = (BACKEND_ANTHROPIC, BACKEND_AGENT_SDK, BACKEND_OPENROUTER)
 # Agent SDK calls are billed to the Claude subscription.
 KEY_BILLED_BACKENDS = (BACKEND_ANTHROPIC, BACKEND_OPENROUTER)
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+logger = logging.getLogger(__name__)
 
-# OpenRouter provider routing, sent on every request (as `provider` in the body). With
-# `data_collection: "deny"`, OpenRouter uses "only providers which do not collect user data"
-# (it is "allow" by default, which includes providers that store prompts and may train on
-# them). Field and values confirmed in OpenRouter's Messages API reference (ProviderPreferences)
-# and its provider-selection guide, read 2026-10-22.
+ANTHROPIC_API_URL = "https://api.anthropic.com"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api"
+OPENROUTER_HOST = "openrouter.ai"
+
+# OpenRouter provider routing, sent on every request (as `provider` in the body). The default,
+# `data_collection: "allow"`, includes "providers which store user data non-transiently and may
+# train on it"; "deny" excludes them. It does NOT mean no retention: a provider may still keep
+# prompts for a while (Anthropic keeps them for trust and safety review). Zero data retention
+# is a separate, stricter preference, `zdr: true`, which may leave fewer (or no) providers for
+# a model; it is not sent. Fields and values from OpenRouter's Messages API reference
+# (ProviderPreferences) and its provider-selection guide, read 2026-10-22.
 OPENROUTER_PROVIDER_PREFERENCES: Mapping[str, Any] = MappingProxyType(
     {"data_collection": "deny"})
 
@@ -48,7 +56,8 @@ class Backend:
     provider: str
     # The environment variable holding the key.
     key_env: str
-    # None: the SDK's default (api.anthropic.com, or ANTHROPIC_BASE_URL when set).
+    # None: the Anthropic endpoint, `anthropic_base_url()` (api.anthropic.com, or a proxy set
+    # in ANTHROPIC_BASE_URL that isn't OpenRouter).
     base_url: str | None
     # True: send the key as `Authorization: Bearer` (the SDK's auth_token). False: x-api-key.
     bearer_auth: bool
@@ -62,6 +71,8 @@ class Backend:
     billing_page: str
     # Placeholder values that are not a key (the .env.example value and documented examples).
     placeholder_keys: frozenset[str] = field(default_factory=frozenset)
+    # Key prefixes of the OTHER service: a key starting with one is in the wrong variable.
+    foreign_key_prefixes: tuple[tuple[str, str], ...] = ()  # (prefix, that service's name)
 
 
 ANTHROPIC = Backend(
@@ -76,6 +87,7 @@ ANTHROPIC = Backend(
     reports_cost=False,
     billing_page="the Anthropic Console",
     placeholder_keys=frozenset({"sk-ant-xxxxx", "sk-ant-...", "sk-ant-…"}),
+    foreign_key_prefixes=(("sk-or-", "OpenRouter"),),
 )
 
 OPENROUTER = Backend(
@@ -91,18 +103,70 @@ OPENROUTER = Backend(
     reports_cost=True,
     billing_page="your OpenRouter account (openrouter.ai/settings/credits)",
     placeholder_keys=frozenset({"sk-or-xxxxx", "sk-or-...", "sk-or-…", "sk-or-v1-xxxxx"}),
+    foreign_key_prefixes=(("sk-ant-", "Anthropic"),),
 )
 
 
 def current_backend_name() -> str:
     """The configured backend: AA_LLM_BACKEND, case and spaces ignored; anything else is
-    the default (anthropic)."""
+    the default (anthropic), and `backend_setting_problem()` says so."""
     raw = os.getenv("AA_LLM_BACKEND", "").strip().lower()
     return raw if raw in BACKENDS else BACKEND_ANTHROPIC
 
 
+def backend_setting_problem() -> str | None:
+    """A plain warning when AA_LLM_BACKEND holds a value that isn't a backend (it then falls
+    back to the Anthropic API), else None."""
+    raw = os.getenv("AA_LLM_BACKEND", "").strip()
+    if not raw or raw.lower() in BACKENDS:
+        return None
+    return (f"AA_LLM_BACKEND is set to '{raw[:40]}', which is not a backend this app knows, so "
+            "it is using the Anthropic API. Use anthropic, openrouter, or agent_sdk (or leave "
+            "it unset), then restart the API.")
+
+
 def use_agent_sdk() -> bool:
     return current_backend_name() == BACKEND_AGENT_SDK
+
+
+def in_container() -> bool:
+    """True inside the Docker image (its Dockerfile sets AA_IN_CONTAINER=1)."""
+    return os.getenv("AA_IN_CONTAINER", "").strip() == "1"
+
+
+AGENT_SDK_IN_CONTAINER_DETAIL = (
+    "AA_LLM_BACKEND=agent_sdk needs Claude Code signed in on the host, and this container "
+    "doesn't have it, so no model calls can run. Unset AA_LLM_BACKEND to use "
+    "ANTHROPIC_API_KEY, or set it to openrouter with OPENROUTER_API_KEY, then restart the "
+    "container (`just up`). Or run the app on the host with `just api`."
+)
+
+
+def agent_sdk_unavailable() -> bool:
+    """agent_sdk is selected but can't run here (the container has no Claude Code). Calls are
+    refused with AGENT_SDK_IN_CONTAINER_DETAIL rather than quietly billed to an API key."""
+    return use_agent_sdk() and in_container()
+
+
+def _is_openrouter_url(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    return host == OPENROUTER_HOST or host.endswith("." + OPENROUTER_HOST)
+
+
+def anthropic_base_url() -> str:
+    """The Anthropic backend's endpoint: ANTHROPIC_BASE_URL when it points at a proxy or
+    gateway, else api.anthropic.com. Never openrouter.ai: OpenRouter's own Claude Code setup
+    exports ANTHROPIC_BASE_URL=https://openrouter.ai/api, and following it would send the
+    Anthropic key there (use AA_LLM_BACKEND=openrouter for OpenRouter)."""
+    url = os.getenv("ANTHROPIC_BASE_URL", "").strip()
+    if not url:
+        return ANTHROPIC_API_URL
+    if _is_openrouter_url(url):
+        logger.warning("ANTHROPIC_BASE_URL points at OpenRouter; the Anthropic backend ignores "
+                       "it and calls %s. Set AA_LLM_BACKEND=openrouter to use OpenRouter.",
+                       ANTHROPIC_API_URL)
+        return ANTHROPIC_API_URL
+    return url
 
 
 def api_backend() -> Backend:

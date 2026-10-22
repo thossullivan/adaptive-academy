@@ -58,6 +58,8 @@ PROVIDER_ENV_VARS = (
     "CLAUDE_CODE_OAUTH_TOKEN",  # Agent SDK subscription token for the `claude` CLI
     "OPENROUTER_API_KEY",  # llm/keys.py: the OpenRouter backend's key
     "AA_LLM_BACKEND",  # llm/backends.py: "agent_sdk" or "openrouter" reroutes every call
+    "AA_IN_CONTAINER",  # llm/backends.py: set by the Dockerfile; agent_sdk is refused there
+    "ANTHROPIC_CUSTOM_HEADERS",  # Anthropic SDK: extra headers merged into every request
 )
 
 # Loopback is allowed, so a proxy listening on it would forward traffic out. Env-configured

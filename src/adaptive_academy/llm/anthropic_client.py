@@ -5,7 +5,12 @@ import httpx
 import pydantic
 from anthropic import Anthropic, omit
 
-from adaptive_academy.llm.backends import Backend, api_backend, request_extra_body
+from adaptive_academy.llm.backends import (
+    Backend,
+    anthropic_base_url,
+    api_backend,
+    request_extra_body,
+)
 from adaptive_academy.llm.keys import require_api_key
 from adaptive_academy.llm.model_catalog import capabilities, replayable
 from adaptive_academy.llm.registry import get_model
@@ -47,9 +52,10 @@ _CREDENTIAL_HEADERS = ("x-api-key", "authorization")
 def sdk_client_kwargs(backend: Backend) -> dict[str, Any]:
     """Credential and endpoint arguments for `Anthropic(...)` on this backend.
 
-    Anthropic: `api_key=` (sent as x-api-key) and the SDK's default endpoint. OpenRouter: its
-    base URL and the key as `auth_token=` (sent as `Authorization: Bearer`). An Anthropic
-    credential must never reach OpenRouter. Passing any credential explicitly stops the SDK
+    Anthropic: `api_key=` (sent as x-api-key) and an explicit endpoint, api.anthropic.com or a
+    non-OpenRouter proxy from ANTHROPIC_BASE_URL. OpenRouter: its base URL and the key as
+    `auth_token=` (sent as `Authorization: Bearer`). An Anthropic credential must never reach
+    OpenRouter, from either backend. Passing any credential explicitly stops the SDK
     reading ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN (and an explicit base_url beats
     ANTHROPIC_BASE_URL); the header overrides below also neutralise an x-api-key or
     Authorization that ANTHROPIC_CUSTOM_HEADERS would merge in, in whatever spelling.
@@ -57,7 +63,9 @@ def sdk_client_kwargs(backend: Backend) -> dict[str, Any]:
     """
     key = require_api_key(backend)
     if not backend.bearer_auth:
-        return {"api_key": key}
+        # Always an explicit endpoint: api.anthropic.com, or a proxy in ANTHROPIC_BASE_URL,
+        # never openrouter.ai (see anthropic_base_url).
+        return {"api_key": key, "base_url": anthropic_base_url()}
     headers: dict[str, Any] = {"X-Api-Key": omit}
     for line in os.environ.get("ANTHROPIC_CUSTOM_HEADERS", "").split("\n"):
         name = line.split(":", 1)[0].strip()
@@ -132,7 +140,8 @@ class AnthropicLLMClient:
                      operation=operation, usage=getattr(resp, "usage", None))
 
     def _check_budget(self) -> None:
-        check_budget(self._model, reports_cost=self._backend.reports_cost)
+        check_budget(self._model, reports_cost=self._backend.reports_cost,
+                     backend=self._backend.name)
 
     def complete(
         self,

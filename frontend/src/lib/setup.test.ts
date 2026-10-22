@@ -8,6 +8,7 @@ import {
   llmBlocked,
   missingKey,
   providerName,
+  setupWarnings,
   showSetupNotice
 } from './setup';
 import type { SetupStatus } from './types';
@@ -58,9 +59,13 @@ describe('experimental models', () => {
     expect(isExperimental('anthropic/claude-haiku-5.5', routerExperimental)).toBe(false);
   });
 
-  it('shows the setup card when blocked or when a model is experimental', () => {
+  it('shows the setup card when blocked, experimental, or misconfigured', () => {
     expect(showSetupNotice(routerMissing)).toBe(true);
     expect(showSetupNotice(routerExperimental)).toBe(true);
+    const mistyped = { ...ready, setup_warnings: ["AA_LLM_BACKEND is set to 'openroutr'"] };
+    expect(setupWarnings(mistyped)).toHaveLength(1);
+    expect(showSetupNotice(mistyped)).toBe(true);
+    expect(setupWarnings(ready)).toEqual([]);
     expect(showSetupNotice(router)).toBe(false);
     expect(showSetupNotice(ready)).toBe(false);
     expect(showSetupNotice(null)).toBe(false);

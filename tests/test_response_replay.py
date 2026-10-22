@@ -419,7 +419,8 @@ def test_openrouter_reply_records_the_reported_cost(session, openrouter_key):
     assert (row.input_tokens, row.output_tokens) == (412, 236)
     assert row.cache_creation_input_tokens == 1500
     assert row.reported_cost_usd == pytest.approx(fixture["usage"]["cost"])
-    assert row.cost_usd is None  # the slug has no list price here; the reported cost stands
+    # The slug's Anthropic list price is kept as the fallback; the reported cost wins.
+    assert row.cost_usd == pytest.approx(0.006934)
     today = usage_summary(session)["totals"]["today"]
     assert today["cost_usd"] == pytest.approx(0.0069354)
     assert today["api_cost_usd"] == pytest.approx(0.0069354)

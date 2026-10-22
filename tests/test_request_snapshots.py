@@ -124,7 +124,7 @@ def _endpoint(client_kw) -> dict:
         auth = "none"
     headers = client_kw.get("default_headers") or {}
     return {
-        "base_url": client_kw.get("base_url"),  # None: the SDK default, api.anthropic.com
+        "base_url": client_kw.get("base_url"),
         "auth": auth,
         "drops_x_api_key": any(k.lower() == "x-api-key" for k in headers),
     }
@@ -446,7 +446,7 @@ def test_openrouter_snapshots_differ_only_where_the_backend_does():
         direct, routed = stored[surface], stored[_key("openrouter", surface)]
         assert len(direct) == len(routed)
         for a, b in zip(direct, routed):
-            assert a["endpoint"] == {"base_url": None, "auth": "x-api-key",
+            assert a["endpoint"] == {"base_url": "https://api.anthropic.com", "auth": "x-api-key",
                                      "drops_x_api_key": False}
             assert b["endpoint"] == {"base_url": "https://openrouter.ai/api",
                                      "auth": "authorization-bearer", "drops_x_api_key": True}

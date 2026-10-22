@@ -61,6 +61,7 @@ from adaptive_academy.llm.anthropic_researcher import (
     MAX_PAUSE_CONTINUATIONS,
     AnthropicResearcherClient,
 )
+from adaptive_academy.llm.backends import BACKEND_ANTHROPIC, current_backend_name
 from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.researcher_types import SearchBrief
 from adaptive_academy.llm.types import StructuredOutputError
@@ -357,6 +358,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", help="model id (default: the reasoning role's model)")
     parser.add_argument("--out", type=Path, default=FIXTURES, help="fixture directory")
     args = parser.parse_args(argv)
+
+    # The fixtures are Anthropic API responses: the clients must not be pointed elsewhere.
+    if current_backend_name() != BACKEND_ANTHROPIC:
+        print("This records Anthropic API responses, so it runs only on the Anthropic backend. "
+              "Unset AA_LLM_BACKEND (it is set to "
+              f"'{current_backend_name()}') and try again. Nothing was sent.", file=sys.stderr)
+        return 2
 
     if args.model:
         registry._settings.settings.reasoning_model = args.model

@@ -71,6 +71,49 @@ describe('SetupNotice', () => {
     expect(body.match(/data-testid="experimental-label"/g)).toHaveLength(1);
   });
 
+  it('explains a key in the wrong variable', () => {
+    const { body } = render(SetupNotice, {
+      props: {
+        status: {
+          ...routerBase,
+          llm_ready: false,
+          missing_key: 'OPENROUTER_API_KEY',
+          key_hint: 'OPENROUTER_API_KEY holds an Anthropic key (it starts with sk-ant-).'
+        }
+      }
+    });
+    expect(body).toContain('data-testid="key-hint"');
+    expect(body).toContain('holds an Anthropic key');
+  });
+
+  it('says agent_sdk cannot run in the container, without key steps', () => {
+    const message = 'AA_LLM_BACKEND=agent_sdk needs Claude Code signed in on the host, and this container doesn’t have it.';
+    const { body } = render(SetupNotice, {
+      props: { status: { llm_backend: 'agent_sdk', provider: 'Claude subscription', llm_ready: false, message } }
+    });
+    expect(body).toContain('data-testid="setup-notice"');
+    expect(body).toContain('The Claude subscription backend can');
+    expect(body).toContain('this container');
+    expect(body).not.toContain('cp .env.example .env');
+  });
+
+  it('shows setup warnings in their own card when calls can run', () => {
+    const warning = "AA_LLM_BACKEND is set to 'openroutr', which is not a backend this app knows.";
+    const { body } = render(SetupNotice, {
+      props: { status: { llm_backend: 'anthropic', llm_ready: true, message: 'ok', setup_warnings: [warning] } }
+    });
+    expect(body).toContain('data-testid="setup-check"');
+    expect(body).toContain('data-testid="setup-warning"');
+    expect(body).toContain('Check your setup');
+    expect(body).not.toContain('data-testid="setup-notice"');
+  });
+
+  it('gives the experimental label a screen-reader explanation', () => {
+    const { body } = render(SetupNotice, { props: { status: experimental } });
+    expect(body).toContain('class="sr-only"');
+    expect(body).toContain('Not a Claude model');
+  });
+
   it('lists experimental models inside the missing-key card too', () => {
     const { body } = render(SetupNotice, {
       props: { status: { ...experimental, llm_ready: false, missing_key: 'OPENROUTER_API_KEY' } }

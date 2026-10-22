@@ -33,6 +33,31 @@ export const openrouterExperimental = {
   experimental_warning: WARNING
 };
 
+export const agentSdkInContainer = {
+  llm_backend: 'agent_sdk',
+  provider: 'Claude subscription',
+  llm_ready: false,
+  message:
+    "AA_LLM_BACKEND=agent_sdk needs Claude Code signed in on the host, and this container doesn't have it, so no " +
+    'model calls can run. Unset AA_LLM_BACKEND to use ANTHROPIC_API_KEY, or set it to openrouter with ' +
+    'OPENROUTER_API_KEY, then restart the container (`just up`). Or run the app on the host with `just api`.',
+  models: { reasoning: 'claude-sonnet-5-5', copy: 'claude-haiku-5-5' },
+  warnings: [] as string[]
+};
+
+export const mistypedBackend = {
+  llm_backend: 'anthropic',
+  provider: 'Anthropic',
+  llm_ready: true,
+  message: 'Anthropic API key configured.',
+  models: { reasoning: 'claude-sonnet-5-5', copy: 'claude-haiku-5-5' },
+  warnings: [] as string[],
+  setup_warnings: [
+    "AA_LLM_BACKEND is set to 'openroutr', which is not a backend this app knows, so it is using the " +
+      'Anthropic API. Use anthropic, openrouter, or agent_sdk (or leave it unset), then restart the API.'
+  ]
+};
+
 export async function mockSetup(page: Page, json: object) {
   await page.route('**/api/setup', (route) => route.fulfill({ json }));
 }

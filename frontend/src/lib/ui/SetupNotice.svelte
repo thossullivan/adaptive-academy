@@ -6,16 +6,18 @@
     keyPlaceholder,
     llmBlocked,
     missingKey,
-    providerName
+    providerName,
+    setupWarnings,
+    showSetupNotice
   } from '$lib/setup';
   import { cn } from '$lib/utils';
   import Badge from './Badge.svelte';
   import Card from './Card.svelte';
   import ExperimentalTag from './ExperimentalTag.svelte';
 
-  // Presentational: the page owns loading (see $lib/setup.svelte.ts). Renders the missing-key
+  // Presentational: the page owns loading (see $lib/setup.svelte.ts). Renders the setup-needed
   // card when the API positively reports that it cannot make LLM calls, a smaller card when a
-  // configured model is experimental, and nothing otherwise.
+  // configured model is experimental or the configuration looks mistaken, and nothing otherwise.
   let { status, class: klass = '' }: { status: SetupStatus | null; class?: string } = $props();
 
   // overflow-wrap:anywhere lets a long token (the env var names) break rather than overflow a
@@ -30,9 +32,12 @@
 
   const blocked = $derived(llmBlocked(status));
   const openrouter = $derived(status?.llm_backend === 'openrouter');
+  // agent_sdk only reports "not ready" when it can't run here (inside the container).
+  const subscription = $derived(status?.llm_backend === 'agent_sdk');
   const provider = $derived(providerName(status));
   const keyVar = $derived(missingKey(status));
   const flagged = $derived(experimentalModels(status));
+  const configWarnings = $derived(setupWarnings(status));
   const models = $derived(Object.entries(status?.models ?? {}));
 </script>
 
@@ -48,62 +53,93 @@
   </ul>
 {/snippet}
 
-{#if blocked}
-  <Card pad data-testid="setup-notice" role="status" class={cn(warnCard, klass)}>
-    <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <Badge tone="warn" dot>Setup needed</Badge>
-      <span class="eyebrow min-w-0 [overflow-wrap:anywhere]">LLM backend · {status?.llm_backend ?? 'anthropic'}</span>
-    </div>
-    <h2 class="mt-3 text-lg text-fg">Add your {provider} API key to run the agents</h2>
-    <p class="mt-1.5 max-w-prose text-sm leading-relaxed text-muted">
-      Research, curricula, tutoring and grading all call the model, and this API has no
-      <code class={code}>{keyVar}</code> configured. Anything already recorded is still here to browse.
+{#snippet warningList()}
+  {#each configWarnings as warning (warning)}
+    <p class="mt-3 max-w-prose text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]" data-testid="setup-warning">
+      {warning}
     </p>
+  {/each}
+{/snippet}
 
-    <ol class="mt-4 flex flex-col gap-2.5 text-sm text-fg-dim">
-      <li class="flex gap-3">
-        <span class="nums mt-0.5 w-4 shrink-0 font-mono text-xs text-faint">1</span>
-        <span class="min-w-0">In the repo root: <code class={code}>cp .env.example .env</code></span>
-      </li>
-      <li class="flex gap-3">
-        <span class="nums mt-0.5 w-4 shrink-0 font-mono text-xs text-faint">2</span>
-        <span class="min-w-0">Set <code class={code}>{keyVar}={keyPlaceholder(keyVar)}</code> in <code class={cmd}>.env</code></span>
-      </li>
-      <li class="flex gap-3">
-        <span class="nums mt-0.5 w-4 shrink-0 font-mono text-xs text-faint">3</span>
-        <span class="min-w-0">
-          Restart the API: <code class={cmd}>just api</code>, or <code class={cmd}>just up</code> for the container
-        </span>
-      </li>
-    </ol>
-
-    {#if flagged.length}
-      {@render modelList()}
-    {/if}
-
-    <p class="mt-4 border-t border-border pt-3 text-xs leading-relaxed text-muted">
-      {#if openrouter}
-        Using OpenRouter (<code class={code}>AA_LLM_BACKEND=openrouter</code>). Each request passes through OpenRouter as
-        well as the model's provider, and only providers that don't store prompts are used. To call Anthropic directly,
-        unset it and set <code class={code}>ANTHROPIC_API_KEY</code> instead.
+{#if showSetupNotice(status)}
+  {#if blocked}
+    <Card pad data-testid="setup-notice" role="status" class={cn(warnCard, klass)}>
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <Badge tone="warn" dot>Setup needed</Badge>
+        <span class="eyebrow min-w-0 [overflow-wrap:anywhere]">LLM backend · {status?.llm_backend ?? 'anthropic'}</span>
+      </div>
+      {#if subscription}
+        <h2 class="mt-3 text-lg text-fg">The Claude subscription backend can't run here</h2>
+        <p class="mt-1.5 max-w-prose text-sm leading-relaxed text-muted [overflow-wrap:anywhere]">{status?.message}</p>
       {:else}
-        Prefer your Claude subscription? Set <code class={code}>AA_LLM_BACKEND=agent_sdk</code> in
-        <code class={cmd}>.env</code> instead — host-only, run with <code class={cmd}>just api</code> rather than the container.
-        Have an OpenRouter key? Set <code class={code}>AA_LLM_BACKEND=openrouter</code> and
-        <code class={code}>OPENROUTER_API_KEY</code>.
+        <h2 class="mt-3 text-lg text-fg">Add your {provider} API key to run the agents</h2>
+        <p class="mt-1.5 max-w-prose text-sm leading-relaxed text-muted">
+          Research, curricula, tutoring and grading all call the model, and this API has no usable
+          <code class={code}>{keyVar}</code> configured. Anything already recorded is still here to browse.
+        </p>
+        {#if status?.key_hint}
+          <p class="mt-2 max-w-prose text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]" data-testid="key-hint">
+            {status.key_hint}
+          </p>
+        {/if}
+
+        <ol class="mt-4 flex flex-col gap-2.5 text-sm text-fg-dim">
+          <li class="flex gap-3">
+            <span class="nums mt-0.5 w-4 shrink-0 font-mono text-xs text-faint">1</span>
+            <span class="min-w-0">In the repo root: <code class={code}>cp .env.example .env</code></span>
+          </li>
+          <li class="flex gap-3">
+            <span class="nums mt-0.5 w-4 shrink-0 font-mono text-xs text-faint">2</span>
+            <span class="min-w-0">Set <code class={code}>{keyVar}={keyPlaceholder(keyVar)}</code> in <code class={cmd}>.env</code></span>
+          </li>
+          <li class="flex gap-3">
+            <span class="nums mt-0.5 w-4 shrink-0 font-mono text-xs text-faint">3</span>
+            <span class="min-w-0">
+              Restart the API: <code class={cmd}>just api</code>, or <code class={cmd}>just up</code> for the container
+            </span>
+          </li>
+        </ol>
       {/if}
-    </p>
-  </Card>
-{:else if flagged.length}
-  <Card pad data-testid="setup-experimental" role="status" class={cn(warnCard, klass)}>
-    <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <Badge tone="warn" dot>Experimental model</Badge>
-      <span class="eyebrow min-w-0 [overflow-wrap:anywhere]">LLM backend · {status?.llm_backend ?? 'anthropic'}</span>
-    </div>
-    <p class="mt-3 max-w-prose text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]">
-      {status?.experimental_warning ??
-        'A configured model is not a Claude model, so structured answers, web search, and the tutor’s tools may not work as well.'}
-    </p>
-    {@render modelList()}
-  </Card>
+
+      {#if flagged.length}
+        {@render modelList()}
+      {/if}
+      {@render warningList()}
+
+      {#if !subscription}
+        <p class="mt-4 border-t border-border pt-3 text-xs leading-relaxed text-muted">
+          {#if openrouter}
+            Using OpenRouter (<code class={code}>AA_LLM_BACKEND=openrouter</code>). Each request passes through OpenRouter as
+            well as the model's provider, and providers that may train on your prompts are left out. To call Anthropic
+            directly, unset it and set <code class={code}>ANTHROPIC_API_KEY</code> instead.
+          {:else}
+            Prefer your Claude subscription? Set <code class={code}>AA_LLM_BACKEND=agent_sdk</code> in
+            <code class={cmd}>.env</code> instead — host-only, run with <code class={cmd}>just api</code> rather than the container.
+            Have an OpenRouter key? Set <code class={code}>AA_LLM_BACKEND=openrouter</code> and
+            <code class={code}>OPENROUTER_API_KEY</code>.
+          {/if}
+        </p>
+      {/if}
+    </Card>
+  {:else}
+    <Card
+      pad
+      data-testid={flagged.length ? 'setup-experimental' : 'setup-check'}
+      role="status"
+      class={cn(warnCard, klass)}
+    >
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <Badge tone="warn" dot>{flagged.length ? 'Experimental model' : 'Check your setup'}</Badge>
+        <span class="eyebrow min-w-0 [overflow-wrap:anywhere]">LLM backend · {status?.llm_backend ?? 'anthropic'}</span>
+      </div>
+      {#if flagged.length}
+        <p class="mt-3 max-w-prose text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]">
+          {status?.experimental_warning ??
+            'A configured model is not a Claude model, so structured answers, web search, and the tutor’s tools may not work as well.'}
+        </p>
+        {@render modelList()}
+      {/if}
+      {@render warningList()}
+    </Card>
+  {/if}
 {/if}

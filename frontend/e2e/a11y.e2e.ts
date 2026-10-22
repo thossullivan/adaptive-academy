@@ -1,7 +1,14 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { withDemoLock, withDemoShared } from './demo-lock';
-import { mockOpenRouterUsage, mockSetup, openrouterExperimental, openrouterMissingKey } from './openrouter-mocks';
+import {
+  agentSdkInContainer,
+  mistypedBackend,
+  mockOpenRouterUsage,
+  mockSetup,
+  openrouterExperimental,
+  openrouterMissingKey
+} from './openrouter-mocks';
 
 // Automated accessibility audit: axe-core's WCAG 2.0/2.1 A + AA rules on every page, in both
 // themes, at desktop and phone width (the two Playwright projects). Topic pages run against
@@ -183,6 +190,18 @@ test('axe: the experimental-model card on the dashboard', async ({ page }) => {
   await mockSetup(page, openrouterExperimental);
   await auditState(page, () => '/', async () => {
     await expect(page.getByTestId('setup-experimental')).toBeVisible();
+  });
+});
+
+test('axe: the container agent_sdk card and the setup-warning card', async ({ page }) => {
+  await mockSetup(page, agentSdkInContainer);
+  await auditState(page, () => '/topics/new', async () => {
+    await expect(page.getByTestId('setup-notice')).toBeVisible();
+  });
+  await page.unroute('**/api/setup');
+  await mockSetup(page, mistypedBackend);
+  await auditState(page, () => '/', async () => {
+    await expect(page.getByTestId('setup-check')).toBeVisible();
   });
 });
 

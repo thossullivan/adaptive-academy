@@ -282,7 +282,7 @@ def test_openrouter_unknown_slug_names_the_slug_and_the_setting(on_openrouter, m
 
 def test_openrouter_no_provider_explains_the_privacy_setting(on_openrouter):
     detail = describe_llm_error(OPENROUTER_CASES[5][1]).detail
-    assert "store" in detail and "prompts" in detail
+    assert "train on your prompts" in detail
     assert "AA_MODEL_REASONING" in detail
 
 

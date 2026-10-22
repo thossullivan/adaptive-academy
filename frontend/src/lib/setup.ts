@@ -38,7 +38,12 @@ export function isExperimental(model: string, status: SetupStatus | null): boole
   return experimentalModels(status).includes(model);
 }
 
-/** The setup card shows when LLM calls are blocked, or when a configured model is experimental. */
+export function setupWarnings(status: SetupStatus | null): string[] {
+  return status?.setup_warnings ?? [];
+}
+
+/** The setup card shows when LLM calls are blocked, when a configured model is experimental,
+ *  or when the configuration looks mistaken. */
 export function showSetupNotice(status: SetupStatus | null): boolean {
-  return llmBlocked(status) || experimentalModels(status).length > 0;
+  return llmBlocked(status) || experimentalModels(status).length > 0 || setupWarnings(status).length > 0;
 }

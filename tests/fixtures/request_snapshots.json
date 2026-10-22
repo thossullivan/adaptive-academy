@@ -2,7 +2,7 @@
   "assessment_grade": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -33,7 +33,7 @@
     },
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -66,7 +66,7 @@
   "curriculum_generation": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -821,7 +821,7 @@
   "paper_probe_director": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -854,7 +854,7 @@
   "research_foundation": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -887,7 +887,7 @@
   "research_search": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -927,7 +927,7 @@
   "roleplay_persona": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -958,7 +958,7 @@
     },
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -994,7 +994,7 @@
   "teach_grade": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -1027,7 +1027,7 @@
   "tutor_solution_guard": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -1070,7 +1070,7 @@
     },
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -1110,7 +1110,7 @@
     },
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -1155,7 +1155,7 @@
     },
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -1197,7 +1197,7 @@
   "tutor_turn": [
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -1240,7 +1240,7 @@
     },
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },
@@ -1285,7 +1285,7 @@
     },
     {
       "endpoint": {
-        "base_url": null,
+        "base_url": "https://api.anthropic.com",
         "auth": "x-api-key",
         "drops_x_api_key": false
       },

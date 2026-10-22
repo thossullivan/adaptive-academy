@@ -10,10 +10,12 @@ Feature attribution: a contextvar holds a short label for the API route that tri
 call (set by a FastAPI dependency in api/app.py, from the matched route template), so engine
 code needs no extra parameters. Non-request callers (CLI, scripts) record feature=NULL.
 
-Cost: each row keeps the list-price cost (llm/pricing.py, `cost_usd`) and, where the service
-reports one, what it actually charged (`reported_cost_usd`: OpenRouter's `usage.cost`, which
-includes its fees). The reported cost wins wherever cost is summed (`effective_cost`): the
-Usage page and the daily limit.
+Cost: each row keeps the list-price cost (llm/pricing.py, `cost_usd`; OpenRouter slugs for
+Claude models use the Anthropic price) and, where the service reports one, what it actually
+charged (`reported_cost_usd`: OpenRouter's `usage.cost`, which includes its fees; on a BYOK
+request, `usage.cost` plus `cost_details.upstream_inference_cost`, what the provider billed
+your own key). The reported cost wins wherever cost is summed (`effective_cost`): the Usage
+page and the daily limit. A row with neither is a call whose spend is unknown.
 
 Budget: `check_budget(model)` runs before every API-key call (backend "anthropic" or
 "openrouter"). When AA_DAILY_BUDGET_USD is set and today's recorded API-key spend already
@@ -22,9 +24,11 @@ calendar day (UTC in the Docker image unless TZ is set). A single call can overs
 — the check runs before the call, and the call's cost is only known after it. On a backend
 that doesn't report cost (Anthropic), a call on a model with no known price would be recorded
 at $0 and never trip the limit, so while a limit is set such a call is refused up front
-(UnpricedModelError, also → 429). On OpenRouter every call reports its cost, so any model can
-run under a limit. Agent SDK calls are billed to the Claude subscription, not a key, so they
-are recorded but never blocked.
+(UnpricedModelError, also → 429). On OpenRouter calls report their cost, so a model with no
+list price may run under a limit, until a response arrives without a cost: then its next call
+is refused (UnreportedCostError). If today's spend can't be read while a limit is set, the call
+is refused too (BudgetUnreadableError): the limit fails closed. Agent SDK calls are billed to
+the Claude subscription, not a key, so they are recorded but never blocked.
 """
 
 from __future__ import annotations
@@ -90,6 +94,38 @@ class UnpricedModelError(BudgetExceededError):
         self.spent_usd = None
         self.limit_usd = limit_usd
         RuntimeError.__init__(self, unpriced_model_message(model))
+
+
+class UnreportedCostError(BudgetExceededError):
+    """A daily limit is set, the model has no list price, and the backend didn't report the
+    cost of this model's last call, so its spend can't be counted (→ HTTP 429)."""
+
+    def __init__(self, model: str, limit_usd: float, provider: str = "OpenRouter"):
+        self.model = model
+        self.spent_usd = None
+        self.limit_usd = limit_usd
+        RuntimeError.__init__(
+            self,
+            f"A daily spending limit is set (AA_DAILY_BUDGET_USD) but {provider} did not report "
+            f"the cost of the last call on '{model}', and this app has no price for it, so its "
+            "spend can't be capped. Use a Claude model (AA_MODEL_REASONING / AA_MODEL_COPY) "
+            "or unset AA_DAILY_BUDGET_USD, then restart the API.")
+
+
+class BudgetUnreadableError(BudgetExceededError):
+    """A daily limit is set but today's recorded spend can't be read (→ HTTP 429): refuse
+    rather than risk running past the limit."""
+
+    def __init__(self, limit_usd: float):
+        self.spent_usd = None
+        self.limit_usd = limit_usd
+        RuntimeError.__init__(
+            self,
+            "A daily spending limit is set (AA_DAILY_BUDGET_USD) but today's spend could not "
+            "be read, so the call was refused rather than risk going past the limit. Check "
+            "the API log. If the database is behind this version of the app, run "
+            "`uv run alembic upgrade head` (the container does this when it starts) and "
+            "restart the API.")
 
 
 def unpriced_model_message(model: str) -> str:
@@ -222,6 +258,22 @@ def _reported_cost(value: Any) -> float | None:
     return value if math.isfinite(value) and value >= 0 else None
 
 
+def _reported_charge(usage: Any) -> float | None:
+    """What the call cost per the service: `usage.cost`, plus, on a BYOK request,
+    `cost_details.upstream_inference_cost` (OpenRouter's usage-accounting docs: `cost` is what
+    OpenRouter charged the account, the upstream cost what the provider billed your own key;
+    the docs don't state the sum, so it is our reading). A BYOK row without the upstream part
+    reports None, so the list price stands in."""
+    cost = _reported_cost(_field(usage, "cost"))
+    if cost is None:
+        return None
+    if _field(usage, "is_byok") is True:
+        upstream = _reported_cost(
+            _field(_field(usage, "cost_details"), "upstream_inference_cost"))
+        return None if upstream is None else cost + upstream
+    return cost
+
+
 def _build_row(
     *,
     backend: str,
@@ -264,7 +316,7 @@ def _build_row(
         cache_read_input_tokens=cache_read,
         web_search_requests=searches,
         cost_usd=cost,
-        reported_cost_usd=_reported_cost(_field(usage, "cost")),
+        reported_cost_usd=_reported_charge(usage),
     )
 
 
@@ -334,25 +386,52 @@ def spent_today_usd(now: datetime | None = None) -> float:
     return float(total or 0.0)
 
 
-def check_budget(model: str | None = None, *, reports_cost: bool = False) -> None:
-    """Raise BudgetExceededError if today's API-key spend meets the configured limit, or
-    UnpricedModelError if a limit is set and `model` (the call's model) has no known price on
-    a backend that doesn't report what it charged (`reports_cost`, see llm/backends.py).
+def last_call_unreported(model: str, backend: str) -> bool:
+    """True when this model's most recent call on `backend` was recorded with neither a
+    reported cost nor a list price: the service stopped reporting what it charged."""
+    bind = get_usage_bind()
+    if bind is None:
+        return False
+    with Session(bind) as session:
+        row = session.exec(
+            select(LLMUsage.reported_cost_usd, LLMUsage.cost_usd)
+            .where(LLMUsage.backend == backend, LLMUsage.model == model)
+            .order_by(LLMUsage.id.desc())
+            .limit(1)
+        ).first()
+        _close_read_session(session, bind)
+    return row is not None and row[0] is None and row[1] is None
 
-    Fails open on a read error: if today's spend can't be read, the call proceeds and a
-    warning is logged — a broken usage store must not take every LLM feature down with it.
+
+def check_budget(model: str | None = None, *, reports_cost: bool = False,
+                 backend: str = BACKEND_ANTHROPIC) -> None:
+    """With AA_DAILY_BUDGET_USD set, refuse (a BudgetExceededError, → 429) a call whose spend
+    can't be capped or that today's spend already rules out:
+
+    - UnpricedModelError: `model` has no list price on a backend that doesn't report what
+      it charged (`reports_cost` False, see llm/backends.py);
+    - UnreportedCostError: no list price, and the reporting backend left this model's last
+      call without a cost;
+    - BudgetUnreadableError: today's spend (or that last call) can't be read. Fails closed:
+      with a limit set, an unreadable usage store must not mean unlimited spend;
+    - BudgetExceededError: today's spend meets the limit.
     """
     limit = settings.daily_budget_usd
     if limit is None:
         return
-    if model is not None and not reports_cost and pricing.price_for(model) is None:
-        raise UnpricedModelError(model, limit)
     try:
+        if model is not None and pricing.price_for(model) is None:
+            if not reports_cost:
+                raise UnpricedModelError(model, limit)
+            if last_call_unreported(model, backend):
+                raise UnreportedCostError(model, limit)
         spent = spent_today_usd()
-    except Exception:  # noqa: BLE001
-        logger.warning("daily budget check skipped: could not read today's spend",
-                       exc_info=True)
-        return
+    except BudgetExceededError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("daily budget check failed: could not read recorded usage; refusing "
+                       "the call", exc_info=True)
+        raise BudgetUnreadableError(limit) from exc
     if spent >= limit:
         raise BudgetExceededError(spent, limit)
 

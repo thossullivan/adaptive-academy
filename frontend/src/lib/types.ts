@@ -59,10 +59,15 @@ export interface SetupStatus {
   message: string;
   /** The env var whose key is missing (ANTHROPIC_API_KEY / OPENROUTER_API_KEY), else null. */
   missing_key?: string | null;
+  /** Why that variable can't be used when it is set (e.g. it holds the other service's key). */
+  key_hint?: string | null;
   models?: Record<string, string>;
   /** Configured models that are not Claude models: allowed through OpenRouter, unverified. */
   experimental_models?: string[];
   experimental_warning?: string | null;
+  /** Configuration that is probably a mistake (a mistyped AA_LLM_BACKEND, a model id that
+   *  isn't an OpenRouter id on that backend), in plain words. */
+  setup_warnings?: string[];
   /** Config problems that change behaviour without blocking it (e.g. a daily limit that
    *  can't cap an unpriced model, so that model's calls are refused). */
   warnings?: string[];
