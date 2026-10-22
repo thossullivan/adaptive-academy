@@ -34,7 +34,8 @@ def test_research_to_curriculum_to_tutor(session):
     ])
     app.dependency_overrides[get_llm] = lambda: shared_llm
     app.dependency_overrides[get_guard_llm] = lambda: ScriptedLLMClient([
-        LLMResponse(text='{"gives_away_solution": false, "reason": "asks a question"}'),
+        LLMResponse(text='{"gives_away_solution": false, "learner_attempted": false, '
+                         '"reason": "asks a question"}'),
     ])
     client = TestClient(app)
 

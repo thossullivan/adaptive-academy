@@ -614,3 +614,20 @@ STRUCTURED_TOOL_RETRY = Prompt(
     "Your answer must arrive as a call to the `{tool_name}` tool; a plain-text reply can't "
     "be used. Call `{tool_name}` now with the complete result as its input.",
 )
+
+# Sent when a model without strict tool use (llm/model_catalog.py) answers with input that
+# doesn't match the schema (llm/schema_check.py): as the tool_result of its bad call on the
+# API path, as a user turn after its JSON on the text path (llm/structured.py). {violations}
+# is one "- $.json.path: what was wrong" line each, the first few only; {resend} is how to
+# answer again (SCHEMA_RESEND_TOOL or SCHEMA_RESEND_TEXT).
+STRUCTURED_SCHEMA_RETRY = Prompt(
+    "structured.schema_retry",
+    1,
+    "Your answer doesn't match its schema, so it can't be used:\n"
+    "{violations}\n"
+    "Send the complete result again, {resend}, corrected so that every value has the type "
+    "and allowed values the schema gives it.",
+)
+# Part of structured.schema_retry's text: bump its version when either changes.
+SCHEMA_RESEND_TOOL = "as a call to the `{tool_name}` tool"
+SCHEMA_RESEND_TEXT = "as only the JSON object, with no prose"

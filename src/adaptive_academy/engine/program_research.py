@@ -11,9 +11,10 @@ from dataclasses import dataclass, field
 from sqlmodel import Session, select
 
 from adaptive_academy.engine.fanout import fan_out_with_retry
+from adaptive_academy.jsonout import dropped_summary, require_list, require_object, str_items
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
 from adaptive_academy.llm.structured import structured_json
-from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.llm.types import LLMClient, StructuredOutputError
 from adaptive_academy.prompts import PROGRAM_SYNTHESIS
 from adaptive_academy.models import AgentEvent, Milestone, Program, ProgramIntent, ProgramTopicLink
 
@@ -81,18 +82,46 @@ class MilestoneDraft:
     topics: list[TopicDraft]
 
 
-def parse_program_obj(data: dict) -> list[MilestoneDraft]:
-    """Parse the synthesis payload; depends_on keeps only valid BACKWARD indices."""
+def parse_program_obj(data: object, *, dropped: list[str] | None = None) -> list[MilestoneDraft]:
+    """Parse the synthesis payload; depends_on keeps only valid BACKWARD indices.
+
+    Defence behind the schema check (llm/schema_check.py): a milestone or topic that isn't
+    an object is skipped and its JSON path appended to `dropped`, and depends_on indices are
+    renumbered past a skipped milestone (a dependency on it is dropped). An answer with
+    nothing usable (not an object, `milestones` not a list, or milestones of which none is
+    an object) is a StructuredOutputError.
+    """
+    dropped = [] if dropped is None else dropped
+    data = require_object(data, "program synthesis")
+    raw = require_list(data, "milestones", "program synthesis")
     drafts: list[MilestoneDraft] = []
-    for i, m in enumerate(data.get("milestones", []) or []):
-        deps = [int(j) for j in (m.get("depends_on", []) or [])
-                if isinstance(j, (int, float)) and 0 <= int(j) < i]
-        topics = [TopicDraft(title=str(t.get("title", "")), why=str(t.get("why", "")),
-                             source_urls=list(t.get("source_urls", []) or []))
-                  for t in (m.get("topics", []) or []) if t.get("title")]
+    kept: dict[int, int] = {}  # the model's milestone index -> its draft's index
+    for i, m in enumerate(raw):
+        if not isinstance(m, dict):
+            dropped.append(f"$.milestones[{i}]")
+            continue
+        raw_deps = m.get("depends_on") if isinstance(m.get("depends_on"), list) else []
+        deps = [kept[int(j)] for j in raw_deps
+                if isinstance(j, (int, float)) and not isinstance(j, bool)
+                and 0 <= int(j) < i and int(j) in kept]
+        raw_topics = m.get("topics") or []
+        if not isinstance(raw_topics, list):
+            dropped.append(f"$.milestones[{i}].topics")
+            raw_topics = []
+        topics: list[TopicDraft] = []
+        for k, t in enumerate(raw_topics):
+            if not isinstance(t, dict):
+                dropped.append(f"$.milestones[{i}].topics[{k}]")
+            elif t.get("title"):
+                topics.append(TopicDraft(title=str(t.get("title", "")), why=str(t.get("why", "")),
+                                         source_urls=str_items(t.get("source_urls"))))
+        kept[i] = len(drafts)
         drafts.append(MilestoneDraft(title=str(m.get("title", "")),
                                      success_criteria=str(m.get("success_criteria", "")),
                                      depends_on=sorted(set(deps)), topics=topics))
+    if raw and not drafts:
+        raise StructuredOutputError(
+            "malformed", f"program synthesis: none of its {len(raw)} milestones is an object")
     return drafts
 
 
@@ -183,7 +212,10 @@ def research_program(
         [{"role": "user", "content": _build_synthesis_user_msg(program, intent, raw)}],
         schema=PROGRAM_SCHEMA, tool_name="emit_program",
     )
-    drafts = parse_program_obj(data)
+    malformed: list[str] = []
+    drafts = parse_program_obj(data, dropped=malformed)
+    if malformed:
+        emit("program_research:malformed", dropped_summary(malformed))
     emit("program_research:synth", f"{len(drafts)} milestones proposed")
 
     milestones: list[Milestone] = []

@@ -14,6 +14,7 @@ from adaptive_academy.llm.backends import (
 from adaptive_academy.llm.keys import require_api_key
 from adaptive_academy.llm.model_catalog import capabilities, replayable
 from adaptive_academy.llm.registry import get_model
+from adaptive_academy.llm.schema_check import describe_violations, schema_violations
 from adaptive_academy.llm.strict_schema import to_strict_schema
 from adaptive_academy.llm.today import today_line
 from adaptive_academy.llm.types import (
@@ -23,7 +24,12 @@ from adaptive_academy.llm.types import (
     ToolCall,
 )
 from adaptive_academy.llm.usage import check_budget, record_usage
-from adaptive_academy.prompts import STRUCTURED_TOOL_INSTRUCTION, STRUCTURED_TOOL_RETRY
+from adaptive_academy.prompts import (
+    SCHEMA_RESEND_TOOL,
+    STRUCTURED_SCHEMA_RETRY,
+    STRUCTURED_TOOL_INSTRUCTION,
+    STRUCTURED_TOOL_RETRY,
+)
 
 
 # Prompt caching (claude-api skill, shared/prompt-caching.md). The prefix renders tools ->
@@ -196,18 +202,26 @@ class AnthropicLLMClient:
         """Strict tool use → schema-valid JSON (no fences, preamble, or shape drift).
 
         Forced tool_choice is a 400 on Claude Sonnet 5.5, so this uses tool_choice=auto with
-        a `strict: true` tool (on every model the catalog says supports it: all Claude models)
-        and tells the model to answer through the tool. `auto` lets the model reply in text
-        instead; that gets one corrective retry (a second, separately recorded call), then a
-        StructuredOutputError (a ValueError; the API maps it to a legible 502). An
-        experimental model gets the same strict-shaped schema without the `strict` flag.
+        a `strict: true` tool (on every model the catalog says supports it: Claude 4.5 and
+        later) and tells the model to answer through the tool. `auto` lets the model reply in
+        text instead; that gets one corrective retry (a second, separately recorded call),
+        then a StructuredOutputError (a ValueError; the API maps it to a legible 502).
+
+        A model without strict tool use (experimental models, Claude before 4.5) gets the same
+        strict-shaped schema without the `strict` flag, so nothing guarantees its answer fits:
+        the answer is checked against that schema (llm/schema_check.py), and a mismatch uses
+        the same single retry, as an error tool_result naming the first few violations. A
+        second mismatch is StructuredOutputError("schema_mismatch"). A strict model's answer
+        is not re-checked: the API guarantees it, and the request stays as it was.
         """
+        input_schema = to_strict_schema(schema)
         tool: dict[str, Any] = {
             "name": tool_name,
             "description": "Emit the result as structured data matching the schema.",
-            "input_schema": to_strict_schema(schema),
+            "input_schema": input_schema,
         }
-        if self._caps.strict_tools:
+        check_shape = not self._caps.strict_tools
+        if not check_shape:
             tool["strict"] = True
         request = {
             "model": self._model,
@@ -220,13 +234,9 @@ class AnthropicLLMClient:
             "tools": [tool],
             "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
         }
-        attempts = [
-            list(messages),
-            # Append-only correction: a new user turn, never an edit of earlier history.
-            [*messages, {"role": "user",
-                         "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}],
-        ]
-        for attempt in attempts:
+        attempt = list(messages)
+        failure = "no_tool_use"
+        for retries_left in (1, 0):
             self._check_budget()
             resp = self._client.messages.create(messages=attempt, **request,
                                                 **request_extra_body(self._backend))
@@ -234,7 +244,40 @@ class AnthropicLLMClient:
             stop_reason = getattr(resp, "stop_reason", None)
             if stop_reason in NO_RETRY_STOP_REASONS:
                 raise StructuredOutputError(stop_reason)
-            for block in resp.content:
-                if block.type == "tool_use" and block.name == tool_name:
-                    return block.input
-        raise StructuredOutputError("no_tool_use")
+            call = next((b for b in resp.content
+                         if b.type == "tool_use" and b.name == tool_name), None)
+            if call is None:
+                failure = "no_tool_use"
+                # Append-only correction: a new user turn, never an edit of earlier history.
+                correction = [{"role": "user",
+                               "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}]
+            else:
+                violations = (schema_violations(call.input, input_schema) if check_shape
+                              else [])
+                if not violations:
+                    return call.input
+                failure = "schema_mismatch"
+                listed = describe_violations(violations)
+                if not retries_left:
+                    raise StructuredOutputError(
+                        failure, "structured completion did not match its schema after a "
+                                 f"corrective retry:\n{listed}")
+                correction = self._schema_correction(resp, tool_name, listed)
+            attempt = [*messages, *correction]
+        raise StructuredOutputError(failure)
+
+    def _schema_correction(self, resp: Any, tool_name: str,
+                           listed: str) -> list[dict[str, Any]]:
+        """The model's own turn, then an error tool_result for each of its tool calls.
+
+        Every tool_use needs its tool_result in the next user turn, and the turn goes back as
+        the model sent it (thinking blocks only for a model that replays them).
+        """
+        content = replayable(self._model, [content_block_to_param(b) for b in resp.content])
+        text = STRUCTURED_SCHEMA_RETRY.format(
+            violations=listed, resend=SCHEMA_RESEND_TOOL.format(tool_name=tool_name))
+        results = [{"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
+                    "content": text}
+                   for b in content if b.get("type") == "tool_use"]
+        return [{"role": "assistant", "content": content},
+                {"role": "user", "content": results}]

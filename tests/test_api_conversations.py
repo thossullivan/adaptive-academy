@@ -43,7 +43,8 @@ def client():
     ])
     # The solution guard's copy-role client: the pre-attempt reply above passes.
     guard = ScriptedLLMClient([
-        LLMResponse(text='{"gives_away_solution": false, "reason": "a hint"}'),
+        LLMResponse(text='{"gives_away_solution": false, "learner_attempted": false, '
+                         '"reason": "a hint"}'),
     ])
 
     app = create_app()

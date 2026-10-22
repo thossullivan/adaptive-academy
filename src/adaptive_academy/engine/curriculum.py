@@ -5,7 +5,13 @@ from dataclasses import dataclass
 from sqlmodel import Session, select
 
 from adaptive_academy.engine import concept_names, graph
-from adaptive_academy.jsonout import extract_json
+from adaptive_academy.jsonout import (
+    dropped_summary,
+    extract_json,
+    require_list,
+    require_object,
+    str_items,
+)
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
     ItemView,
@@ -15,7 +21,7 @@ from adaptive_academy.engine.track_markdown import (
 )
 from adaptive_academy.engine.runlock import exclusive_run
 from adaptive_academy.llm.structured import structured_json
-from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.llm.types import LLMClient, StructuredOutputError
 from adaptive_academy.prompts import CURRICULUM
 from adaptive_academy.models import (
     AgentEvent,
@@ -284,27 +290,62 @@ def parse_curriculum_json(text: str, title: str) -> TrackView:
     return parse_curriculum_obj(json.loads(extract_json(text)), title)
 
 
-def parse_curriculum_obj(data: dict, title: str) -> TrackView:
+def _entries(value: object, path: str, dropped: list[str]) -> list[tuple[str, dict]]:
+    """(path, entry) for each object in a JSON array; a non-array or non-object entry is
+    recorded in `dropped` by its path and skipped."""
+    if not value:
+        return []
+    if not isinstance(value, list):
+        dropped.append(path)
+        return []
+    out: list[tuple[str, dict]] = []
+    for i, entry in enumerate(value):
+        if isinstance(entry, dict):
+            out.append((f"{path}[{i}]", entry))
+        else:
+            dropped.append(f"{path}[{i}]")
+    return out
+
+
+def parse_curriculum_obj(data: object, title: str, *,
+                         dropped: list[str] | None = None) -> TrackView:
+    """The model's track as a TrackView, skipping malformed entries.
+
+    The schema check (llm/schema_check.py) normally stops a wrongly shaped answer before it
+    gets here; this is the defence behind it. A phase, item or sidebar that isn't an object
+    (the live failure: a phase as a string) is skipped and its JSON path appended to
+    `dropped`. An answer with nothing usable (not an object, `phases` not a list, or phases
+    of which none is an object) is a StructuredOutputError, not an empty track. An empty
+    `phases` list is the model's answer and is kept.
+    """
+    dropped = [] if dropped is None else dropped
+    data = require_object(data, "curriculum")
+    raw_phases = require_list(data, "phases", "curriculum")
     phases: list[PhaseView] = []
-    for p in data.get("phases", []) or []:
+    for path, p in _entries(raw_phases, "$.phases", dropped):
         items = [
             ItemView(text=str(it.get("text", "")), type=str(it.get("type", "read")),
-                     concept_refs=list(it.get("concept_refs", []) or []))
-            for it in (p.get("items", []) or [])
+                     concept_refs=str_items(it.get("concept_refs")))
+            for _, it in _entries(p.get("items"), f"{path}.items", dropped)
         ]
         d = p.get("deliverable") or None
         deliverable = None
-        if d:
+        if isinstance(d, dict):
             deliverable = DeliverableView(
                 text=str(d.get("text", "")), kind=str(d.get("kind", "blog")),
-                acceptance_criteria=list(d.get("acceptance_criteria", []) or []))
+                acceptance_criteria=str_items(d.get("acceptance_criteria")))
+        elif d is not None:
+            dropped.append(f"{path}.deliverable")
         phases.append(PhaseView(
             title=str(p.get("title", "")), est_hours=str(p.get("est_hours", "")),
-            flags=list(p.get("flags", []) or []), items=items, deliverable=deliverable))
+            flags=str_items(p.get("flags")), items=items, deliverable=deliverable))
+    if raw_phases and not phases:
+        raise StructuredOutputError(
+            "malformed", f"curriculum: none of its {len(raw_phases)} phases is an object")
     sidebars = [
         SidebarView(kind=str(s.get("kind", "reference")), title=str(s.get("title", "")),
                     body=str(s.get("body", "")))
-        for s in (data.get("sidebars", []) or [])
+        for _, s in _entries(data.get("sidebars"), "$.sidebars", dropped)
     ]
     return TrackView(title=title, overview=str(data.get("overview", "")),
                      phases=phases, sidebars=sidebars)
@@ -408,7 +449,10 @@ def _generate_curriculum_locked(
     data = structured_json(
         llm, system, [{"role": "user", "content": user}],
         schema=CURRICULUM_SCHEMA, tool_name="emit_track")
-    draft = parse_curriculum_obj(data, title=topic.title)
+    malformed: list[str] = []
+    draft = parse_curriculum_obj(data, title=topic.title, dropped=malformed)
+    if malformed:
+        emit("curriculum:malformed", dropped_summary(malformed))
 
     canonicalize_concept_refs(draft.phases, key_concepts, renamed)
     dependents = dependents_of(prerequisite_map, key_concepts)

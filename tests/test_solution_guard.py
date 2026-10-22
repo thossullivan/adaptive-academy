@@ -487,7 +487,8 @@ def test_a_clean_reply_passes_when_the_model_check_fails(session):
 def test_invalid_model_output_falls_back_to_the_screen(session, bad):
     convo = _seed(session)
     llm = ScriptedLLMClient([LLMResponse(text=HINT)])
-    guard = ScriptedLLMClient([LLMResponse(text=bad)])
+    # A wrongly shaped answer gets one corrective retry (llm/structured.py); bad twice here.
+    guard = ScriptedLLMClient([LLMResponse(text=bad), LLMResponse(text=bad)])
 
     result = run_tutor_turn(session, convo, "teach me", llm, guard_llm=guard)
 
@@ -945,7 +946,9 @@ def test_guard_prompt_treats_picking_among_listed_options_as_a_leak():
 def test_a_verdict_without_a_boolean_learner_attempted_drops_the_deferred_attempt(
         session, verdict):
     # Conservative on the text-parsed (subscription) path: a missing or non-boolean
-    # learner_attempted only ever withholds the log, never records it.
+    # learner_attempted only ever withholds the log, never records it. Such a verdict
+    # doesn't fit GUARD_SCHEMA, so it gets one corrective retry (llm/structured.py); sent
+    # twice, the model check is unavailable and the screen decides.
     convo = _seed(session)
     llm = ScriptedLLMClient([
         LLMResponse(text=SUBTLE_LEAK),
@@ -953,7 +956,8 @@ def test_a_verdict_without_a_boolean_learner_attempted_drops_the_deferred_attemp
             ToolCall(id="t1", name="log_attempt", input={"summary": "tried"})]),
         LLMResponse(text=HINT),
     ])
-    guard = ScriptedLLMClient([_verdict(True), LLMResponse(text=verdict)])
+    guard = ScriptedLLMClient([_verdict(True), LLMResponse(text=verdict),
+                               LLMResponse(text=verdict)])
 
     result = run_tutor_turn(session, convo, "My attempt: divide by d_k?", llm, guard_llm=guard)
 

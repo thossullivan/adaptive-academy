@@ -17,7 +17,7 @@ from adaptive_academy.engine.memory import (
 )
 from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, SearchBrief
 from adaptive_academy.llm.retriever_types import Hit, Retriever
-from adaptive_academy.jsonout import extract_json
+from adaptive_academy.jsonout import extract_json, require_object, str_items
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.prompts import CONCEPT_NAME_CORRECTION, RESEARCH_FOUNDATION
 from adaptive_academy.models import AgentEvent, SourceDoc, Topic, TopicFoundation, TopicIntent
@@ -122,11 +122,14 @@ def _build_foundation_user_msg(
 
 
 def _parse_foundation_json(text: str) -> Foundation:
-    data = json.loads(extract_json(text))
+    # Text-parsed, so nothing guarantees the shape: an answer that isn't an object is a
+    # StructuredOutputError (a legible 502), and a wrongly typed part is dropped.
+    data = require_object(json.loads(extract_json(text)), "research foundation")
+    prerequisite_map = data.get("prerequisite_map")
     return Foundation(
         overview=str(data.get("overview", "")),
-        key_concepts=list(data.get("key_concepts", [])),
-        prerequisite_map=dict(data.get("prerequisite_map", {})),
+        key_concepts=str_items(data.get("key_concepts")),
+        prerequisite_map=dict(prerequisite_map) if isinstance(prerequisite_map, dict) else {},
     )
 
 
