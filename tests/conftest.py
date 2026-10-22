@@ -1,10 +1,16 @@
+# First, before anything imports the app: point AA_DATABASE_URL and the other path-like
+# settings at a per-session temp directory (see _isolated_env.py and the SQLite guard below).
+from _isolated_env import TEST_DATA_DIR
+
 import asyncio
 import ipaddress
 import os
 import re
 import shlex
 import sys
+import tempfile
 import warnings
+from pathlib import Path
 from typing import NoReturn
 
 import pytest
@@ -533,3 +539,82 @@ def session(_usage_bind_off):
     llm_usage.set_usage_bind(engine)
     with Session(engine) as s:
         yield s
+
+
+# --- Database guard --------------------------------------------------------------------------
+# _isolated_env.py points AA_DATABASE_URL (and the other path-like settings) at a per-session
+# temp directory before the app is imported, so settings, db.engine, the usage recorder's
+# default bind, backup/export and alembic/env.py all resolve there. This guard backs that up
+# at runtime: a SQLite connection to any database FILE outside the temp directory (the
+# developer's adaptive_academy.db, a backups/ dir in the repo, anything under $HOME) is
+# blocked before sqlite opens or creates the file, and fails the test that tried, even if the
+# code under test caught the error. In-memory databases and tmp_path files are unaffected.
+
+_TEMP_ROOTS = tuple(dict.fromkeys((Path(tempfile.gettempdir()).resolve(), TEST_DATA_DIR)))
+
+
+class RealDatabaseBlockedError(PermissionError):
+    """Raised in place of opening a SQLite file outside the temp directory during tests."""
+
+
+def sqlite_file_target(database: object) -> Path | None:
+    """The file a `sqlite3.connect(database)` call would open, or None for an in-memory db."""
+    text = os.fsdecode(database) if isinstance(database, bytes | os.PathLike) else str(database)
+    if text in ("", ":memory:"):
+        return None
+    if text.startswith("file:"):  # URI filename (uri=True): file:path?mode=...
+        path, _, query = text[len("file:"):].partition("?")
+        if path.startswith("//"):  # file://host/path; sqlite accepts only an empty host
+            path = "/" + path[2:].partition("/")[2]
+        if "mode=memory" in query or path in ("", ":memory:"):
+            return None
+        text = path
+    return Path(text).expanduser().resolve()
+
+
+def sqlite_file_allowed(path: Path) -> bool:
+    return (any(path.is_relative_to(root) for root in _TEMP_ROOTS)
+            or path.name.startswith(".coverage"))  # coverage.py's own data file
+
+
+class _DatabaseGuard:
+    def __init__(self) -> None:
+        self.attempts: dict[str | None, list[str]] = {}
+
+
+_DB_GUARD = _DatabaseGuard()
+
+
+def _sqlite_audit_hook(event: str, args: tuple) -> None:
+    if event != "sqlite3.connect" or not args:
+        return
+    target = sqlite_file_target(args[0])
+    if target is None or sqlite_file_allowed(target):
+        return
+    _DB_GUARD.attempts.setdefault(_GUARD.nodeid, []).append(str(target))
+    raise RealDatabaseBlockedError(
+        f"tests may only open SQLite files under the temp directory, not {target}")
+
+
+sys.addaudithook(_sqlite_audit_hook)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_database(request):
+    """Fail the test if anything in it tried to open a SQLite file outside the temp dir."""
+    yield
+    targets = _DB_GUARD.attempts.pop(request.node.nodeid, None)
+    if targets:
+        pytest.fail(
+            f"{request.node.nodeid} tried to open a database outside the temp directory: "
+            f"{', '.join(dict.fromkeys(targets))}\nUse the `session` fixture or a tmp_path "
+            "file; the real database is never a test target.", pytrace=False)
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_real_database_outside_tests():
+    yield
+    stray = _DB_GUARD.attempts.pop(None, None)
+    if stray:
+        pytest.fail("a database outside the temp directory was opened outside any test: "
+                    f"{', '.join(dict.fromkeys(stray))}", pytrace=False)

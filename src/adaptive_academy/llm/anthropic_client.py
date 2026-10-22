@@ -1,5 +1,6 @@
 from typing import Any
 
+import httpx
 import pydantic
 from anthropic import Anthropic
 
@@ -7,13 +8,15 @@ from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.strict_schema import to_strict_schema
 from adaptive_academy.llm.today import today_line
-from adaptive_academy.llm.types import LLMResponse, StructuredOutputError, ToolCall
+from adaptive_academy.llm.types import (
+    NO_RETRY_STOP_REASONS,
+    LLMResponse,
+    StructuredOutputError,
+    ToolCall,
+)
 from adaptive_academy.llm.usage import BACKEND_ANTHROPIC, check_budget, record_usage
 from adaptive_academy.prompts import STRUCTURED_TOOL_INSTRUCTION, STRUCTURED_TOOL_RETRY
 
-# Stop reasons a corrective retry can't fix: the same request would truncate or be declined
-# again, so fail fast instead of paying for a second call.
-_NO_RETRY_STOP_REASONS = ("max_tokens", "refusal", "model_context_window_exceeded")
 
 # Prompt caching (claude-api skill, shared/prompt-caching.md). The prefix renders tools ->
 # system -> messages, and a breakpoint on the last stable system block caches tools + system
@@ -58,7 +61,13 @@ class AnthropicLLMClient:
     responses are read by block type so `thinking` blocks are skipped.
     """
 
-    def __init__(self, role: str = "reasoning", max_tokens: int = 20_000):
+    def __init__(
+        self,
+        role: str = "reasoning",
+        max_tokens: int = 20_000,
+        *,
+        http_client: httpx.Client | None = None,
+    ):
         # max_tokens covers thinking + text on models that think by default (Sonnet/Haiku 5.5),
         # and thinking tokens bill as output only when generated — the ceiling itself is free
         # insurance against a structured answer (e.g. a full curriculum track) being cut off
@@ -66,7 +75,12 @@ class AnthropicLLMClient:
         # Known limit: the SDK's own retries (after a read timeout or dropped connection)
         # happen inside messages.create and their usage is never reported back, so a
         # retried call is recorded (and counted against the daily limit) only once.
-        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3)
+        # `http_client` is a test seam: tests/test_response_replay.py passes an httpx.Client
+        # on a MockTransport to replay API responses through the real SDK, and
+        # scripts/record_response_fixtures.py one with a capture hook. The app passes
+        # nothing and gets the SDK's default client.
+        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3,
+                                 http_client=http_client)
         self._role = role
         self._model = get_model(role)
         self._max_tokens = max_tokens
@@ -164,7 +178,7 @@ class AnthropicLLMClient:
             resp = self._client.messages.create(messages=attempt, **request)
             self._record(resp, "complete_json")
             stop_reason = getattr(resp, "stop_reason", None)
-            if stop_reason in _NO_RETRY_STOP_REASONS:
+            if stop_reason in NO_RETRY_STOP_REASONS:
                 raise StructuredOutputError(stop_reason)
             for block in resp.content:
                 if block.type == "tool_use" and block.name == tool_name:

@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
@@ -10,7 +12,7 @@ from adaptive_academy.api.schemas import (
 )
 from adaptive_academy.engine.decay import due_decay_checks, grade_decay_check
 from adaptive_academy.llm.retriever_types import Retriever
-from adaptive_academy.llm.types import LLMClient
+from adaptive_academy.llm.types import LLMClient, StructuredOutputError
 from adaptive_academy.models import Concept
 
 topic_router = APIRouter(prefix="/api/topics", tags=["decay"])
@@ -41,6 +43,8 @@ def grade(prompt_id: int, body: DecayGradeIn, session: Session = Depends(get_ses
             llm=llm,
             retriever=retriever,
         )
+    except (StructuredOutputError, json.JSONDecodeError):
+        raise  # a model failure (both are ValueErrors), not a missing prompt: the app's 502
     except ValueError as e:
         raise HTTPException(404, str(e))
     a = result.assessment

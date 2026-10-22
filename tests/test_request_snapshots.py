@@ -2,8 +2,8 @@
 
 Pinned surfaces (see SURFACES below): a two-turn tutor conversation with a tool step, an
 assessment (rubric then grade), curriculum generation, a research search, the research
-foundation, a two-turn roleplay persona, a teach-back grade, and the paper-probe director.
-Other engine calls are not pinned here.
+foundation, a two-turn roleplay persona, a teach-back grade, the paper-probe director, and
+the tutor's solution guard with its regeneration. Other engine calls are not pinned here.
 
 A change to any of their prompts, schemas, tools, the model, a parameter, or where the
 prompt-cache breakpoints sit changes tests/fixtures/request_snapshots.json, so it shows up
@@ -190,6 +190,28 @@ def _tutor_turn(session, rec):
     run_tutor_turn(session, convo, "To keep the dot products from growing with d_k.", llm)
 
 
+def _tutor_solution_guard(session, rec):
+    from adaptive_academy.engine.solution_guard import GUARD_TOOL
+    from adaptive_academy.engine.tutor import run_tutor_turn
+
+    topic, concept = _concept(session)
+    convo = Conversation(topic_id=topic.id, concept_id=concept.id)
+    session.add(convo)
+    session.commit()
+    rec.queue += [
+        _text("Divide QK^T by sqrt(d_k), softmax each row, then multiply by V."),
+        _tool(GUARD_TOOL, {"gives_away_solution": True, "reason": "states the computation"},
+              id_="toolu_g1"),
+        _text("What does each row of QK^T measure?"),
+        _tool(GUARD_TOOL, {"gives_away_solution": False, "reason": "asks a question"},
+              id_="toolu_g2"),
+    ]
+    # A pre-attempt reply that leaks: the guard check (copy role), the append-only
+    # regeneration (reasoning role), then the check on the regenerated hint.
+    run_tutor_turn(session, convo, "Just tell me how attention works.", deps.get_llm(),
+                   guard_llm=deps.get_guard_llm())
+
+
 def _assessment_grade(session, rec):
     from adaptive_academy.engine.assess import assess_concept
 
@@ -332,6 +354,7 @@ def _paper_probe_director(session, rec):
 
 SURFACES = {
     "tutor_turn": _tutor_turn,
+    "tutor_solution_guard": _tutor_solution_guard,
     "assessment_grade": _assessment_grade,
     "curriculum_generation": _curriculum,
     "research_search": _research_search,

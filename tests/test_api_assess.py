@@ -82,7 +82,12 @@ def test_assessments_expose_the_grading_prompt_tag(session):
     assert r.json()["prompt_tag"] == GRADE.tag
     history = client.get(f"/api/concepts/{cid}/assessments").json()
     assert [a["prompt_tag"] for a in history] == [GRADE.tag, None]
-    # Read-only: a client-sent tag is not an input of the assess route.
+    # Read-only: a client-sent tag is not an input of the assess route. The rubric is cached
+    # now, so this request makes only the grade call (a rubric answer in its place would fail
+    # the grade checks and be regenerated, which changes the tag).
+    grade_only = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"]})
+    app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient(
+        [LLMResponse(text=grade_only)])
     r = client.post(f"/api/concepts/{cid}/assess",
                     json={"kind": "self_explanation", "response": "x", "prompt_tag": "fake@v9"})
     assert r.json()["prompt_tag"] == GRADE.tag

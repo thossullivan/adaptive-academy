@@ -4,7 +4,7 @@ import json
 from fastapi.testclient import TestClient
 
 from adaptive_academy.api.app import app
-from adaptive_academy.api.deps import get_llm, get_researcher, get_session
+from adaptive_academy.api.deps import get_guard_llm, get_llm, get_researcher, get_session
 from adaptive_academy.llm.researcher_types import RawSource
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.scripted_researcher import ScriptedResearcherClient
@@ -33,6 +33,9 @@ def test_research_to_curriculum_to_tutor(session):
         LLMResponse(text="What have you tried so far?"),  # tutor turn (no tool calls)
     ])
     app.dependency_overrides[get_llm] = lambda: shared_llm
+    app.dependency_overrides[get_guard_llm] = lambda: ScriptedLLMClient([
+        LLMResponse(text='{"gives_away_solution": false, "reason": "asks a question"}'),
+    ])
     client = TestClient(app)
 
     tid = client.post("/api/topics", json={"title": "Build LLMs", "goal": "build a GPT"}).json()["id"]

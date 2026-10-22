@@ -1,0 +1,5 @@
+{
+  "canonical": "Scale the logits by 1/sqrt(d).",
+  "feedback": "You saw variance grow with d.",
+  "score": 0.7
+}

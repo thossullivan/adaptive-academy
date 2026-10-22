@@ -18,6 +18,7 @@ import pytest
 from conftest import PROVIDER_ENV_VARS, _network_command
 
 CONFTEST = Path(__file__).with_name("conftest.py")
+ISOLATED_ENV = Path(__file__).with_name("_isolated_env.py")
 
 INNER_TESTS = '''
 import asyncio
@@ -220,6 +221,8 @@ def test_marker_opts_out():
 def result(tmp_path_factory) -> subprocess.CompletedProcess[str]:
     inner = tmp_path_factory.mktemp("network_guard")
     (inner / "conftest.py").write_text(CONFTEST.read_text())
+    # The conftest imports this first (test database isolation).
+    (inner / ISOLATED_ENV.name).write_text(ISOLATED_ENV.read_text())
     (inner / "test_inner.py").write_text(INNER_TESTS)
     # Module fixtures run before the function-scoped env scrub, so build the child's env
     # explicitly: no real credential leaves this process. The fake key and backend switch

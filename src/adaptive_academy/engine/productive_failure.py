@@ -26,6 +26,8 @@ from adaptive_academy.engine.memory import (
     retrieve,
     topic_id_for_concept,
 )
+from adaptive_academy.engine.grade_gate import checked_completion
+from adaptive_academy.engine.output_checks import CONSOLIDATE_RUBRIC
 from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.retriever_types import Retriever
@@ -80,7 +82,12 @@ def parse_problem_json(text: str) -> str:
 
 
 def parse_consolidation_json(text: str) -> tuple[str, str, float]:
-    d = json.loads(extract_json(text))
+    return consolidation_from_dict(json.loads(extract_json(text)))
+
+
+def consolidation_from_dict(d: dict) -> tuple[str, str, float]:
+    """Lenient on its own; consolidate runs it only on answers that passed
+    CONSOLIDATE_RUBRIC."""
     return (
         str(d.get("canonical", "")).strip(),
         str(d.get("feedback", "")).strip(),
@@ -187,10 +194,15 @@ def consolidate(
             f"<<<ATTEMPT>>>\n{escape_markers(attempt or '(none)')}\n<<<END_ATTEMPT>>>")
     topic_id = topic_id_for_concept(session, concept.id)
     trace_prompt(session, PF_CONSOLIDATE, topic_id=topic_id)
-    resp = llm.complete(
-        system=PF_CONSOLIDATE, messages=[{"role": "user", "content": user}], tools=[]
-    )
-    canonical, feedback, score = parse_consolidation_json(resp.text)
+
+    def emit(kind: str, detail: str = "") -> None:
+        session.add(AgentEvent(topic_id=topic_id, kind=kind, detail=detail))
+
+    # Fails closed: an answer that fails CONSOLIDATE_RUBRIC twice raises before anything is
+    # written.
+    answer = checked_completion(
+        session, llm, system=PF_CONSOLIDATE, user=user, rubric=CONSOLIDATE_RUBRIC, emit=emit)
+    canonical, feedback, score = consolidation_from_dict(answer.data)
 
     assessment = Assessment(
         concept_id=concept.id,
@@ -200,7 +212,8 @@ def consolidate(
         verdict=feedback,
         score=score,
         gaps=[],
-        prompt_tag=PF_CONSOLIDATE.tag,  # the grade's prompt; PF_GENERATE only wrote the problem
+        # the grade's prompt(s); PF_GENERATE only wrote the problem
+        prompt_tag=answer.prompt_tag(PF_CONSOLIDATE),
     )
     session.add(assessment)
     session.flush()

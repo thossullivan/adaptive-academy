@@ -1,0 +1,14 @@
+{
+  "_source": "documented",
+  "_note": "Rate limited; retryable, with a retry-after header.",
+  "_status": 429,
+  "_headers": {
+    "retry-after": "12"
+  },
+  "type": "error",
+  "error": {
+    "type": "rate_limit_error",
+    "message": "Number of request tokens has exceeded your per-minute rate limit (https://docs.claude.com/en/api/rate-limits); see the response headers for current usage. Please reduce the prompt length or the maximum tokens requested, or try again later."
+  },
+  "request_id": "req_011CSHoEeqs5C35K2UUqR7Fy"
+}
