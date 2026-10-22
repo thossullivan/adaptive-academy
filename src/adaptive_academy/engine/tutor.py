@@ -133,7 +133,7 @@ def run_tutor_turn(
             elif guard.regenerating or not convo.attempt_logged:
                 # The solution guard: a reply finalised before any attempt is logged (this
                 # turn's log_attempt included) must not hand over the answer. A regenerated
-                # reply is always reviewed (it was pre-attempt, and log_attempt is refused
+                # reply is always reviewed (it was pre-attempt, and log_attempt is deferred
                 # while regenerating). Release the write lock first (F5): the check may make
                 # a model call.
                 session.commit()
@@ -147,7 +147,7 @@ def run_tutor_turn(
                     messages.append({"role": "user", "content": str(TUTOR_GUARD_CORRECTION)})
                     reply_text = ""
                     # A late draft still leaves the regeneration room for a tool step or two
-                    # (a refused log_attempt, a blocked reveal) before its reply.
+                    # (a deferred log_attempt, a blocked reveal) before its reply.
                     max_steps = max(max_steps, step + _REGEN_STEPS)
                     continue
                 if decision == FALLBACK:
@@ -179,6 +179,12 @@ def run_tutor_turn(
         if not any(e.kind == "empty_reply" for e in events):
             emit("max_steps_exhausted")
         reply_text = _FALLBACK
+
+    # An attempt the regeneration logged counts only now, and only if its reply passed
+    # review: never mid-turn, and never for a turn that ended in the guard's fallback.
+    if guard.take_deferred_attempt():
+        convo.attempt_logged = True
+        session.add(convo)
 
     # Persist the tutor reply.
     tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply_text)
@@ -225,9 +231,10 @@ def _execute_tool(
 
     if call.name == "log_attempt":
         if guard is not None and guard.regenerating:
-            # Rewriting a withheld draft: the tutor can't unlock the gate for itself. Nothing
-            # is recorded, so reveal_solution stays gated and the reply is still reviewed.
-            return False, guard.refuse_attempt()
+            # Rewriting a withheld draft: the tutor can't unlock the gate mid-turn. The
+            # attempt is deferred (recorded after the turn if the reply passes review), so
+            # reveal_solution stays gated and the reply is still reviewed.
+            return True, guard.defer_attempt(call.input.get("summary", ""))
         convo.attempt_logged = True
         session.add(convo)
         session.commit()

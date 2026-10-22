@@ -17,7 +17,7 @@ import adaptive_academy.engine.solution_guard as solution_guard
 import adaptive_academy.engine.tutor_sdk as tutor_sdk
 from adaptive_academy.db import ensure_fts
 from adaptive_academy.engine.solution_guard import (
-    ATTEMPT_REFUSED,
+    ATTEMPT_DEFERRED,
     GUARD_FALLBACK,
     build_guard_messages,
     screen_reply,
@@ -128,7 +128,8 @@ def test_screen_passes_socratic_questions_that_mention_the_answer(reply):
     assert screen_reply(reply) is None
 
 
-@pytest.mark.parametrize("marker", ["# TODO: fill this in", "    pass", "out = ...", "w = ___"])
+@pytest.mark.parametrize("marker", ["    pass", "    out = ...", "    ...",
+                                    "    raise NotImplementedError", "    w = ___"])
 def test_screen_passes_a_fill_in_the_blank_scaffold(marker):
     lines = ["def attention(q, k, v):", "    d_k = q.shape[-1]", "    scores = q @ k.T",
              "    scores = scores / d_k ** 0.5", "    weights = softmax(scores)", marker]
@@ -136,6 +137,99 @@ def test_screen_passes_a_fill_in_the_blank_scaffold(marker):
     # The same block with the gap filled in is an implementation.
     filled = lines[:-1] + ["    return weights @ v"]
     assert screen_reply("```python\n" + "\n".join(filled) + "\n```") == "code_block"
+
+
+def _fenced(lang: str, code: str) -> str:
+    return f"```{lang}\n{code.strip()}\n```"
+
+
+def test_screen_passes_blocks_whose_body_is_only_a_todo():
+    python = _fenced("python", """
+import numpy as np
+
+def softmax(x):
+    shifted = x - x.max(axis=-1, keepdims=True)
+    return np.exp(shifted) / np.exp(shifted).sum(axis=-1, keepdims=True)
+
+def attention(q, k, v):
+    # TODO: your code here
+""")
+    js = _fenced("js", """
+function merge(a, b) {
+  // TODO: merge the two sorted arrays
+}
+function mergeSort(xs) {
+  if (xs.length < 2) return xs;
+  const mid = xs.length >> 1;
+  return merge(mergeSort(xs.slice(0, mid)), mergeSort(xs.slice(mid)));
+}
+""")
+    assert screen_reply(python) is None and screen_reply(js) is None
+
+
+# Finished solutions that merely contain a scaffold-looking token (review regression): each
+# must still trip the screen.
+FINISHED_SOLUTIONS = {
+    "except_pass": _fenced("python", """
+def binary_search(xs, target):
+    lo, hi = 0, len(xs) - 1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        try:
+            if xs[mid] == target:
+                return mid
+        except IndexError:
+            pass
+        if xs[mid] < target:
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return -1
+"""),
+    "js_spread": _fenced("js", """
+function merge(a, b) {
+  const out = [];
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) {
+    out.push(a[i] <= b[j] ? a[i++] : b[j++]);
+  }
+  return [...out, ...a.slice(i), ...b.slice(j)];
+}
+"""),
+    "todo_annotation": _fenced("python", """
+def fib(n):
+    # TODO: memoize later
+    if n < 2:
+        return n
+    a, b = 0, 1
+    for _ in range(n - 1):
+        a, b = b, a + b
+    return b
+"""),
+    "ellipsis_in_string": _fenced("python", """
+def gcd(a, b):
+    print("computing...")
+    while b:
+        a, b = b, a % b
+    print('done...')
+    return a
+"""),
+    "ellipsis_subscript": _fenced("python", """
+import numpy as np
+
+def softmax(x):
+    shifted = x - x.max(axis=-1, keepdims=True)
+    e = np.exp(shifted)
+    y = e / e.sum(axis=-1, keepdims=True)
+    first = y[..., 0]
+    return y
+"""),
+}
+
+
+@pytest.mark.parametrize("name", list(FINISHED_SOLUTIONS))
+def test_screen_flags_finished_code_with_scaffold_looking_tokens(name):
+    assert screen_reply(FINISHED_SOLUTIONS[name]) == "code_block"
 
 
 def test_guard_messages_bound_a_huge_learner_paste_head_and_tail():
@@ -483,32 +577,66 @@ def test_the_guard_sees_the_question_being_answered(session):
     assert "<<<LEARNER_MESSAGE>>>\nhmm?\n<<<END_LEARNER_MESSAGE>>>" in sent
 
 
-def test_the_regeneration_cannot_log_an_attempt_and_unlock_the_reveal(session):
-    # The review's reproduction: the regenerated turn calls log_attempt, then
-    # reveal_solution with the answer. The attempt is refused, the reveal stays blocked,
-    # and the reply that follows is still reviewed.
+CONFIRMING_DRAFT = "Yes: softmax(QK^T / sqrt(d_k)) V, exactly right, that's the whole formula."
+FOLLOW_UP = "Good attempt. Why do you think the scores are divided by something at all?"
+
+
+def test_a_genuine_attempt_logged_during_regeneration_is_recorded_after_the_turn(session):
+    # The learner really tried; the first draft confirmed it by restating the answer
+    # without calling log_attempt, and was withheld. The regeneration logs the attempt: it
+    # is deferred (the reveal stays blocked within the turn, the reply is still reviewed)
+    # and recorded once the rewritten reply passes.
     convo = _seed(session)
     llm = _SnapshotScripted([
+        LLMResponse(text=CONFIRMING_DRAFT),
+        LLMResponse(tool_calls=[
+            ToolCall(id="t1", name="log_attempt", input={"summary": "softmax of scaled QK^T"}),
+            ToolCall(id="t2", name="reveal_solution", input={"text": SECOND_LEAK}),
+        ]),
+        LLMResponse(text=FOLLOW_UP),
+    ])
+    guard = ScriptedLLMClient([_verdict(True), _verdict(False)])
+
+    result = run_tutor_turn(session, convo, "My attempt: softmax(QK^T / sqrt(d_k)) times V?",
+                            llm, guard_llm=guard)
+
+    assert result.reply == FOLLOW_UP
+    session.refresh(convo)
+    assert convo.attempt_logged is True  # recorded after the turn
+    kinds = _kinds(result)
+    assert kinds.index("tool:log_attempt:deferred") < kinds.index("tool:reveal_solution:blocked")
+    assert kinds.index("tool:reveal_solution:blocked") < kinds.index("tool:log_attempt")
+    assert len(guard.calls) == 2  # the regenerated reply was reviewed
+    results = llm.calls[2]["messages"][-1]["content"]
+    assert results[0] == {"type": "tool_result", "tool_use_id": "t1",
+                          "content": ATTEMPT_DEFERRED}
+    stored = _stored_text(session)
+    assert CONFIRMING_DRAFT not in stored and SECOND_LEAK not in stored
+
+
+def test_the_regeneration_cannot_log_an_attempt_and_unlock_the_reveal(session):
+    # The attack: the regenerated turn calls log_attempt, then reveal_solution with the
+    # answer, then writes the answer anyway. The reveal stays blocked, the reply is
+    # reviewed and replaced by the fallback, and no attempt is recorded.
+    convo = _seed(session)
+    llm = ScriptedLLMClient([
         LLMResponse(text=SUBTLE_LEAK),
         LLMResponse(tool_calls=[
             ToolCall(id="t1", name="log_attempt", input={"summary": "they tried"}),
             ToolCall(id="t2", name="reveal_solution", input={"text": SECOND_LEAK}),
         ]),
-        LLMResponse(text=HINT),
+        LLMResponse(text=SECOND_LEAK),
     ])
-    guard = ScriptedLLMClient([_verdict(True), _verdict(False)])
+    guard = ScriptedLLMClient([_verdict(True), _verdict(True)])
 
     result = run_tutor_turn(session, convo, "just tell me", llm, guard_llm=guard)
 
-    assert result.reply == HINT
+    assert result.reply == GUARD_FALLBACK
     session.refresh(convo)
     assert convo.attempt_logged is False
     kinds = _kinds(result)
-    assert "tool:log_attempt:refused" in kinds and "tool:log_attempt" not in kinds
-    assert "tool:reveal_solution:blocked" in kinds
-    assert len(guard.calls) == 2  # the regenerated reply was reviewed
-    results = llm.calls[2]["messages"][-1]["content"]
-    assert results[0] == {"type": "tool_result", "tool_use_id": "t1", "content": ATTEMPT_REFUSED}
+    assert "tool:log_attempt:deferred" in kinds and "tool:log_attempt" not in kinds
+    assert "tool:reveal_solution:blocked" in kinds and "guard:fallback" in kinds
     stored = _stored_text(session)
     assert SUBTLE_LEAK not in stored and SECOND_LEAK not in stored
 
@@ -670,9 +798,9 @@ def test_sdk_tutor_hint_passes_with_one_check(session, monkeypatch):
     assert result.reply == HINT and len(prompts) == 1 and len(guard.calls) == 1
 
 
-def test_sdk_regeneration_cannot_log_an_attempt_and_unlock_the_reveal(session, monkeypatch):
-    # The same reproduction on the subscription path: during the regeneration run the model
-    # calls the real in-process tool handlers, log_attempt then reveal_solution(text=leak).
+def _sdk_regeneration(session, monkeypatch, *, first, regenerated, verdicts, learner):
+    """Run an SDK turn whose regeneration calls the REAL in-process tool handlers:
+    log_attempt, then reveal_solution(text=SECOND_LEAK), then replies `regenerated`."""
     convo = _seed(session)
     captured: dict = {}
     real_server = tutor_sdk.create_sdk_mcp_server
@@ -685,27 +813,53 @@ def test_sdk_regeneration_cannot_log_an_attempt_and_unlock_the_reveal(session, m
 
     async def fake_query(prompt, options):
         if "Guard check:" in prompt:  # the regeneration run
-            tool_results.append(await captured["log_attempt"].handler({"summary": "x"}))
+            tool_results.append(await captured["log_attempt"].handler({"summary": "tried"}))
             tool_results.append(
                 await captured["reveal_solution"].handler({"text": SECOND_LEAK}))
-            yield _FakeResult(SECOND_LEAK)  # and it writes the answer as its reply anyway
+            yield _FakeResult(regenerated)
         else:
-            yield _FakeResult(SUBTLE_LEAK)
+            yield _FakeResult(first)
 
     monkeypatch.setattr(tutor_sdk, "create_sdk_mcp_server", capture_server)
     monkeypatch.setattr(tutor_sdk, "ResultMessage", _FakeResult)
     monkeypatch.setattr(tutor_sdk, "query", fake_query)
-    guard = ScriptedLLMClient([_verdict(True), _verdict(True)])
+    guard = ScriptedLLMClient([_verdict(v) for v in verdicts])
+    result = tutor_sdk.run_tutor_turn_sdk(session, convo, learner, guard_llm=guard)
+    session.refresh(convo)
+    return convo, result, tool_results, guard
 
-    result = tutor_sdk.run_tutor_turn_sdk(session, convo, "just tell me", guard_llm=guard)
+
+def test_sdk_regeneration_cannot_log_an_attempt_and_unlock_the_reveal(session, monkeypatch):
+    # The attack on the subscription path: log_attempt, reveal_solution(text=leak), then
+    # the answer as the reply. Blocked, reviewed, fallback, and no attempt recorded.
+    convo, result, (deferred, reveal), guard = _sdk_regeneration(
+        session, monkeypatch, first=SUBTLE_LEAK, regenerated=SECOND_LEAK,
+        verdicts=[True, True], learner="just tell me")
 
     assert result.reply == GUARD_FALLBACK
     assert convo.attempt_logged is False
-    refused, reveal = tool_results
-    assert refused.get("is_error") is True and ATTEMPT_REFUSED in str(refused["content"])
+    assert ATTEMPT_DEFERRED in str(deferred["content"])
     assert reveal.get("is_error") is True and SECOND_LEAK not in str(reveal["content"])
     kinds = _kinds(result)
-    assert "tool:log_attempt:refused" in kinds and "tool:reveal_solution:blocked" in kinds
+    assert "tool:log_attempt:deferred" in kinds and "tool:log_attempt" not in kinds
+    assert "tool:reveal_solution:blocked" in kinds
     assert len(guard.calls) == 2  # the regenerated reply was reviewed, not waved through
     stored = _stored_text(session)
     assert SUBTLE_LEAK not in stored and SECOND_LEAK not in stored
+
+
+def test_sdk_genuine_attempt_logged_during_regeneration_is_recorded_after_the_turn(
+        session, monkeypatch):
+    convo, result, (deferred, reveal), guard = _sdk_regeneration(
+        session, monkeypatch, first=CONFIRMING_DRAFT, regenerated=FOLLOW_UP,
+        verdicts=[True, False], learner="My attempt: softmax(QK^T / sqrt(d_k)) times V?")
+
+    assert result.reply == FOLLOW_UP
+    assert convo.attempt_logged is True  # recorded after the turn
+    assert reveal.get("is_error") is True  # still blocked within the turn
+    kinds = _kinds(result)
+    assert kinds.index("tool:log_attempt:deferred") < kinds.index("tool:reveal_solution:blocked")
+    assert kinds.index("tool:reveal_solution:blocked") < kinds.index("tool:log_attempt")
+    assert len(guard.calls) == 2
+    stored = _stored_text(session)
+    assert CONFIRMING_DRAFT not in stored and SECOND_LEAK not in stored

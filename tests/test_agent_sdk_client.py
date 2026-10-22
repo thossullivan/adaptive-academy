@@ -80,6 +80,35 @@ def test_complete_no_tools_returns_query_text(monkeypatch):
     assert resp.tool_calls == []
 
 
+@pytest.mark.parametrize("stop_reason", ["end_turn", "max_tokens", "refusal"])
+def test_complete_passes_the_sdk_stop_reason_through(monkeypatch, stop_reason):
+    # Callers fast-fail on stop_reason (a cut-off or declined grade); on the subscription
+    # backend it comes from the SDK's ResultMessage.
+    async def fake_query(prompt, options):
+        result = _FakeResult("partial")
+        result.stop_reason = stop_reason
+        yield result
+
+    monkeypatch.setattr(mod, "ResultMessage", _FakeResult)
+    monkeypatch.setattr(mod, "query", fake_query)
+
+    resp = AgentSDKLLMClient(role="reasoning").complete(
+        "s", [{"role": "user", "content": "x"}], tools=[])
+    assert resp.stop_reason == stop_reason
+
+
+def test_complete_tolerates_a_result_without_stop_reason(monkeypatch):
+    async def fake_query(prompt, options):
+        yield _FakeResult("text")  # older SDKs: no stop_reason attribute
+
+    monkeypatch.setattr(mod, "ResultMessage", _FakeResult)
+    monkeypatch.setattr(mod, "query", fake_query)
+
+    resp = AgentSDKLLMClient(role="reasoning").complete(
+        "s", [{"role": "user", "content": "x"}], tools=[])
+    assert resp.text == "text" and resp.stop_reason is None
+
+
 def test_complete_raises_on_error_result(monkeypatch):
     async def fake_query(prompt, options):
         yield _FakeResult("Invalid API key", is_error=True)

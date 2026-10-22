@@ -61,9 +61,11 @@ def log_attempt_result(convo: Conversation, emit, args: dict, *,
                        guard: SolutionGuard | None = None) -> dict:
     """Tool body for log_attempt — records the learner's attempt. Extracted so the
     attempt-gate can be unit-tested without the live SDK. While the solution guard is
-    regenerating a withheld draft it is refused: the tutor can't unlock the gate itself."""
+    regenerating a withheld draft the attempt is deferred, not recorded: the tutor can't
+    unlock the gate mid-turn (run_tutor_turn_sdk records it after the turn if the reply
+    passed review)."""
     if guard is not None and guard.regenerating:
-        return _text_result(guard.refuse_attempt(), is_error=True)
+        return _text_result(guard.defer_attempt(str(args.get("summary", ""))))
     convo.attempt_logged = True
     emit("tool:log_attempt", str(args.get("summary", "")))
     return _text_result("ok: attempt recorded")
@@ -182,6 +184,11 @@ def run_tutor_turn_sdk(
         reply = _FALLBACK
     elif not convo.attempt_logged:
         reply = _guarded_reply(session, convo, guard, reply, prompt, _run)
+        # An attempt the regeneration logged counts only now, and only if its reply passed
+        # review: never mid-turn, and never for a turn that ended in the guard's fallback.
+        if guard.take_deferred_attempt():
+            convo.attempt_logged = True
+            session.add(convo)
 
     tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply)
     session.add(tutor_message)
@@ -204,7 +211,7 @@ def _guarded_reply(session: Session, convo: Conversation, guard: SolutionGuard, 
 
     A withheld draft gets ONE regeneration: a second query whose prompt is the same flattened
     history with the draft and the correction appended (append-only, like the API path).
-    During that run log_attempt is refused (so reveal_solution stays gated), and its reply
+    During that run log_attempt is deferred (so reveal_solution stays gated), and its reply
     is always checked; a second leak stores GUARD_FALLBACK. Only the returned text is ever
     stored.
     """

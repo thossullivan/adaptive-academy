@@ -9,9 +9,11 @@ an API key, engine/tutor_sdk.py on the Claude subscription).
 Scope: a reply is reviewed only when it is finalised while the conversation has NO logged
 attempt. A log_attempt earlier in the same turn makes the reply post-attempt (not reviewed),
 and the text of an allowed reveal_solution is never reviewed (the gate already decided).
-While a withheld draft is being regenerated the tutor cannot unlock itself: log_attempt is
-refused for that step (`ATTEMPT_REFUSED`; an attempt must come from the learner), so
-reveal_solution stays gated and the regenerated reply is always reviewed.
+While a withheld draft is being regenerated the tutor cannot unlock itself mid-turn: a
+log_attempt then is DEFERRED (`ATTEMPT_DEFERRED`), so reveal_solution stays gated for the
+rest of the turn and the regenerated reply is always reviewed. The attempt is recorded after
+the turn only if that reply passes review (a genuine attempt the first draft forgot to log
+is kept); a turn that ends in the fallback records nothing.
 
 Detection:
 1. `screen_reply`: a deterministic screen, no model call, for obvious leaks (a long fenced
@@ -86,11 +88,12 @@ GUARD_FALLBACK = (
     "here, even if you're not sure it's right? Tell me that and we'll build from it."
 )
 
-# The tool result for a log_attempt the tutor makes while regenerating a withheld draft.
-ATTEMPT_REFUSED = (
-    "REFUSED: nothing was recorded. An attempt must come from the learner, in their own "
-    "words; you are rewriting a reply that gave the answer away. Reply with one question or "
-    "hint that invites their attempt."
+# The tool result for a log_attempt the tutor makes while regenerating a withheld draft. The
+# attempt is DEFERRED, not refused (the learner may really have tried, and the first draft
+# just forgot to log it): it is recorded after the turn, and only if the rewritten reply
+# passes review. Until then reveal_solution stays gated.
+ATTEMPT_DEFERRED = (
+    "Noted. Reply without stating the answer; the solution can be shown on the next turn."
 )
 
 # Decisions returned by SolutionGuard.review.
@@ -109,10 +112,23 @@ FALLBACK = "fallback"
 _SECTION_MAX = 6_000
 
 # A fenced block with this many non-blank lines is an implementation, not a hint, unless it
-# is a fill-in-the-blank scaffold (TODO, ..., pass, ___), a standard generation-first hint.
+# is a fill-in-the-blank scaffold (a standard generation-first hint). A block is a scaffold
+# only if it has a real GAP, judged line by line (`_is_scaffold`): a token appearing
+# somewhere is not enough, since spreads (`[...a]`), Ellipsis subscripts (`y[..., 0]`),
+# `"computing..."`, `except E: pass` and `# TODO: memoize later` all occur in finished code.
 _CODE_LINES_LEAK = 6
 _FENCE = re.compile(r"```[^\n]*\n(.*?)(?:```|\Z)", re.S)
-_SCAFFOLD = re.compile(r"\bTODO\b|\.\.\.|…|_{3,}|^\s*pass\s*$", re.M)
+_STRING = re.compile(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"|`(?:\\.|[^`\\])*`")
+# A statement that is nothing but a placeholder: `...`, `pass`, `raise NotImplementedError`,
+# or an assignment / return of a bare ellipsis (`out = ...`, `return ...`).
+_PLACEHOLDER = re.compile(
+    r"^(?:\.\.\.|…|pass|raise\s+NotImplementedError\b.*"
+    r"|(?:.*[^=!<>]=|return)\s*(?:\.\.\.|…))\s*;?$")
+_TODO_COMMENT = re.compile(r"^(?:#|//)\s*TODO\b", re.I)
+_BLANK = re.compile(r"_{3,}")
+# Headers whose body is legitimately `pass` in finished code.
+_HANDLER_HEADER = re.compile(
+    r"^(?:except\b.*|finally|else|try)\s*:$|\b(?:catch|finally|else)\b.*\{$")
 # Only announcements of a handover. A bare "the final answer is" also opens Socratic
 # questions ("Before we get to what the final answer is, ..."), so it is not matched.
 _ANNOUNCED = re.compile(
@@ -144,12 +160,38 @@ class GuardVerdict:
     reason: str = ""
 
 
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _is_scaffold(lines: list[str]) -> bool:
+    """True when the (non-blank) code lines leave a gap for the learner to fill.
+
+    A gap is a `___` blank outside a string, a placeholder statement (`...`, `pass`,
+    `raise NotImplementedError`, `x = ...`) that does not follow an except/finally/else
+    header, or a TODO comment that is the whole body of a block (a header before it, and a
+    dedent, a closing brace or the end of the block after it)."""
+    for i, line in enumerate(lines):
+        code = _STRING.sub("''", line).strip()
+        prev = lines[i - 1].strip() if i else ""
+        if _BLANK.search(code):
+            return True
+        if _PLACEHOLDER.match(code) and not _HANDLER_HEADER.search(prev):
+            return True
+        if _TODO_COMMENT.match(code) and prev.endswith((":", "{")) \
+                and not _HANDLER_HEADER.search(prev):
+            after = lines[i + 1] if i + 1 < len(lines) else None
+            if after is None or _indent(after) < _indent(line) or after.strip().startswith("}"):
+                return True
+    return False
+
+
 def screen_reply(reply: str) -> str | None:
     """Deterministic screen: the rule an obvious leak tripped ("code_block" or "phrase"),
     or None. With a model check available this is a hint to it, not a verdict."""
     for body in _FENCE.findall(reply or ""):
         lines = [line for line in body.splitlines() if line.strip()]
-        if len(lines) >= _CODE_LINES_LEAK and not _SCAFFOLD.search(body):
+        if len(lines) >= _CODE_LINES_LEAK and not _is_scaffold(lines):
             return "code_block"
     if _ANNOUNCED.search(reply or ""):
         return "phrase"
@@ -212,7 +254,9 @@ class SolutionGuard:
     `emit(kind, detail)` writes the turn's AgentEvents. The caller releases the db write lock
     before `review` (it may make a model call) and decides, per the returned decision,
     whether to show the draft, regenerate, or store GUARD_FALLBACK. While `regenerating`, the
-    caller refuses log_attempt with ATTEMPT_REFUSED and reviews the reply regardless.
+    caller defers log_attempt (`defer_attempt`), keeps reveal_solution gated, reviews the
+    reply regardless, and after the turn records the attempt only if
+    `take_deferred_attempt()` says so.
     """
 
     def __init__(self, *, concept: str, learner_text: str, llm: LLMClient | None,
@@ -223,6 +267,8 @@ class SolutionGuard:
         self._llm = llm
         self._emit = emit
         self.regenerating = False
+        self._pending_attempt: str | None = None  # a deferred log_attempt's summary
+        self._regenerated_passed = False
 
     def check(self, reply: str) -> GuardVerdict:
         """The model check, told what the screen saw; the screen alone if it fails."""
@@ -256,6 +302,8 @@ class SolutionGuard:
         """PASS (show it), REGENERATE (withhold it, ask once more), or FALLBACK."""
         verdict = self.check(draft)
         if not verdict.gives_away:
+            if self.regenerating:
+                self._regenerated_passed = True
             return PASS
         self._emit("guard:solution_blocked", f"source={verdict.source}")
         if not self.regenerating:
@@ -266,10 +314,21 @@ class SolutionGuard:
         self._emit("guard:fallback", "the regenerated draft also gave the answer away")
         return FALLBACK
 
-    def refuse_attempt(self) -> str:
-        """log_attempt during a regeneration: trace it and return the refusal tool result."""
-        self._emit("tool:log_attempt:refused", "attempt must come from the learner")
-        return ATTEMPT_REFUSED
+    def defer_attempt(self, summary: str) -> str:
+        """log_attempt during a regeneration: hold it until the rewritten reply has passed
+        review, and return the tool result telling the tutor so."""
+        self._pending_attempt = str(summary or "")
+        self._emit("tool:log_attempt:deferred", "recorded after the turn if the reply passes")
+        return ATTEMPT_DEFERRED
+
+    def take_deferred_attempt(self) -> bool:
+        """After the turn: True if a deferred attempt should now be recorded (the rewritten
+        reply passed review). Emits the normal tool:log_attempt event when it is."""
+        if self._pending_attempt is None or not self._regenerated_passed:
+            return False
+        self._emit("tool:log_attempt", self._pending_attempt)
+        self._pending_attempt = None
+        return True
 
     def regeneration_failed(self, cause: BaseException | str) -> str:
         """The regeneration produced nothing usable: store the fallback, not an error."""
