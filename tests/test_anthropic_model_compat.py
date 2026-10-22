@@ -447,13 +447,8 @@ def test_researcher_continues_a_paused_turn_until_it_finishes(session, api_key, 
     assert calls[2]["messages"][1]["role"] == "assistant"
     assert calls[2]["messages"][1]["content"][-1]["id"] == "srvtoolu_2"
     assert len(calls[2]["messages"]) == 2
-    # The same search tool each time, carrying what is left of the 5 searches (1, then 2
-    # used): max_uses counts per request, and each continuation is a new request.
-    assert [kw["tools"] for kw in calls] == [
-        [{"type": "web_search_20250305", "name": "web_search", "max_uses": n}]
-        for n in (5, 4, 2)]
     for kw in calls:
-        assert kw["system"] == calls[0]["system"]
+        assert kw["tools"] == calls[0]["tools"] and kw["system"] == calls[0]["system"]
         assert not (_FORBIDDEN_REQUEST_KEYS & set(kw))
     rows = _rows(session)
     assert [r.operation for r in rows] == ["research_search"] * 3

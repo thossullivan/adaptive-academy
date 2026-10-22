@@ -319,12 +319,8 @@ def test_research_pause_turn_is_continued_with_the_paused_content_unchanged(sess
     assert second["messages"][1]["role"] == "assistant"
     assert _canonical(second["messages"][1]["content"]) == _canonical(
         _body("research_pause_turn")["content"])
-    # Otherwise the same request, with the search tool carrying the rest of the cap (the
-    # paused turn reported 1 search).
-    assert second["tools"] == [{"type": "web_search_20250305", "name": "web_search",
-                                "max_uses": 4}]
-    assert {k: v for k, v in first.items() if k not in ("messages", "tools")} == {
-        k: v for k, v in second.items() if k not in ("messages", "tools")}
+    assert {k: v for k, v in first.items() if k != "messages"} == {
+        k: v for k, v in second.items() if k != "messages"}
 
     rows = _usage_rows(session)
     assert [r.operation for r in rows] == ["research_search", "research_search"]

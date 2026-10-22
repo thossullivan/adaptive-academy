@@ -145,29 +145,6 @@ def test_web_search_tool_follows_the_catalog():
         "type": "openrouter:web_search", "parameters": {"max_uses": 5}}
 
 
-def test_web_search_limits_stop_openrouters_tool_loop_for_other_models():
-    # Claude: Anthropic's max_uses on the tool is the cap; no extra request fields.
-    assert model_catalog.web_search_limits("anthropic/claude-sonnet-5.5", 5) == {}
-    assert model_catalog.web_search_limits("claude-sonnet-5-5", 5) == {}
-    # Others: OpenRouter's server-tool loop stops after the cap, whatever the engine.
-    assert model_catalog.web_search_limits("deepseek/deepseek-v4", 5) == {
-        "stop_server_tools_when": [{"type": "step_count_is", "step_count": 5}]}
-    assert model_catalog.web_search_limits("openai/gpt-5.6", 1) == {
-        "stop_server_tools_when": [{"type": "step_count_is", "step_count": 1}]}
-
-
-def test_request_extra_body_merges_per_request_fields():
-    stop = {"stop_server_tools_when": [{"type": "step_count_is", "step_count": 5}]}
-    assert backends.request_extra_body(backends.ANTHROPIC) == {}
-    assert backends.request_extra_body(backends.ANTHROPIC, {}) == {}
-    assert backends.request_extra_body(backends.OPENROUTER, stop) == {"extra_body": {
-        "provider": {"data_collection": "deny"}, **stop}}
-    # The backend's own fields can't be replaced by a per-request field.
-    assert backends.request_extra_body(
-        backends.OPENROUTER, {"provider": {"data_collection": "allow"}}) == {
-        "extra_body": {"provider": {"data_collection": "deny"}}}
-
-
 def test_experimental_models_lists_configured_ones(monkeypatch):
     monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
     assert model_catalog.experimental_models() == []
