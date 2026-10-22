@@ -1,6 +1,11 @@
 {
   "assessment_grade": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -27,6 +32,11 @@
       ]
     },
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -55,6 +65,11 @@
   ],
   "curriculum_generation": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete_json",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -90,8 +105,726 @@
       ]
     }
   ],
+  "openrouter/assessment_grade": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "19889164fe20f8bbb1c38ed8ce62a63de79fbee9be95b59163afc3da3f67d4a8",
+          "chars": 627
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "9fad1de9aa242b45dfe7ff59f1c7a78084c719f97605e18660cabc447f01f31f",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "5c465941979c061e48cd7d45f19bbcce6127cca1fbbfae4ccce004a9474120a6",
+          "chars": 1999
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "42e5d17fc6cd2d083f76f736805f04616052095b5cb693bc53f3960c0129200d",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "openrouter/curriculum_generation": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete_json",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "a8e3b421beebbdcfc6bcf680321a622ce3bea061c1e26c07212aeda2cb1078ba",
+          "chars": 1625
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "emit_track",
+          "type": "custom",
+          "sha256": "46add79da84754fd6575883f1776a770e7c24d43cc8f5d774a9b3510805b207c"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "a33494aad2dd8d36bd8f8e0d803fc748a0db34cced42ac1470ae617003d264b8",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "openrouter/paper_probe_director": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "4c1226a605aee208a9072e432b75562d8f0f5da0ae812f94e1e3791edf154ef3",
+          "chars": 1322
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "b56783225929813e4a3eeebdb81776e55ed0b49624f791b2c8b16384b0064899",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "openrouter/research_foundation": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "db9a65ed9131d10c17894e97b378b49bf78c4b9a8bf82f132e99dac285994d94",
+          "chars": 804
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "58f4b0d629b2ab5aa422aeb57ad5945123a04f020c57b1f6a2940937f891e513",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "openrouter/research_search": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "research_search",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 16000,
+      "system": [
+        {
+          "sha256": "a01661e763c523c678088eba0c4e1ec8392855b60d4e9d32ebe6ba13a86e7e01",
+          "chars": 370
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "web_search",
+          "type": "web_search_20250305",
+          "sha256": "83647c1c1d41a904b6de51b0b241db6e33e7d883cf27f8f391c411ed81d166cd"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "22bf72c492ba6b024c10d74365dd2eeb3028b2f8a5a7ac45f539e0d533264a4d",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    }
+  ],
+  "openrouter/roleplay_persona": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "1ad5cc5fc6c4976c0aab0b312ec06b9c1e4e7afd004f29a57128c436fc988479",
+          "chars": 844
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "329ddae1ffecd7da4933322ca1d4e73f02ea9a51465c91ab2bee0e496f2ef1c1",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "1ad5cc5fc6c4976c0aab0b312ec06b9c1e4e7afd004f29a57128c436fc988479",
+          "chars": 844
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "03a0646e0386bd9e1368f929b11e256de1fe5b0bb7b919862848da79ecca37ad",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    }
+  ],
+  "openrouter/teach_grade": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2978d964f39e10be59ecaebf0080cab05f3fa673c911f7a2ff80f3f52b475882",
+          "chars": 769
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "e1a0899cf2a126ac5b7a8a89a65f41cfb3790865888031617192e7f71fc60fcd",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "openrouter/tutor_solution_guard": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "0de7fca9752a5456d67ab85d2de8f2b4c4a3840cb10e6d624dc39f0c66daff08",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete_json",
+      "role": "copy",
+      "model": "anthropic/claude-haiku-5.5",
+      "max_tokens": 4000,
+      "system": [
+        {
+          "sha256": "5a68484aeb3f16283635ce3d4a191da6e74db6e046ffba822c0386be162fd6db",
+          "chars": 3134
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "emit_solution_check",
+          "type": "custom",
+          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "511ec8b16490a6b11a48e95d0ef7ae13a333a1687ff13a0c91c004644acb0638",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "67e79946f041054e408926a25a7b97bab551211550ec980cdc1405888e5c8435",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete_json",
+      "role": "copy",
+      "model": "anthropic/claude-haiku-5.5",
+      "max_tokens": 4000,
+      "system": [
+        {
+          "sha256": "5a68484aeb3f16283635ce3d4a191da6e74db6e046ffba822c0386be162fd6db",
+          "chars": 3134
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "emit_solution_check",
+          "type": "custom",
+          "sha256": "01eb935a680b78e402cc5111bc934786182c37899a458b1bd1d1896a7f3740dc"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "eca21d4a13d28978dfd8920941128487741591a26faf634c3a4159db284e3b56",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "openrouter/tutor_turn": [
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "b378b8dff1202a1aa739370afd66bfae253dab48af70786c07f74d4820521648",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "2df9def22398fe0f5303292874fecc1a45968bb869bbc25d5a8a6f3056b844e6",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api",
+        "auth": "authorization-bearer",
+        "drops_x_api_key": true
+      },
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "anthropic/claude-sonnet-5.5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "a03025c64a638e2147a3f2da1dfc7f96a4d86282a3eb036b1482e3dd00edbc98",
+      "other_params": {
+        "extra_body": {
+          "provider": {
+            "data_collection": "deny"
+          }
+        }
+      },
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    }
+  ],
   "paper_probe_director": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -120,6 +853,11 @@
   ],
   "research_foundation": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -148,6 +886,11 @@
   ],
   "research_search": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "research_search",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -183,6 +926,11 @@
   ],
   "roleplay_persona": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -209,6 +957,11 @@
       ]
     },
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -240,6 +993,11 @@
   ],
   "teach_grade": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -268,6 +1026,11 @@
   ],
   "tutor_solution_guard": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -306,6 +1069,11 @@
       ]
     },
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete_json",
       "role": "copy",
       "model": "claude-haiku-5-5",
@@ -341,6 +1109,11 @@
       ]
     },
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -381,6 +1154,11 @@
       ]
     },
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete_json",
       "role": "copy",
       "model": "claude-haiku-5-5",
@@ -418,6 +1196,11 @@
   ],
   "tutor_turn": [
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -456,6 +1239,11 @@
       ]
     },
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",
@@ -496,6 +1284,11 @@
       ]
     },
     {
+      "endpoint": {
+        "base_url": null,
+        "auth": "x-api-key",
+        "drops_x_api_key": false
+      },
       "operation": "complete",
       "role": "reasoning",
       "model": "claude-sonnet-5-5",

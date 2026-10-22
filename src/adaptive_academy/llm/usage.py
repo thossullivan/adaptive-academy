@@ -10,20 +10,28 @@ Feature attribution: a contextvar holds a short label for the API route that tri
 call (set by a FastAPI dependency in api/app.py, from the matched route template), so engine
 code needs no extra parameters. Non-request callers (CLI, scripts) record feature=NULL.
 
-Budget: `check_budget(model)` runs before every API-key (backend="anthropic") call. When
-AA_DAILY_BUDGET_USD is set and today's recorded API-key spend already meets or exceeds it, it
-raises BudgetExceededError (→ HTTP 429). "Today" is the server's local calendar day (UTC in
-the Docker image unless TZ is set). A single call can overshoot the limit — the check runs
-before the call, and the call's cost is only known after it. A call on a model with no known
-price (llm/pricing.py) would be recorded at $0 and never trip the limit, so while a limit is
-set such a call is refused up front (UnpricedModelError, also → 429). Agent SDK calls are
-billed to the Claude subscription, not the key, so they are recorded but never blocked.
+Cost: each row keeps the list-price cost (llm/pricing.py, `cost_usd`) and, where the service
+reports one, what it actually charged (`reported_cost_usd`: OpenRouter's `usage.cost`, which
+includes its fees). The reported cost wins wherever cost is summed (`effective_cost`): the
+Usage page and the daily limit.
+
+Budget: `check_budget(model)` runs before every API-key call (backend "anthropic" or
+"openrouter"). When AA_DAILY_BUDGET_USD is set and today's recorded API-key spend already
+meets or exceeds it, it raises BudgetExceededError (→ HTTP 429). "Today" is the server's local
+calendar day (UTC in the Docker image unless TZ is set). A single call can overshoot the limit
+— the check runs before the call, and the call's cost is only known after it. On a backend
+that doesn't report cost (Anthropic), a call on a model with no known price would be recorded
+at $0 and never trip the limit, so while a limit is set such a call is refused up front
+(UnpricedModelError, also → 429). On OpenRouter every call reports its cost, so any model can
+run under a limit. Agent SDK calls are billed to the Claude subscription, not a key, so they
+are recorded but never blocked.
 """
 
 from __future__ import annotations
 
 import contextvars
 import logging
+import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -35,14 +43,24 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, select
 
 from adaptive_academy.engine.trace_writer import TRACE_WRITER
-from adaptive_academy.llm import pricing
+from adaptive_academy.llm import model_catalog, pricing
+from adaptive_academy.llm.backends import (
+    BACKEND_AGENT_SDK,
+    BACKEND_ANTHROPIC,
+    BACKEND_OPENROUTER,
+    KEY_BILLED_BACKENDS,
+    api_backend,
+)
 from adaptive_academy.models import LLMUsage
 from adaptive_academy.settings import settings
 
 logger = logging.getLogger(__name__)
 
-BACKEND_ANTHROPIC = "anthropic"
-BACKEND_AGENT_SDK = "agent_sdk"
+# Re-exported for the clients that import them from here.
+__all__ = ["BACKEND_AGENT_SDK", "BACKEND_ANTHROPIC", "BACKEND_OPENROUTER"]
+
+# What a row cost: the service's reported charge when there is one, else the list price.
+effective_cost = func.coalesce(LLMUsage.reported_cost_usd, LLMUsage.cost_usd)
 
 
 class BudgetExceededError(RuntimeError):
@@ -195,6 +213,15 @@ def _int(value: Any) -> int:
     return 0
 
 
+def _reported_cost(value: Any) -> float | None:
+    """A charge the service reported (OpenRouter's usage.cost), or None if absent or not a
+    usable dollar amount."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) and value >= 0 else None
+
+
 def _build_row(
     *,
     backend: str,
@@ -237,6 +264,7 @@ def _build_row(
         cache_read_input_tokens=cache_read,
         web_search_requests=searches,
         cost_usd=cost,
+        reported_cost_usd=_reported_cost(_field(usage, "cost")),
     )
 
 
@@ -289,25 +317,27 @@ def _close_read_session(session: Session, bind: Engine) -> None:
 
 
 def spent_today_usd(now: datetime | None = None) -> float:
-    """Recorded API-key spend since local midnight. Unknown-price calls count as $0."""
+    """Recorded API-key spend since local midnight (reported cost where the service reports
+    one, else list price). Unknown-price calls count as $0."""
     bind = get_usage_bind()
     if bind is None:
         return 0.0
     start = _db_time(local_day_start(now))
     with Session(bind) as session:
         total = session.exec(
-            select(func.coalesce(func.sum(LLMUsage.cost_usd), 0.0)).where(
+            select(func.coalesce(func.sum(effective_cost), 0.0)).where(
                 LLMUsage.created_at >= start,
-                LLMUsage.backend == BACKEND_ANTHROPIC,
+                LLMUsage.backend.in_(KEY_BILLED_BACKENDS),
             )
         ).one()
         _close_read_session(session, bind)
     return float(total or 0.0)
 
 
-def check_budget(model: str | None = None) -> None:
+def check_budget(model: str | None = None, *, reports_cost: bool = False) -> None:
     """Raise BudgetExceededError if today's API-key spend meets the configured limit, or
-    UnpricedModelError if a limit is set and `model` (the call's model) has no known price.
+    UnpricedModelError if a limit is set and `model` (the call's model) has no known price on
+    a backend that doesn't report what it charged (`reports_cost`, see llm/backends.py).
 
     Fails open on a read error: if today's spend can't be read, the call proceeds and a
     warning is logged — a broken usage store must not take every LLM feature down with it.
@@ -315,7 +345,7 @@ def check_budget(model: str | None = None) -> None:
     limit = settings.daily_budget_usd
     if limit is None:
         return
-    if model is not None and pricing.price_for(model) is None:
+    if model is not None and not reports_cost and pricing.price_for(model) is None:
         raise UnpricedModelError(model, limit)
     try:
         spent = spent_today_usd()
@@ -331,9 +361,10 @@ def budget_warnings() -> list[str]:
     """Configuration problems with the daily limit, for GET /api/setup (empty when fine).
 
     Today: a limit is set but a configured role's model has no known price, so every
-    API-key call on that role will be refused (see check_budget).
+    API-key call on that role will be refused (see check_budget). Never on a backend that
+    reports each call's cost: there every model's spend is counted.
     """
-    if settings.daily_budget_usd is None:
+    if settings.daily_budget_usd is None or api_backend().reports_cost:
         return []
     from adaptive_academy.llm.registry import MODEL_ENV_VARS, resolved_models
 
@@ -362,13 +393,14 @@ _TOKEN_FIELDS = (
 def _aggregates() -> list:
     cols = [
         func.count(LLMUsage.id).label("calls"),
-        func.coalesce(func.sum(LLMUsage.cost_usd), 0.0).label("cost_usd"),
+        func.coalesce(func.sum(effective_cost), 0.0).label("cost_usd"),
         func.coalesce(
-            func.sum(case((LLMUsage.backend == BACKEND_ANTHROPIC, LLMUsage.cost_usd), else_=0.0)),
+            func.sum(case((LLMUsage.backend.in_(KEY_BILLED_BACKENDS), effective_cost),
+                          else_=0.0)),
             0.0,
         ).label("api_cost_usd"),
         func.coalesce(
-            func.sum(case((LLMUsage.cost_usd.is_(None), 1), else_=0)), 0
+            func.sum(case((effective_cost.is_(None), 1), else_=0)), 0
         ).label("unpriced_calls"),
     ]
     cols += [
@@ -431,6 +463,9 @@ def usage_summary(session: Session, now: datetime | None = None) -> dict:
     by_feature = [{"feature": i.pop("key"), **i, "cache_read_share": cache_read_share(i)}
                   for i in _breakdown(LLMUsage.feature)]
     by_model = [{"model": i.pop("key"), **i} for i in _breakdown(LLMUsage.model)]
+    for item in by_model:
+        # The model catalog is the one source for the UI's "Experimental" label.
+        item["experimental"] = model_catalog.is_experimental(item["model"])
 
     limit = settings.daily_budget_usd
     spent = totals["today"]["api_cost_usd"]

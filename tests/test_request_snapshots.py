@@ -4,13 +4,18 @@ Pinned surfaces (see SURFACES below): a two-turn tutor conversation with a tool 
 assessment (rubric then grade), curriculum generation, a research search, the research
 foundation, a two-turn roleplay persona, a teach-back grade, the paper-probe director, and
 the tutor's solution guard with its regeneration. Other engine calls are not pinned here.
+Each surface is pinned twice: on the default Anthropic backend (keyed by the surface name) and
+on AA_LLM_BACKEND=openrouter (keyed "openrouter/<surface>"), where the endpoint, the model
+slugs, the auth header kind and OpenRouter's provider preference differ.
 
 A change to any of their prompts, schemas, tools, the model, a parameter, or where the
 prompt-cache breakpoints sit changes tests/fixtures/request_snapshots.json, so it shows up
 as a reviewed diff instead of slipping through. Per call it records: the usage operation,
 role and model, max_tokens, a sha256 and length of EACH system block (so text moving across
 the cache breakpoint shows), a sha256 of the messages, each tool's name with a sha256 of its
-full definition, tool_choice, any other request parameters, and every cache_control location.
+full definition, tool_choice, any other request parameters (OpenRouter's `provider`
+preference arrives here as `extra_body`), every cache_control location, and the client's
+endpoint (base URL, and whether the key goes as x-api-key or Authorization: Bearer).
 
 The engine functions run against the real AnthropicLLMClient / AnthropicResearcherClient
 from api/deps, whose SDK `messages.create` is replaced by a fake that records the kwargs and
@@ -72,10 +77,11 @@ def _cache_locations(kw) -> list[str]:
     return where
 
 
-def _summarise(kw, usage_call) -> dict:
+def _summarise(kw, usage_call, endpoint) -> dict:
     system = kw.get("system")
     blocks = [system] if isinstance(system, str) else [b["text"] for b in system]
     return {
+        "endpoint": endpoint,
         "operation": usage_call["operation"],
         "role": usage_call["role"],
         "model": kw["model"],
@@ -98,12 +104,30 @@ def _summarise(kw, usage_call) -> dict:
 class _Recorder:
     def __init__(self):
         self.calls: list[dict] = []
+        self.endpoints: list[dict] = []
         self.usage: list[dict] = []
         self.queue: list = []
 
     def summaries(self) -> list[dict]:
         assert len(self.calls) == len(self.usage), "every call records its usage once"
-        return [_summarise(kw, u) for kw, u in zip(self.calls, self.usage)]
+        return [_summarise(kw, u, e)
+                for kw, u, e in zip(self.calls, self.usage, self.endpoints)]
+
+
+def _endpoint(client_kw) -> dict:
+    """Where the client sends requests and how it authenticates, never the key itself."""
+    if client_kw.get("auth_token"):
+        auth = "authorization-bearer"
+    elif client_kw.get("api_key"):
+        auth = "x-api-key"
+    else:
+        auth = "none"
+    headers = client_kw.get("default_headers") or {}
+    return {
+        "base_url": client_kw.get("base_url"),  # None: the SDK default, api.anthropic.com
+        "auth": auth,
+        "drops_x_api_key": any(k.lower() == "x-api-key" for k in headers),
+    }
 
 
 def _resp(*blocks, stop_reason="end_turn"):
@@ -121,20 +145,28 @@ def _tool(name, payload, id_="toolu_01"):
                  stop_reason="tool_use")
 
 
-@pytest.fixture
-def rec(monkeypatch):
+BACKENDS = ("anthropic", "openrouter")
+
+
+@pytest.fixture(params=BACKENDS)
+def rec(request, monkeypatch):
     from adaptive_academy.settings import settings
 
     recorder = _Recorder()
+    recorder.backend = request.param
 
     class _Messages:
+        def __init__(self, endpoint):
+            self.endpoint = endpoint
+
         def create(self, **kw):
             recorder.calls.append(json.loads(json.dumps(kw)))  # a copy, as sent
+            recorder.endpoints.append(self.endpoint)
             return recorder.queue.pop(0)
 
     class _FakeAnthropic:
         def __init__(self, *a, **kw):
-            self.messages = _Messages()
+            self.messages = _Messages(_endpoint(kw))
 
     def _record_usage(**kw):
         recorder.usage.append({"operation": kw["operation"], "role": kw["role"]})
@@ -143,9 +175,13 @@ def rec(monkeypatch):
         monkeypatch.setattr(f"adaptive_academy.llm.{module}.Anthropic", _FakeAnthropic)
         monkeypatch.setattr(f"adaptive_academy.llm.{module}.record_usage", _record_usage)
     monkeypatch.setattr(today, "local_now", lambda: FROZEN_NOW)
-    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    if request.param == "openrouter":
+        monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-test-not-a-real-key")
+    else:
+        monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key")
-    # Pin the defaults (llm/registry.py), whatever the developer's .env says.
+    # Pin the defaults (llm/backends.py, per backend), whatever the developer's .env says.
     monkeypatch.setattr(settings, "reasoning_model", "")
     monkeypatch.setattr(settings, "copy_model", "")
     return recorder
@@ -365,28 +401,59 @@ SURFACES = {
 }
 
 
+def _key(backend: str, surface: str) -> str:
+    return surface if backend == "anthropic" else f"{backend}/{surface}"
+
+
+ALL_KEYS = {_key(b, s) for b in BACKENDS for s in SURFACES}
+
+
 @pytest.mark.parametrize("surface", list(SURFACES))
 def test_request_matches_snapshot(surface, session, rec):
     SURFACES[surface](session, rec)
     assert not rec.queue, "every canned response was consumed"
     actual = rec.summaries()
+    key = _key(rec.backend, surface)
 
     stored = json.loads(SNAPSHOT.read_text()) if SNAPSHOT.exists() else {}
     if os.environ.get("UPDATE_REQUEST_SNAPSHOTS") == "1":
-        stored[surface] = actual
-        kept = {name: calls for name, calls in sorted(stored.items()) if name in SURFACES}
+        stored[key] = actual
+        kept = {name: calls for name, calls in sorted(stored.items()) if name in ALL_KEYS}
         SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
         SNAPSHOT.write_text(json.dumps(kept, indent=2) + "\n")
         return
-    assert surface in stored, (
-        f"no snapshot for {surface!r}; run UPDATE_REQUEST_SNAPSHOTS=1 uv run pytest "
+    assert key in stored, (
+        f"no snapshot for {key!r}; run UPDATE_REQUEST_SNAPSHOTS=1 uv run pytest "
         "tests/test_request_snapshots.py and review the new fixture")
-    assert actual == stored[surface], (
-        f"the {surface!r} request changed. If intended, regenerate with "
+    assert actual == stored[key], (
+        f"the {key!r} request changed. If intended, regenerate with "
         "UPDATE_REQUEST_SNAPSHOTS=1 uv run pytest tests/test_request_snapshots.py and review "
         "the fixture diff.")
 
 
 def test_snapshot_has_no_stale_surfaces():
     stored = json.loads(SNAPSHOT.read_text())
-    assert set(stored) == set(SURFACES)
+    assert set(stored) == ALL_KEYS
+
+
+def test_openrouter_snapshots_differ_only_where_the_backend_does():
+    # Same prompts, tools and cache breakpoints on both backends; only the endpoint, the
+    # model slug and OpenRouter's provider preference change.
+    stored = json.loads(SNAPSHOT.read_text())
+    slugs = {"claude-sonnet-5-5": "anthropic/claude-sonnet-5.5",
+             "claude-haiku-5-5": "anthropic/claude-haiku-5.5"}
+    for surface in SURFACES:
+        direct, routed = stored[surface], stored[_key("openrouter", surface)]
+        assert len(direct) == len(routed)
+        for a, b in zip(direct, routed):
+            assert a["endpoint"] == {"base_url": None, "auth": "x-api-key",
+                                     "drops_x_api_key": False}
+            assert b["endpoint"] == {"base_url": "https://openrouter.ai/api",
+                                     "auth": "authorization-bearer", "drops_x_api_key": True}
+            assert b["model"] == slugs[a["model"]]
+            assert "extra_body" not in a["other_params"]
+            assert b["other_params"] == {
+                **a["other_params"], "extra_body": {"provider": {"data_collection": "deny"}}}
+            ignore = {"endpoint", "model", "other_params"}
+            assert {k: v for k, v in a.items() if k not in ignore} == {
+                k: v for k, v in b.items() if k not in ignore}

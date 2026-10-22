@@ -9,6 +9,10 @@ services:
       AA_EMBEDDING_CACHE_DIR: /data/fastembed_cache
       AA_OBSIDIAN_VAULT_PATH: /vault
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Optional: AA_LLM_BACKEND=openrouter with OPENROUTER_API_KEY sends the model calls
+      # through OpenRouter instead. (agent_sdk is host-only: the image has no Claude Code.)
+      AA_LLM_BACKEND: ${AA_LLM_BACKEND:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       # Optional model overrides from .env; blank falls back to the built-in default.
       AA_MODEL_REASONING: ${AA_MODEL_REASONING:-}
       AA_MODEL_COPY: ${AA_MODEL_COPY:-}

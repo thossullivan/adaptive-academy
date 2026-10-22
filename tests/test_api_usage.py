@@ -221,3 +221,33 @@ def test_unpriced_model_under_a_limit_is_a_legible_429(client, session, api_key,
     assert "claude-unpriced-test" in detail and "no known price" in detail
     assert "AA_DAILY_BUDGET_USD" in detail
     assert calls == []
+
+
+def test_openrouter_usage_prefers_reported_cost_and_flags_experimental_models(
+        client, session, monkeypatch):
+    monkeypatch.setattr(usage.settings, "daily_budget_usd", 1.0)
+    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+    # A Claude call where OpenRouter's charge (with its fee) differs from list price, and a
+    # call on a model with no list price at all.
+    session.add(LLMUsage(created_at=NOW, backend="openrouter",
+                         model="anthropic/claude-sonnet-5.5", role="reasoning",
+                         operation="complete", cost_usd=0.10, reported_cost_usd=0.12))
+    session.add(LLMUsage(created_at=NOW, backend="openrouter", model="deepseek/deepseek-v4",
+                         role="reasoning", operation="complete", cost_usd=None,
+                         reported_cost_usd=0.03))
+    session.commit()
+    _row(session, cost=0.50, when=NOW)  # an earlier Anthropic-backend call today
+
+    body = client.get("/api/usage").json()
+    assert body["backend"] == "openrouter"
+    today = body["totals"]["today"]
+    assert today["cost_usd"] == pytest.approx(0.65)
+    assert today["api_cost_usd"] == pytest.approx(0.65)  # both backends are key-billed
+    assert today["unpriced_calls"] == 0
+    assert body["budget"]["spent_today_usd"] == pytest.approx(0.65)
+    assert usage.spent_today_usd() == pytest.approx(0.65)
+    by_model = {m["model"]: m for m in body["by_model"]}
+    assert by_model["anthropic/claude-sonnet-5.5"]["cost_usd"] == pytest.approx(0.12)
+    assert by_model["anthropic/claude-sonnet-5.5"]["experimental"] is False
+    assert by_model["deepseek/deepseek-v4"]["experimental"] is True
+    assert by_model["claude-sonnet-4-6"]["experimental"] is False

@@ -1,0 +1,46 @@
+{
+  "_source": "documented",
+  "_note": "OpenRouter Messages endpoint (POST https://openrouter.ai/api/v1/messages) reply on anthropic/claude-sonnet-5.5: empty thinking then text. Usage carries Anthropic's fields plus OpenRouter's cost (what it charged, USD), cost_details (CostDetails: upstream_inference_prompt_cost, upstream_inference_completions_cost, upstream_inference_cost, server_tool_cost), is_byok, and server_tool_use (ORAnthropicServerToolUsage: web_search_requests, web_fetch_requests, tool_calls_requested, tool_calls_executed). Shapes from OpenRouter's API reference, anthropic-messages/create-a-message (MessagesResult.usage), read 2026-10-22; values invented.",
+  "id": "gen-1761130800-OpenRouterCost0001",
+  "type": "message",
+  "role": "assistant",
+  "model": "anthropic/claude-sonnet-5.5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "EqQBCkgIBxABGAIqQOrOpenRouterReplaySignature0000000000000000000000000000000000000000000000000000000000000000000000000=="
+    },
+    {
+      "type": "text",
+      "text": "Before I say more: what do you think happens to the loss if each step overshoots the minimum?"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 412,
+    "output_tokens": 236,
+    "cache_creation_input_tokens": 1500,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 1500,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0,
+      "tool_calls_requested": 0,
+      "tool_calls_executed": 0
+    },
+    "service_tier": "standard",
+    "cost": 0.0069354,
+    "cost_details": {
+      "upstream_inference_cost": null,
+      "upstream_inference_prompt_cost": 0.0045744,
+      "upstream_inference_completions_cost": 0.002361,
+      "server_tool_cost": null
+    },
+    "is_byok": false
+  }
+}

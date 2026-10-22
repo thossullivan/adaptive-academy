@@ -56,7 +56,8 @@ PROVIDER_ENV_VARS = (
     "ANTHROPIC_AUTH_TOKEN",  # Anthropic SDK bearer-token auth
     "ANTHROPIC_BASE_URL",  # Anthropic SDK endpoint override
     "CLAUDE_CODE_OAUTH_TOKEN",  # Agent SDK subscription token for the `claude` CLI
-    "AA_LLM_BACKEND",  # api/deps.py: "agent_sdk" routes every call to the subscription
+    "OPENROUTER_API_KEY",  # llm/keys.py: the OpenRouter backend's key
+    "AA_LLM_BACKEND",  # llm/backends.py: "agent_sdk" or "openrouter" reroutes every call
 )
 
 # Loopback is allowed, so a proxy listening on it would forward traffic out. Env-configured

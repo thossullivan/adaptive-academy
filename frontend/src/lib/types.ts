@@ -49,11 +49,20 @@ export interface SourceDoc {
 export interface Foundation { overview: string; key_concepts: string[]; prerequisite_map: Record<string, string[]>; }
 export interface ResearchResult { foundation: Foundation; sources: SourceDoc[]; events: EventOut[]; }
 /** GET /api/setup — can the API make LLM calls? Never carries the key itself. */
+/** AA_LLM_BACKEND: the Anthropic API (default), a Claude subscription, or OpenRouter. */
+export type LlmBackend = 'anthropic' | 'agent_sdk' | 'openrouter';
 export interface SetupStatus {
-  llm_backend: 'anthropic' | 'agent_sdk';
+  llm_backend: LlmBackend;
+  /** The service named for people: "Anthropic", "OpenRouter", or "Claude subscription". */
+  provider?: string;
   llm_ready: boolean;
   message: string;
+  /** The env var whose key is missing (ANTHROPIC_API_KEY / OPENROUTER_API_KEY), else null. */
+  missing_key?: string | null;
   models?: Record<string, string>;
+  /** Configured models that are not Claude models: allowed through OpenRouter, unverified. */
+  experimental_models?: string[];
+  experimental_warning?: string | null;
   /** Config problems that change behaviour without blocking it (e.g. a daily limit that
    *  can't cap an unpriced model, so that model's calls are refused). */
   warnings?: string[];
@@ -312,7 +321,7 @@ export interface UsageBudget {
   exceeded: boolean;
 }
 export interface UsageReport {
-  backend: 'anthropic' | 'agent_sdk';
+  backend: LlmBackend;
   totals: {
     today: UsageTotals;
     last_7_days: UsageTotals;
@@ -321,7 +330,8 @@ export interface UsageReport {
   };
   // cache_read_share: input tokens read from the prompt cache, 0..1; null with no input.
   by_feature: (UsageTotals & { feature: string | null; cache_read_share: number | null })[];
-  by_model: (UsageTotals & { model: string })[];
+  // experimental: not a Claude model (the API's model catalog), shown with a text label.
+  by_model: (UsageTotals & { model: string; experimental?: boolean })[];
   budget: UsageBudget;
   priced_models: string[];
   pricing_source: string;

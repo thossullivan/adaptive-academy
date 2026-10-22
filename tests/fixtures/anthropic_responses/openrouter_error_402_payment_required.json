@@ -1,0 +1,10 @@
+{
+  "_source": "documented",
+  "_note": "OpenRouter out of credits: HTTP 402 with OpenRouter's error body {error: {code, message, metadata}}, status equal to error.code. Shape and message from OpenRouter's docs, api_reference/errors-and-debugging (read 2026-10-22). The Messages endpoint reference lists Anthropic-format errors (with billing_error) but not 402, so which body a 402 there carries is for the live check to confirm; the classifier keys on the status either way.",
+  "_status": 402,
+  "error": {
+    "code": 402,
+    "message": "Insufficient credits. Add more credits and retry the request.",
+    "metadata": {}
+  }
+}

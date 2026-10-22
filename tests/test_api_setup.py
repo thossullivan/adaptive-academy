@@ -222,3 +222,90 @@ def test_setup_reports_models_when_key_missing(client, monkeypatch):
     body = client.get("/api/setup").json()
     assert body["llm_ready"] is False
     assert set(body["models"]) == {"reasoning", "copy"}
+
+
+# --- missing key and experimental models, per backend ------------------------------------
+
+OR_SECRET = "sk-or-v1-SUPERSECRETVALUE-do-not-leak"
+
+
+@pytest.fixture
+def default_models(monkeypatch):
+    from adaptive_academy.settings import settings
+
+    monkeypatch.setattr(settings, "reasoning_model", "")
+    monkeypatch.setattr(settings, "copy_model", "")
+
+
+def test_setup_anthropic_reports_its_missing_key(client, monkeypatch, default_models):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    body = client.get("/api/setup").json()
+    assert body["missing_key"] == "ANTHROPIC_API_KEY"
+    assert body["provider"] == "Anthropic"
+    assert body["experimental_models"] == [] and body["experimental_warning"] is None
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    assert client.get("/api/setup").json()["missing_key"] is None
+
+
+def test_setup_openrouter_ready(client, monkeypatch, default_models):
+    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", OR_SECRET)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)  # not needed on this backend
+    r = client.get("/api/setup")
+    body = r.json()
+    assert body["llm_backend"] == "openrouter"
+    assert body["provider"] == "OpenRouter"
+    assert body["llm_ready"] is True
+    assert body["missing_key"] is None
+    assert "OpenRouter" in body["message"]
+    assert body["models"] == {"reasoning": "anthropic/claude-sonnet-5.5",
+                              "copy": "anthropic/claude-haiku-5.5"}
+    assert body["experimental_models"] == [] and body["experimental_warning"] is None
+    assert OR_SECRET not in r.text and "SUPERSECRET" not in r.text
+
+
+@pytest.mark.parametrize("value", [None, "", "  ", "sk-or-xxxxx"])
+def test_setup_openrouter_names_its_missing_key(client, monkeypatch, default_models, value):
+    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)  # an Anthropic key does not count
+    if value is None:
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("OPENROUTER_API_KEY", value)
+    r = client.get("/api/setup")
+    body = r.json()
+    assert body["llm_ready"] is False
+    assert body["missing_key"] == "OPENROUTER_API_KEY"
+    assert "OPENROUTER_API_KEY" in body["message"]
+    assert SECRET not in r.text
+
+
+def test_setup_warns_about_an_experimental_model(client, monkeypatch, default_models):
+    from adaptive_academy.settings import settings
+
+    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+    monkeypatch.setenv("OPENROUTER_API_KEY", OR_SECRET)
+    monkeypatch.setattr(settings, "reasoning_model", "deepseek/deepseek-v4")
+    body = client.get("/api/setup").json()
+    assert body["experimental_models"] == ["deepseek/deepseek-v4"]
+    warning = body["experimental_warning"]
+    assert "deepseek/deepseek-v4" in warning and "AA_MODEL_REASONING" in warning
+    assert "experimental" in warning.lower()
+    assert "—" not in warning
+    # OpenRouter reports every call's cost, so an unpriced model is no budget hole there.
+    monkeypatch.setattr(settings, "daily_budget_usd", 5.0)
+    assert client.get("/api/setup").json()["warnings"] == []
+
+
+def test_llm_route_on_openrouter_without_key_is_legible_503(client, session, monkeypatch,
+                                                            no_network):
+    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    cid = _seed_concept(session)
+    r = client.post(f"/api/concepts/{cid}/assess",
+                    json={"kind": "self_explanation", "response": "..."})
+    assert r.status_code == 503
+    assert "No OPENROUTER_API_KEY configured" in r.json()["detail"]
+    assert r.json()["category"] == "auth"

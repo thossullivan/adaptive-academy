@@ -46,6 +46,7 @@ from adaptive_academy.api.routes_retention import (
 from adaptive_academy.api.routes_roleplay import router as roleplay_router
 from adaptive_academy.api.routes_scout import router as scout_router
 from adaptive_academy.db import create_db_and_tables
+from adaptive_academy.llm.backends import use_agent_sdk
 from adaptive_academy.llm.errors import describe_llm_error
 from adaptive_academy.llm.keys import MissingAPIKeyError
 from adaptive_academy.llm.types import AgentSDKError, StructuredOutputError
@@ -80,7 +81,7 @@ def drop_api_key_if_agent_sdk() -> None:
     subprocess (LLM, Researcher, Anchor) uses the Claude plan, not API credits — which lets
     the SDK clients skip per-call key juggling and run parallel/lock-free. Called from the
     startup hook (not import time) so merely importing this module never mutates the env."""
-    if os.getenv("AA_LLM_BACKEND", "").lower() == "agent_sdk":
+    if use_agent_sdk():
         os.environ.pop("ANTHROPIC_API_KEY", None)
 
 

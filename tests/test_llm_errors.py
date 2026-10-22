@@ -186,3 +186,107 @@ def test_api_error_json_carries_category_and_detail(session, category, exc, stat
     body = r.json()
     assert body["category"] == category
     assert body["detail"]
+
+
+# --- the OpenRouter backend --------------------------------------------------------------
+# OpenRouter's errors (docs: api_reference/errors-and-debugging): `{"error": {"code", "message",
+# "metadata"}}` with the HTTP status equal to error.code; 402 = insufficient credits, 429 = rate
+# limited, 503 = no provider meets the routing requirements. Its Messages endpoint also uses
+# Anthropic's error body (error.type includes billing_error). The unknown-slug wordings below
+# ("is not a valid model ID", "No endpoints found for") are not in the docs: the live check
+# confirms them.
+
+_OR_REQ = httpx.Request("POST", "https://openrouter.ai/api/v1/messages")
+
+
+def _or_status(cls, code, message, *, error_type=None):
+    error = {"code": code, "message": message, "metadata": {}}
+    if error_type:
+        error["type"] = error_type
+    return cls(f"Error code: {code}", response=httpx.Response(code, request=_OR_REQ),
+               body={"error": error})
+
+
+@pytest.fixture
+def on_openrouter(monkeypatch):
+    from adaptive_academy.settings import settings
+
+    monkeypatch.setenv("AA_LLM_BACKEND", "openrouter")
+    monkeypatch.setattr(settings, "reasoning_model", "")
+    monkeypatch.setattr(settings, "copy_model", "")
+
+
+OPENROUTER_CASES = [
+    ("out_of_credits", _or_status(anthropic.APIStatusError, 402,
+                                  "Insufficient credits. Add more credits and retry the request.")),
+    ("out_of_credits", _or_status(anthropic.APIStatusError, 402, "x",
+                                  error_type="payment_required")),
+    ("rate_limited", _or_status(anthropic.RateLimitError, 429, "Rate limit exceeded")),
+    ("model_unavailable", _or_status(anthropic.BadRequestError, 400,
+                                     "anthropic/claude-sonnet-9.9 is not a valid model ID")),
+    ("model_unavailable", _or_status(anthropic.NotFoundError, 404,
+                                     "No endpoints found for deepseek/deepseek-v9.")),
+    ("model_unavailable", _or_status(
+        anthropic.InternalServerError, 503,
+        "There is no available model provider that meets your routing requirements")),
+    ("auth", _or_status(anthropic.AuthenticationError, 401, "No auth credentials found")),
+    ("overloaded", _or_status(anthropic.InternalServerError, 502, "Provider returned error")),
+]
+
+
+@pytest.mark.parametrize(("category", "exc"), OPENROUTER_CASES,
+                         ids=[f"{c}-{i}" for i, (c, _) in enumerate(OPENROUTER_CASES)])
+def test_openrouter_errors_map_to_the_same_categories(on_openrouter, category, exc):
+    assert describe_llm_error(exc).category == category
+
+
+@pytest.mark.parametrize("category", CATEGORIES)
+def test_openrouter_messages_are_plain_and_never_say_anthropic(on_openrouter, category):
+    from adaptive_academy.llm.backends import OPENROUTER
+    from adaptive_academy.llm.errors import category_messages
+
+    msg = category_messages(OPENROUTER)[category]
+    assert msg.endswith(".")
+    assert "—" not in msg and "–" not in msg and "!" not in msg
+    for sentence in msg.split(". "):
+        assert len(sentence.split()) <= 25, sentence
+    assert "Anthropic" not in msg
+    assert "ANTHROPIC_API_KEY" not in msg
+
+
+def test_openrouter_details_name_openrouter_and_its_key(on_openrouter):
+    credits = describe_llm_error(OPENROUTER_CASES[0][1]).detail
+    assert "OpenRouter" in credits and "Anthropic" not in credits
+    assert "Insufficient credits" in credits  # the upstream text, attributed to OpenRouter
+    assert "OpenRouter said:" in credits
+    auth = describe_llm_error(OPENROUTER_CASES[6][1]).detail
+    assert "OPENROUTER_API_KEY" in auth and "ANTHROPIC" not in auth
+    rate = describe_llm_error(OPENROUTER_CASES[2][1]).detail
+    assert rate.startswith("OpenRouter is limiting")
+    missing = describe_llm_error(MissingAPIKeyError(env_var="OPENROUTER_API_KEY"))
+    assert (missing.category, missing.status_code) == ("auth", 503)
+    assert "No OPENROUTER_API_KEY configured" in missing.detail
+
+
+def test_openrouter_unknown_slug_names_the_slug_and_the_setting(on_openrouter, monkeypatch):
+    from adaptive_academy.settings import settings
+
+    monkeypatch.setattr(settings, "reasoning_model", "anthropic/claude-sonnet-9.9")
+    detail = describe_llm_error(OPENROUTER_CASES[3][1]).detail
+    assert "'anthropic/claude-sonnet-9.9'" in detail
+    assert "AA_MODEL_REASONING" in detail and "AA_MODEL_COPY" not in detail
+    assert "OpenRouter" in detail
+    no_endpoints = describe_llm_error(OPENROUTER_CASES[4][1]).detail
+    assert "'deepseek/deepseek-v9'" in no_endpoints
+
+
+def test_openrouter_no_provider_explains_the_privacy_setting(on_openrouter):
+    detail = describe_llm_error(OPENROUTER_CASES[5][1]).detail
+    assert "store" in detail and "prompts" in detail
+    assert "AA_MODEL_REASONING" in detail
+
+
+def test_anthropic_wording_is_unchanged_on_the_default_backend(monkeypatch):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    exc = _status(anthropic.RateLimitError, 429, "slow down", "rate_limit_error")
+    assert describe_llm_error(exc).detail == CATEGORY_MESSAGES["rate_limited"]

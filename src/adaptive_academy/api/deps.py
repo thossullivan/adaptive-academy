@@ -1,5 +1,4 @@
 import logging
-import os
 from collections.abc import Callable, Iterator
 
 from sqlmodel import Session
@@ -11,6 +10,7 @@ from adaptive_academy.llm.anchor_types import AnchorClient
 from adaptive_academy.llm.anthropic_anchor import AnthropicAnchorClient
 from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
 from adaptive_academy.llm.anthropic_researcher import AnthropicResearcherClient
+from adaptive_academy.llm.backends import use_agent_sdk as _use_agent_sdk
 from adaptive_academy.llm.embedder_types import Embedder
 from adaptive_academy.llm.researcher_types import ResearcherClient
 from adaptive_academy.llm.retriever_types import Retriever
@@ -28,9 +28,11 @@ _embedder: Embedder | None = None
 def use_agent_sdk() -> bool:
     """Opt in to the Claude Agent SDK backend (subscription auth) via env flag.
 
-    Default is the API-key client, so nothing changes unless you set this.
+    Default is the API-key client, so nothing changes unless you set this. The other choice,
+    AA_LLM_BACKEND=openrouter, keeps the API-key clients below and points them at OpenRouter
+    (llm/backends.py), so it needs no branch here.
     """
-    return os.getenv("AA_LLM_BACKEND", "").lower() == "agent_sdk"
+    return _use_agent_sdk()
 
 
 def get_session() -> Iterator[Session]:
