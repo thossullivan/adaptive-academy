@@ -49,6 +49,27 @@ def str_items(value: Any) -> list[str]:
     return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
 
+# Keys a model uses when it wraps a name or a point in an object instead of a bare string.
+_TEXT_KEYS = ("name", "concept", "title", "text", "point", "label")
+
+
+def text_items(value: Any) -> list[str]:
+    """Like str_items, but an object entry contributes its name-like string field
+    ({"name": "Chain rule"} -> "Chain rule") instead of being dropped."""
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for v in value:
+        if isinstance(v, str):
+            out.append(v)
+        elif isinstance(v, dict):
+            text = next((v[k] for k in _TEXT_KEYS if isinstance(v.get(k), str) and v[k].strip()),
+                        None)
+            if text is not None:
+                out.append(text)
+    return out
+
+
 def require_object(data: Any, what: str) -> dict:
     """`data` if it is a JSON object, else StructuredOutputError("malformed")."""
     if not isinstance(data, dict):

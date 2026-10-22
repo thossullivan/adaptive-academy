@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from adaptive_academy.engine.research import Foundation, synthesize_foundation
 from adaptive_academy.llm.researcher_types import RawSource
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
@@ -204,3 +206,25 @@ def test_research_topic_persists_repaired_names_and_traces_them(session):
     kinds = [e.kind for e in session.exec(
         select(AgentEvent).where(AgentEvent.topic_id == topic.id)).all()]
     assert "concepts:regenerated" in kinds and "concepts:repaired" in kinds
+
+
+def test_concepts_wrapped_in_objects_keep_their_names():
+    # Final-review regression: object entries used to be dropped, leaving a topic with
+    # no concepts and no event.
+    from adaptive_academy.engine.research import _parse_foundation_json
+
+    f = _parse_foundation_json(json.dumps({
+        "overview": "o",
+        "key_concepts": [{"name": "Chain rule"}, {"concept": "Gradient"}, "Loss"],
+        "prerequisite_map": {"Gradient": [{"name": "Chain rule"}]},
+    }))
+    assert f.key_concepts == ["Chain rule", "Gradient", "Loss"]
+    assert f.prerequisite_map == {"Gradient": ["Chain rule"]}
+
+
+def test_concepts_with_no_usable_name_fail_legibly():
+    from adaptive_academy.engine.research import _parse_foundation_json
+    from adaptive_academy.llm.types import StructuredOutputError
+
+    with pytest.raises(StructuredOutputError):
+        _parse_foundation_json(json.dumps({"overview": "o", "key_concepts": [{"x": 1}, 2]}))

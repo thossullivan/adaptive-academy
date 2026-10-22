@@ -11,6 +11,7 @@ from adaptive_academy.jsonout import (
     require_list,
     require_object,
     str_items,
+    text_items,
 )
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
@@ -325,7 +326,7 @@ def parse_curriculum_obj(data: object, title: str, *,
     for path, p in _entries(raw_phases, "$.phases", dropped):
         items = [
             ItemView(text=str(it.get("text", "")), type=str(it.get("type", "read")),
-                     concept_refs=str_items(it.get("concept_refs")))
+                     concept_refs=text_items(it.get("concept_refs")))
             for _, it in _entries(p.get("items"), f"{path}.items", dropped)
         ]
         d = p.get("deliverable") or None

@@ -257,3 +257,23 @@ def test_summary_lists_input_and_output():
     text = fix.summary()
     assert text.startswith("WARN ")
     assert "N3" in text and "Gradient of the cost" in text
+
+
+@pytest.mark.parametrize(("name", "expected"), [
+    ("Gauss - Newton Method", "Gauss-Newton Method"),
+    ("Kullback - Leibler Divergence", "Kullback-Leibler Divergence"),
+    ("Cauchy - Schwarz Inequality", "Cauchy-Schwarz Inequality"),
+    ("Levenberg - Marquardt Algorithm", "Levenberg-Marquardt Algorithm"),
+    ("Generalized Gauss - Newton", "Generalized Gauss-Newton"),
+    ("Damped Gauss - Newton method", "Damped Gauss-Newton method"),
+])
+def test_repair_keeps_named_compounds_whole(name, expected):
+    # Final-review regression: the strict check fails these (the model is asked to fix
+    # them), but repair must not cut them to the first surname.
+    assert repair_name(name, fallback="Concept 1") == expected
+
+
+@pytest.mark.parametrize("name", ["Softmax - Outputs Sum To One",
+                                  "Learning Rate - Too High Diverges"])
+def test_repair_still_drops_long_dash_claims(name):
+    assert "-" not in repair_name(name, fallback="Concept 1").split()[0][1:]

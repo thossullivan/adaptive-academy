@@ -117,6 +117,10 @@ _SPACED_OPERATOR = re.compile(r"\s*([/=<>^≤≥≠≈−×·*])\s*")
 _WORD = re.compile(r"[^\W_]+")
 # "Gauss - Newton", "Gauss - Newton method" — not Title Case "Momentum - Faster Convergence"
 _SPACED_COMPOUND = re.compile(r"^([A-Z]\w*) - ([A-Z]\w*)(?=$|\s+[a-z])")
+# Repair only (the check stays strict, so the model is still asked to fix the name): a named
+# compound that ends the name or is followed by one more word, anywhere in it ("Kullback -
+# Leibler Divergence", "Damped Gauss - Newton method"). Longer tails are claims, not names.
+_REPAIR_COMPOUND = re.compile(r"\b([A-Z]\w*) - ([A-Z]\w*)(?=$|\s+\S+$)")
 _FUNCTION_NAME = re.compile(r"^[^\W\d_]+(?=\()")
 
 
@@ -377,6 +381,9 @@ def repair_name(name: Any, *, fallback: str) -> str:
     if not isinstance(name, str):
         return fallback
     text = _join_compounds(" ".join(name.split()))
+    joined = _REPAIR_COMPOUND.sub(r"\1-\2", text)
+    if joined != text and not name_problems(joined):
+        return joined  # "Kullback - Leibler Divergence" -> "Kullback-Leibler Divergence"
     segments = [s for s in _SEPARATOR.split(text) if s and _WORD.search(s)]
     head = segments[0].strip() if segments else ""
     if head and not name_problems(head):

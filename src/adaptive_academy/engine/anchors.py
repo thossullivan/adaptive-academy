@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
-from adaptive_academy.jsonout import extract_json, require_object, str_items
+from adaptive_academy.jsonout import extract_json, require_object, text_items
 from adaptive_academy.llm.anchor_types import AnchorBrief, AnchorClient, RawAnchor
 from adaptive_academy.models import (
     AgentEvent,
@@ -62,7 +62,7 @@ def parse_anchors_json(text: str) -> list[RawAnchor]:
         out.append(RawAnchor(
             question=str(a.get("question", "")),
             reference_answer=str(a.get("reference_answer", "")),
-            key_points=str_items(a.get("key_points")),
+            key_points=text_items(a.get("key_points")),
             concept_name=str(a.get("concept", a.get("concept_name", "")) or ""),
         ))
     return out
