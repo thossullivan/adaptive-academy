@@ -17,8 +17,9 @@ engine/tutor_sdk.py):
 Every outcome is traced with a fixed-label event (attempt:submitted, then attempt:accepted,
 attempt:rejected or attempt:unverified) whose detail is fixed text, never the learner's
 words or the model's reason. The tutor is told what happened in a fixed system note for this
-turn only (prompts.TUTOR_ATTEMPT_*), so it can respond to it. The tutor itself has no way to
-log an attempt.
+turn only (prompts.TUTOR_ATTEMPT_*), so it can respond to it; every other turn carries a
+short state line instead (prompts.TUTOR_STATE_*: unlocked or locked). The tutor itself has
+no way to log an attempt.
 """
 
 from collections.abc import Callable
@@ -33,6 +34,8 @@ from adaptive_academy.prompts import (
     TUTOR_ATTEMPT_ALREADY_LOGGED,
     TUTOR_ATTEMPT_REJECTED,
     TUTOR_ATTEMPT_UNVERIFIED,
+    TUTOR_STATE_LOCKED,
+    TUTOR_STATE_UNLOCKED,
     Prompt,
 )
 
@@ -95,6 +98,16 @@ def submit_attempt(session: Session, convo: Conversation, message: Message,
     return AttemptOutcome(status, note)
 
 
-def with_attempt_note(system: str, outcome: AttemptOutcome | None) -> str:
-    """The turn's system prompt, with the attempt note last when the learner submitted one."""
-    return system if outcome is None else f"{system}\n\n{outcome.note}"
+def with_attempt_state(system: str, outcome: AttemptOutcome | None, *,
+                       attempt_logged: bool) -> str:
+    """The turn's system prompt with the attempt state last, on every turn.
+
+    On a Submit attempt turn that is the outcome note, which already says whether the gate is
+    now open (a state line beside it could only repeat or contradict it). On any other turn
+    it is the state line for `attempt_logged`, so the tutor knows on every later turn that it
+    may reveal, not only on the turn the attempt was accepted."""
+    if outcome is not None:
+        line = outcome.note
+    else:
+        line = TUTOR_STATE_UNLOCKED if attempt_logged else TUTOR_STATE_LOCKED
+    return f"{system}\n\n{line}"

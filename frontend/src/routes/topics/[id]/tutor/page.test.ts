@@ -1,10 +1,21 @@
 import { render } from 'svelte/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import type { Conversation, MessageOut } from '$lib/types';
 import Composer from './Composer.svelte';
-import { ATTEMPT_NOTES, attemptNote, attemptShortcutLabel, composerAction } from './attempt';
+import {
+  ATTEMPT_NOTES,
+  attemptNote,
+  attemptSavedMessage,
+  attemptShortcutLabel,
+  composerAction,
+  messageNote,
+  storedAttempt
+} from './attempt';
 
-const key = (k: string, mods: Partial<Record<'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing', boolean>> = {}) => ({
+type Mods = Partial<Record<'shiftKey' | 'ctrlKey' | 'metaKey' | 'altKey' | 'isComposing', boolean> & { keyCode: number }>;
+const key = (k: string, mods: Mods = {}) => ({
   key: k,
+  keyCode: k === 'Enter' ? 13 : 65,
   shiftKey: false,
   ctrlKey: false,
   metaKey: false,
@@ -30,6 +41,12 @@ describe('composer keyboard shortcuts', () => {
     expect(composerAction(key('a'))).toBeNull();
   });
 
+  it("ignores Safari's confirming Enter after IME composition (keyCode 229)", () => {
+    // Safari ends the composition before this keydown, so isComposing is already false.
+    expect(composerAction(key('Enter', { keyCode: 229 }))).toBeNull();
+    expect(composerAction(key('Enter', { keyCode: 229, ctrlKey: true }))).toBeNull();
+  });
+
   it('names the shortcut for the platform', () => {
     expect(attemptShortcutLabel(true)).toBe('⌘ Enter');
     expect(attemptShortcutLabel(false)).toBe('Ctrl+Enter');
@@ -47,9 +64,58 @@ describe('attempt notes', () => {
   });
 
   it('uses plain words: no em dashes or exclamation marks', () => {
-    for (const note of Object.values(ATTEMPT_NOTES)) {
+    for (const note of [...Object.values(ATTEMPT_NOTES), attemptSavedMessage('503 Service Unavailable')]) {
       expect(note).not.toMatch(/[—–!]/);
     }
+  });
+
+  it("reads a reloaded message's verdict when the send's outcome is not on it", () => {
+    const rejected: MessageOut = { role: 'user', content: 'is it 42?', is_attempt: true, attempt_accepted: false };
+    expect(messageNote(rejected)).toBe(ATTEMPT_NOTES.rejected);
+    expect(messageNote({ ...rejected, attempt_accepted: true })).toBeNull();
+    expect(messageNote({ ...rejected, attempt_accepted: null })).toBeNull();
+    // The send's own outcome wins (it can say "unverified", which a reload can't).
+    expect(messageNote({ ...rejected, attempt_accepted: null, attempt_outcome: 'unverified' })).toBe(ATTEMPT_NOTES.unverified);
+    expect(messageNote({ role: 'tutor', content: 'hi' })).toBeNull();
+  });
+});
+
+describe('after a Submit attempt send fails', () => {
+  const convo = (messages: MessageOut[], attempt_logged = false): Conversation => ({
+    id: 7,
+    concept_id: 1,
+    attempt_logged,
+    assistance_level: 'medium',
+    challenge_level: 'high',
+    messages
+  });
+  const attempt: MessageOut = { role: 'user', content: 'divide by sqrt(d_k)', is_attempt: true, attempt_accepted: true };
+
+  it('finds the attempt the server stored when only the reply failed', async () => {
+    const read = vi.fn().mockResolvedValue(convo([{ role: 'user', content: 'hi' }, { role: 'tutor', content: 'yes?' }, attempt], true));
+    const stored = await storedAttempt(read, 'divide by sqrt(d_k)');
+    expect(read).toHaveBeenCalledOnce();
+    expect(stored?.message).toEqual(attempt);
+    expect(stored?.conversation.attempt_logged).toBe(true);
+  });
+
+  it('says nothing was stored when the attempt never reached the server', async () => {
+    const before = convo([{ role: 'user', content: 'hi' }, { role: 'tutor', content: 'yes?' }]);
+    expect(await storedAttempt(vi.fn().mockResolvedValue(before), 'divide by sqrt(d_k)')).toBeNull();
+    // A tutor reply after it means it is an older, answered message, not this send.
+    const answered = convo([attempt, { role: 'tutor', content: 'good' }]);
+    expect(await storedAttempt(vi.fn().mockResolvedValue(answered), 'divide by sqrt(d_k)')).toBeNull();
+    // An ordinary message with the same text is not the attempt.
+    const plain = convo([{ role: 'user', content: 'divide by sqrt(d_k)' }]);
+    expect(await storedAttempt(vi.fn().mockResolvedValue(plain), 'divide by sqrt(d_k)')).toBeNull();
+    // The re-read failing too: fall back to "nothing was sent".
+    expect(await storedAttempt(vi.fn().mockRejectedValue(new Error('down')), 'divide by sqrt(d_k)')).toBeNull();
+  });
+
+  it('says plainly that the attempt was saved and the reply failed', () => {
+    const text = attemptSavedMessage('529 Overloaded');
+    expect(text).toMatch(/^Your attempt was saved, but the tutor's reply failed/);
+    expect(text).toContain('529 Overloaded');
   });
 });
 

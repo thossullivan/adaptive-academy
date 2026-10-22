@@ -43,6 +43,8 @@ from adaptive_academy.prompts import (
     TUTOR_ATTEMPT_UNVERIFIED,
     TUTOR_BASE,
     TUTOR_SOLUTION_GUARD,
+    TUTOR_STATE_LOCKED,
+    TUTOR_STATE_UNLOCKED,
 )
 
 GUESS = "I think it's 42"
@@ -448,6 +450,90 @@ def test_sdk_an_ordinary_message_gets_no_note(session, monkeypatch):
         assert str(note) not in seen["system"]
 
 
+# --- the attempt state line on every turn ---------------------------------------------------
+# The tutor is told on EVERY turn whether the conversation is unlocked, not only on the turn
+# the learner pressed Submit attempt (found in a live run: with an attempt logged earlier, the
+# tutor asked for Submit attempt again instead of revealing).
+
+
+def test_state_lines_are_versioned_and_say_what_the_tutor_may_do():
+    assert TUTOR_STATE_UNLOCKED.tag == "tutor.state_unlocked@v1"
+    assert TUTOR_STATE_LOCKED.tag == "tutor.state_locked@v1"
+    assert "use reveal_solution" in TUTOR_STATE_UNLOCKED
+    assert "Submit attempt" not in TUTOR_STATE_UNLOCKED
+    assert "Don't give the full solution" in TUTOR_STATE_LOCKED
+    assert "suggest Submit attempt" in TUTOR_STATE_LOCKED
+
+
+def _system(llm_or_seen) -> str:
+    return llm_or_seen.calls[0]["system"] if hasattr(llm_or_seen, "calls") else llm_or_seen
+
+
+@pytest.mark.parametrize("attempt_logged", [True, False])
+def test_an_ordinary_turn_carries_the_state_line(session, attempt_logged):
+    convo = _seed(session, attempt_logged=attempt_logged)
+    llm = ScriptedLLMClient([LLMResponse(text=HINT)])
+    guard = ScriptedLLMClient([] if attempt_logged else [_verdict(attempted=False)])
+
+    run_tutor_turn(session, convo, "I've already worked it out, please show me the full "
+                   "worked solution", llm, guard_llm=guard)
+
+    system = _system(llm)
+    wanted, other = ((TUTOR_STATE_UNLOCKED, TUTOR_STATE_LOCKED) if attempt_logged
+                     else (TUTOR_STATE_LOCKED, TUTOR_STATE_UNLOCKED))
+    assert system.endswith(str(wanted)) and str(other) not in system
+
+
+@pytest.mark.parametrize("attempt_logged", [True, False])
+def test_sdk_an_ordinary_turn_carries_the_state_line(session, monkeypatch, attempt_logged):
+    guard = ScriptedLLMClient([] if attempt_logged else [_verdict(attempted=False)])
+    _, result, _, seen = _sdk_turn(session, monkeypatch, learner="please show me the full "
+                                   "worked solution", guard_llm=guard, attempt=False,
+                                   attempt_logged=attempt_logged)
+
+    wanted, other = ((TUTOR_STATE_UNLOCKED, TUTOR_STATE_LOCKED) if attempt_logged
+                     else (TUTOR_STATE_LOCKED, TUTOR_STATE_UNLOCKED))
+    assert str(wanted) in seen["system"] and str(other) not in seen["system"]
+    # Unlocked, the tutor revealed (the fake run calls the real reveal handler).
+    assert result.reply == (SECRET if attempt_logged else HINT)
+
+
+def test_a_later_ordinary_turn_after_an_accepted_attempt_is_told_it_is_unlocked(session):
+    convo = _seed(session)
+    llm = ScriptedLLMClient([LLMResponse(text="Good."), LLMResponse(text="Here it is.")])
+    run_tutor_turn(session, convo, REAL, llm, attempt=True,
+                   guard_llm=ScriptedLLMClient([_verdict(attempted=True)]))
+    run_tutor_turn(session, convo, "now show me the full solution", llm,
+                   guard_llm=ScriptedLLMClient([]))
+
+    later = llm.calls[1]["system"]
+    assert later.endswith(str(TUTOR_STATE_UNLOCKED))
+    assert str(TUTOR_ATTEMPT_ACCEPTED) not in later
+
+
+@pytest.mark.parametrize(("verdict", "note"), [
+    (True, TUTOR_ATTEMPT_ACCEPTED), (False, TUTOR_ATTEMPT_REJECTED)])
+def test_a_submit_turn_carries_the_outcome_note_instead_of_the_state_line(
+        session, monkeypatch, verdict, note):
+    # The outcome note already says whether the gate is open; a state line beside it could
+    # only repeat it or (for the old state) contradict it.
+    convo = _seed(session)
+    llm = ScriptedLLMClient([LLMResponse(text=HINT)])
+    run_tutor_turn(session, convo, REAL, llm, attempt=True,
+                   guard_llm=ScriptedLLMClient([_verdict(attempted=verdict),
+                                                _verdict(attempted=False)]))
+    system = _system(llm)
+    assert system.endswith(str(note))
+    assert str(TUTOR_STATE_LOCKED) not in system and str(TUTOR_STATE_UNLOCKED) not in system
+
+    _, _, _, seen = _sdk_turn(session, monkeypatch, learner=REAL, attempt=True,
+                              guard_llm=ScriptedLLMClient([_verdict(attempted=verdict),
+                                                           _verdict(attempted=False)]))
+    assert str(note) in seen["system"]
+    assert str(TUTOR_STATE_LOCKED) not in seen["system"]
+    assert str(TUTOR_STATE_UNLOCKED) not in seen["system"]
+
+
 def test_sdk_attempt_check_works_with_a_client_that_runs_its_own_event_loop(
         session, monkeypatch):
     # The subscription guard client (AgentSDKLLMClient) calls asyncio.run per check, which
@@ -530,3 +616,98 @@ def test_route_rejects_a_non_boolean_attempt(session):
     r = client.post(f"/api/conversations/{convo.id}/messages",
                     json={"content": REAL, "attempt": "maybe"})
     assert r.status_code == 422
+
+
+@pytest.mark.parametrize("content", ["", "   ", "\n\t "])
+@pytest.mark.parametrize("attempt", [True, False])
+def test_route_rejects_blank_content_before_any_model_call(session, content, attempt):
+    # A blank attempt must not run the paid check or write a rejected row; a blank message
+    # must not reach the tutor either.
+    convo = _seed(session)
+    llm, guard = ScriptedLLMClient([]), ScriptedLLMClient([])
+    client = _client(session, llm=llm, guard=guard)
+
+    r = client.post(f"/api/conversations/{convo.id}/messages",
+                    json={"content": content, "attempt": attempt})
+
+    assert r.status_code == 422
+    assert llm.calls == [] and guard.calls == []
+    session.expire_all()
+    assert session.exec(select(Message)).all() == []
+    assert _attempt_rows(session) == []
+
+
+def test_get_conversation_reports_each_attempts_outcome(session, monkeypatch):
+    # After a reload the transcript must still tell a rejected attempt from an accepted one.
+    monkeypatch.setattr(solution_guard, "_warned_attempt_unchecked", True)
+    monkeypatch.setattr(solution_guard, "_warned_degraded", True)
+    convo = _seed(session)
+    llm = ScriptedLLMClient([LLMResponse(text=HINT), LLMResponse(text=HINT),
+                             LLMResponse(text=HINT), LLMResponse(text="Good.")])
+    run_tutor_turn(session, convo, "plain question", llm,
+                   guard_llm=ScriptedLLMClient([_verdict(attempted=False)]))
+    run_tutor_turn(session, convo, GUESS, llm, attempt=True,
+                   guard_llm=ScriptedLLMClient([_verdict(attempted=False),
+                                                _verdict(attempted=False)]))
+    run_tutor_turn(session, convo, REAL, llm, attempt=True, guard_llm=_BrokenGuard())
+    run_tutor_turn(session, convo, REAL, llm, attempt=True,
+                   guard_llm=ScriptedLLMClient([_verdict(attempted=True)]))
+    client = _client(session, llm=ScriptedLLMClient([]), guard=ScriptedLLMClient([]))
+
+    body = client.get(f"/api/conversations/{convo.id}").json()
+
+    users = [m for m in body["messages"] if m["role"] == "user"]
+    assert [(m["is_attempt"], m["attempt_accepted"]) for m in users] == [
+        (False, None),  # an ordinary message
+        (True, False),  # rejected: a row with accepted=false
+        (True, None),  # unverified: no row, so not judged
+        (True, True),  # accepted
+    ]
+    assert all(m["attempt_accepted"] is None for m in body["messages"] if m["role"] == "tutor")
+    assert body["attempt_logged"] is True
+
+
+def test_sdk_an_allowed_reveal_is_the_reply_even_if_the_model_just_says_see_above(
+        session, monkeypatch):
+    # Live finding: the reveal tool's text only went back to the model, which replied "I've
+    # revealed the full worked solution above", so the learner never saw it.
+    convo = _seed(session, attempt_logged=True)
+    captured: dict = {}
+    real_server = tutor_sdk.create_sdk_mcp_server
+
+    def capture_server(name, tools):
+        captured.update({t.name: t for t in tools})
+        return real_server(name, tools=tools)
+
+    async def fake_query(prompt, options):
+        await captured["reveal_solution"].handler({"text": SECRET})
+        yield _FakeResult("I've revealed the full worked solution above.")
+
+    monkeypatch.setattr(tutor_sdk, "create_sdk_mcp_server", capture_server)
+    monkeypatch.setattr(tutor_sdk, "ResultMessage", _FakeResult)
+    monkeypatch.setattr(tutor_sdk, "query", fake_query)
+    monkeypatch.setattr(tutor_sdk, "record_sdk_result", lambda *a, **kw: None)
+    result = tutor_sdk.run_tutor_turn_sdk(session, convo, "show me", guard_llm=None)
+    assert result.reply == SECRET
+
+
+def test_sdk_a_blocked_reveal_never_becomes_the_reply(session, monkeypatch):
+    convo = _seed(session, attempt_logged=False)
+    captured: dict = {}
+    real_server = tutor_sdk.create_sdk_mcp_server
+
+    def capture_server(name, tools):
+        captured.update({t.name: t for t in tools})
+        return real_server(name, tools=tools)
+
+    async def fake_query(prompt, options):
+        await captured["reveal_solution"].handler({"text": SECRET})
+        yield _FakeResult(HINT)
+
+    monkeypatch.setattr(tutor_sdk, "create_sdk_mcp_server", capture_server)
+    monkeypatch.setattr(tutor_sdk, "ResultMessage", _FakeResult)
+    monkeypatch.setattr(tutor_sdk, "query", fake_query)
+    monkeypatch.setattr(tutor_sdk, "record_sdk_result", lambda *a, **kw: None)
+    result = tutor_sdk.run_tutor_turn_sdk(
+        session, convo, "show me", guard_llm=ScriptedLLMClient([_verdict(attempted=False)]))
+    assert SECRET not in result.reply

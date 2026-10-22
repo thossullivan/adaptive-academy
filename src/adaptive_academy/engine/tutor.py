@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session
 
-from adaptive_academy.engine.attempt import AttemptOutcome, submit_attempt, with_attempt_note
+from adaptive_academy.engine.attempt import AttemptOutcome, submit_attempt, with_attempt_state
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import index_message, memory_blocks_for_tutor
 from adaptive_academy.engine.solution_guard import (
@@ -104,12 +104,12 @@ def run_tutor_turn(
     outcome: AttemptOutcome | None = None
     if attempt:
         outcome = submit_attempt(session, convo, user_message, guard, emit)
-    system = with_attempt_note(build_tutor_system_prompt(
+    system = with_attempt_state(build_tutor_system_prompt(
         concept.name if concept else "",
         levels,
         memory_block=memory_block,
         covered_block=covered_block,
-    ), outcome)
+    ), outcome, attempt_logged=convo.attempt_logged)
 
     step = 0
     max_steps = _MAX_STEPS

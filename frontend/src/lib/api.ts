@@ -124,6 +124,7 @@ export const api = {
     fetch(`/api/conversations/preview?${new URLSearchParams({ topic_id: String(topic_id), concept_id: String(concept_id) })}`).then(
       j<ConversationPreview>
     ),
+  getConversation: (id: number) => fetch(`/api/conversations/${id}`).then(j<Conversation>),
   startConversation: (topic_id: number, concept_id: number) =>
     fetch('/api/conversations', {
       method: 'POST',

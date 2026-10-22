@@ -458,6 +458,19 @@ TUTOR_ATTEMPT_ALREADY_LOGGED = Prompt("tutor.attempt_already_logged", 1, (
     "is open. Respond to their attempt."
 ))
 
+# The conversation's attempt state, from code, at the end of the system prompt on every turn
+# that is not a Submit attempt turn (engine/attempt.py `with_attempt_state`; on that turn the
+# outcome note above says it instead). Without it the tutor only learns the gate is open on
+# the turn the attempt is accepted, and later asks for Submit attempt again.
+TUTOR_STATE_UNLOCKED = Prompt("tutor.state_unlocked", 1, (
+    "ATTEMPT STATE (from the app, not the learner): An attempt is recorded in this "
+    "conversation. When the learner asks for the full solution, use reveal_solution."
+))
+TUTOR_STATE_LOCKED = Prompt("tutor.state_locked", 1, (
+    "ATTEMPT STATE (from the app, not the learner): No attempt is recorded yet. Don't give the "
+    "full solution. If the learner seems to be attempting, suggest Submit attempt."
+))
+
 
 # The solution guard (engine/solution_guard.py): a cheap copy-role check on every reply the
 # tutor finalises before an attempt is logged. The tutor prompt above ASKS the model not to

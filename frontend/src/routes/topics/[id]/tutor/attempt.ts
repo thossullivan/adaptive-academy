@@ -1,8 +1,10 @@
-import type { AttemptOutcome } from '$lib/types';
+import type { AttemptOutcome, Conversation, MessageOut } from '$lib/types';
 
 /** The keys the composer reads off a keydown (a KeyboardEvent has all of them). */
 export interface ComposerKey {
   key: string;
+  /** 229 while an IME owns the key (Safari's confirming Enter, after isComposing has ended). */
+  keyCode: number;
   shiftKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
@@ -16,7 +18,7 @@ export interface ComposerKey {
  * composing) is left to the textarea.
  */
 export function composerAction(e: ComposerKey): 'send' | 'attempt' | null {
-  if (e.key !== 'Enter' || e.isComposing) return null;
+  if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return null;
   if (e.ctrlKey || e.metaKey) return 'attempt';
   if (e.shiftKey || e.altKey) return null;
   return 'send';
@@ -35,4 +37,33 @@ export const ATTEMPT_NOTES: Partial<Record<AttemptOutcome, string>> = {
 
 export function attemptNote(outcome: AttemptOutcome | null | undefined): string | null {
   return (outcome && ATTEMPT_NOTES[outcome]) || null;
+}
+
+/**
+ * The note under a message: the send's own outcome when the page has it, else the stored
+ * verdict (GET /api/conversations/{id} `attempt_accepted`), so a re-read transcript still
+ * marks an attempt that was not logged.
+ */
+export function messageNote(m: MessageOut): string | null {
+  return attemptNote(m.attempt_outcome ?? (m.is_attempt && m.attempt_accepted === false ? 'rejected' : null));
+}
+
+/**
+ * After a Submit attempt send fails: did the attempt reach the server anyway? The attempt is
+ * checked and stored before the tutor runs, so a failed tutor call (an overload, say) can
+ * leave it saved, and logged. Re-read the conversation: the attempt was stored when the
+ * transcript ends with it (no reply after it). Null when it wasn't, or the re-read fails.
+ */
+export async function storedAttempt(
+  read: () => Promise<Conversation>,
+  content: string
+): Promise<{ conversation: Conversation; message: MessageOut } | null> {
+  const conversation = await read().catch(() => null);
+  const last = conversation?.messages.at(-1);
+  if (!conversation || !last || last.role !== 'user' || !last.is_attempt || last.content !== content) return null;
+  return { conversation, message: last };
+}
+
+export function attemptSavedMessage(error: string): string {
+  return `Your attempt was saved, but the tutor's reply failed (${error}). Send a message when you're ready to carry on.`;
 }

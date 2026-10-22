@@ -176,6 +176,11 @@ def test_tutor_tool_turn_then_echo_sends_the_blocks_back_byte_for_byte(session, 
     blocks = _body("tutor_tool_use_turn")["content"]
     assert turn.stop_reason == "tool_use"
     assert turn.text == ""  # the progress-update thinking block is not reply text
+    # This replays a raw recorded response shape, independent of TOOLS: the client parses
+    # whatever tool calls the API returned. The recording predates the Attempt button, when
+    # the tutor still had log_attempt (it now has reveal_solution only, and engine/tutor.py
+    # answers any other name as an unknown tool). What is pinned here is the parsing and the
+    # byte-for-byte echo of thinking blocks between tool calls, not the tutor's tool set.
     assert [(c.id, c.name, c.input) for c in turn.tool_calls] == [
         (blocks[1]["id"], "log_attempt", blocks[1]["input"]),
         (blocks[3]["id"], "reveal_solution", blocks[3]["input"]),

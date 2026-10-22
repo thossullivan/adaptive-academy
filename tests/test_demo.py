@@ -159,11 +159,18 @@ def test_build_demo_has_data_for_every_page(session):
         assert a.accepted is True and message.role == "user"
         assert (message.conversation_id, a.concept_id) == (convo.id, convo.concept_id)
         assert not message.content.startswith("Attempt:")
-    traced = [(e.conversation_id, e.kind) for e in _rows(session, AgentEvent)]
+    events_by_convo = {c.id: [e for e in _rows(session, AgentEvent)
+                              if e.conversation_id == c.id] for c in convos}
     for convo in convos:
-        assert (convo.id, "attempt:submitted") in traced
-        assert (convo.id, "attempt:accepted") in traced
-        assert (convo.id, "tool:log_attempt") not in traced
+        kinds = [e.kind for e in events_by_convo[convo.id]]
+        # One submitted, accepted attempt per conversation, traced in the live order: the
+        # check before the tutor call, and the reveal only after the attempt was accepted.
+        assert kinds.count("attempt:submitted") == 1 and kinds.count("attempt:accepted") == 1
+        assert not {"attempt:rejected", "attempt:unverified"} & set(kinds)
+        assert kinds.index("attempt:submitted") < kinds.index("attempt:accepted")
+        assert kinds.index("attempt:accepted") < kinds.index("tool:reveal_solution:allowed")
+        accepted = next(e for e in events_by_convo[convo.id] if e.kind == "attempt:accepted")
+        assert accepted.detail == "recorded: the worked solution can now be revealed"
 
     # Trace: topic-level and conversation-level agent events.
     events = _rows(session, AgentEvent)

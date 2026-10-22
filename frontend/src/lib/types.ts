@@ -35,6 +35,8 @@ export interface MessageOut {
   role: 'user' | 'tutor'; content: string; memory?: MemoryHit[];
   /** Sent with Submit attempt. */
   is_attempt?: boolean;
+  /** The stored verdict on a submitted attempt (GET only): null when there is none. */
+  attempt_accepted?: boolean | null;
   /** Set on the page from the send's reply; the API does not store it on the message. */
   attempt_outcome?: AttemptOutcome | null;
 }

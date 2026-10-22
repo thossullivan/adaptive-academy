@@ -10,7 +10,7 @@
   import EventFeed from '$lib/shell/EventFeed.svelte';
   import { scrollBehavior } from '$lib/utils';
   import Composer from './Composer.svelte';
-  import { attemptNote } from './attempt';
+  import { attemptSavedMessage, messageNote, storedAttempt } from './attempt';
 
   const topicId = Number($page.params.id);
   let topic = $state<Topic | null>(null);
@@ -80,8 +80,10 @@
     busy = true;
     await tick();
     scroller?.scrollTo({ top: scroller.scrollHeight, behavior: scrollBehavior() });
+    let convoId: number | null = null;
     try {
       const convo = await ensureConversation(forConcept);
+      convoId = convo.id;
       const r = await api.sendMessage(convo.id, content, attempt);
       const sent = { ...messages[messages.length - 1], attempt_outcome: r.attempt_outcome ?? null };
       messages = [...messages.slice(0, -1), sent, { role: 'tutor', content: r.reply, memory: r.memory ?? [] }];
@@ -90,10 +92,21 @@
       await tick();
       scroller?.scrollTo({ top: scroller.scrollHeight, behavior: scrollBehavior() });
     } catch (e) {
-      // Nothing was sent (e.g. no API key): take the bubble back, keep the draft, say why.
-      messages = messages.slice(0, -1);
-      input = content;
-      toasts.show(e instanceof Error ? e.message : String(e), 'error', 9000);
+      const error = e instanceof Error ? e.message : String(e);
+      // An attempt is stored before the tutor runs, so the reply can fail after it was saved.
+      const id = convoId;
+      const stored = attempt && id != null ? await storedAttempt(() => api.getConversation(id), content) : null;
+      if (stored) {
+        const c = stored.conversation;
+        messages = [...messages.slice(0, -1), stored.message];
+        levels = { assistance: c.assistance_level, challenge: c.challenge_level, attempt: c.attempt_logged };
+        toasts.show(attemptSavedMessage(error), 'error', 12000);
+      } else {
+        // Nothing was sent (e.g. no API key): take the bubble back, keep the draft, say why.
+        messages = messages.slice(0, -1);
+        input = content;
+        toasts.show(error, 'error', 9000);
+      }
     } finally {
       busy = false;
     }
@@ -151,7 +164,7 @@
         </div>
       {/if}
       {#each messages as m, i (i)}
-        {@const note = attemptNote(m.attempt_outcome)}
+        {@const note = messageNote(m)}
         <div class="flex {m.role === 'user' ? 'justify-end' : 'justify-start'}">
           <div class="flex max-w-[80%] flex-col {m.role === 'user' ? 'items-end' : ''}">
             <div

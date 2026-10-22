@@ -23,7 +23,7 @@ from claude_agent_sdk import (
 )
 from sqlmodel import Session
 
-from adaptive_academy.engine.attempt import AttemptOutcome, submit_attempt, with_attempt_note
+from adaptive_academy.engine.attempt import AttemptOutcome, submit_attempt, with_attempt_state
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import index_message, memory_blocks_for_tutor
 from adaptive_academy.engine.solution_guard import (
@@ -129,17 +129,25 @@ def run_tutor_turn_sdk(
     outcome: AttemptOutcome | None = None
     if attempt:
         outcome = submit_attempt(session, convo, user_message, guard, emit)
-    system = with_attempt_note(build_tutor_system_prompt(
+    system = with_attempt_state(build_tutor_system_prompt(
         concept_name,
         levels,
         memory_block=memory_block,
         covered_block=covered_block,
-    ), outcome)
+    ), outcome, attempt_logged=convo.attempt_logged)
+
+    # The text of an allowed reveal. As on the API path, an allowed reveal is the reply: the
+    # tool result only goes back to the model, which may then just say "see above", and the
+    # learner would never see the solution.
+    revealed: list[str] = []
 
     @tool("reveal_solution", "Reveal the full worked solution (only after an attempt)",
           {"text": str})
     async def _reveal_solution(args):  # noqa: ANN001
-        return reveal_solution_result(convo, emit, args)
+        result = reveal_solution_result(convo, emit, args)
+        if not result.get("is_error") and str(args.get("text", "")).strip():
+            revealed.append(str(args["text"]))
+        return result
 
     server = create_sdk_mcp_server("tutor", tools=[_reveal_solution])
 
@@ -178,7 +186,9 @@ def run_tutor_turn_sdk(
     session.commit()
     session.refresh(convo)
     reply = asyncio.run(_run(prompt))
-    if not reply:
+    if revealed:
+        reply = revealed[-1]  # the tool is the authoritative source of the answer
+    elif not reply:
         emit("max_steps_exhausted")
         reply = _FALLBACK
     elif not convo.attempt_logged:

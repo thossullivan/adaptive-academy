@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class ConceptOut(BaseModel):
@@ -68,6 +68,10 @@ class MessageOut(BaseModel):
     role: str
     content: str
     is_attempt: bool = False  # the learner sent it with Submit attempt
+    # The check's verdict on a submitted attempt (its Attempt row): true accepted, false not
+    # logged, None when there is no verdict (not an attempt, the check was unavailable, or an
+    # attempt in a conversation that was already unlocked).
+    attempt_accepted: Optional[bool] = None
 
 
 class MemoryHitOut(BaseModel):
@@ -115,6 +119,15 @@ class SendMessageIn(BaseModel):
     # The Submit attempt button: check the message and record it as the learner's attempt
     # before the tutor runs (engine/attempt.py). Send leaves it false.
     attempt: bool = False
+
+    @field_validator("content")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        # Rejected here, before any model call: a blank attempt would otherwise pay for an
+        # attempt check and store a rejected row, and a blank message reaches the tutor.
+        if not value.strip():
+            raise ValueError("message is empty")
+        return value
 
 
 class ConversationOut(BaseModel):

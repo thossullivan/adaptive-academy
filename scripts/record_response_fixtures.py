@@ -69,10 +69,14 @@ from adaptive_academy.llm.types import StructuredOutputError
 FIXTURES = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "anthropic_responses"
 MISSING_MODEL = "claude-sonnet-3-9"  # must stay an id that does not exist (404 scenario)
 
+# The tutor's only tool is reveal_solution (engine/tools.py): the learner logs an attempt with
+# the Submit attempt button, never the tutor. tutor_tool_use_turn.json was recorded when the
+# tutor also had log_attempt, so it still holds one; re-recording replaces it with this
+# reveal-only scenario.
 TUTOR_SYSTEM = (
-    "You are a Socratic tutor for gradient descent. Call log_attempt as soon as the learner "
-    "makes a genuine attempt. Call reveal_solution only after an attempt is logged and the "
-    "learner asks for the answer."
+    "You are a Socratic tutor for gradient descent. The learner has already submitted a real "
+    "attempt, so the solution is unlocked. When they ask for the full worked solution, call "
+    "reveal_solution with it."
 )
 SCHEMA = {
     "type": "object",

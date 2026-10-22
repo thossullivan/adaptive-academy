@@ -207,3 +207,81 @@ test('keyboard: Enter sends, Ctrl+Enter submits an attempt, Shift+Enter adds a l
   ]);
   await expect(page.getByText('attempt logged')).toBeVisible();
 });
+
+/**
+ * The attempt is checked and stored before the tutor runs; here the tutor call then fails
+ * (an overload), and GET /api/conversations/997 returns what the server stored.
+ */
+async function mockReplyFailureAfterStoredAttempt(page: Page, accepted: boolean) {
+  let stored: { content: string } | null = null;
+  await page.route('**/api/conversations', (r) =>
+    r.request().method() === 'POST'
+      ? r.fulfill({
+          json: {
+            id: 997,
+            concept_id: r.request().postDataJSON().concept_id,
+            attempt_logged: false,
+            assistance_level: 'medium',
+            challenge_level: 'medium',
+            messages: []
+          }
+        })
+      : r.fallback()
+  );
+  await page.route('**/api/conversations/997/messages', async (r) => {
+    stored = r.request().postDataJSON();
+    await r.fulfill({ status: 529, json: { detail: 'The model is overloaded. Try again shortly.' } });
+  });
+  await page.route('**/api/conversations/997', (r) =>
+    r.fulfill({
+      json: {
+        id: 997,
+        concept_id: 1,
+        attempt_logged: accepted,
+        assistance_level: 'medium',
+        challenge_level: 'medium',
+        messages: [{ role: 'user', content: stored!.content, is_attempt: true, attempt_accepted: accepted }]
+      }
+    })
+  );
+}
+
+for (const accepted of [true, false]) {
+  test(`a reply that fails after a ${accepted ? 'logged' : 'rejected'} attempt keeps what was saved`, async ({ page }) => {
+    const topic = await seededTopic(page);
+    await mockReplyFailureAfterStoredAttempt(page, accepted);
+    await page.goto(`/topics/${topic.id}/tutor`);
+    await settle(page);
+
+    const input = page.getByRole('textbox', { name: 'Message the tutor' });
+    const attempt = 'I divide by sqrt(d_k) because the variance grows with d_k.';
+    await input.fill(attempt);
+    const reread = page.waitForRequest((r) => r.method() === 'GET' && r.url().endsWith('/api/conversations/997'));
+    await page.getByRole('button', { name: 'Submit attempt' }).click();
+    await reread;
+
+    await expect(page.getByTestId('toaster')).toContainText(
+      "Your attempt was saved, but the tutor's reply failed (The model is overloaded. Try again shortly.)"
+    );
+    // The bubble stays (it was stored), the draft is not put back, and the header and note
+    // say what the server recorded.
+    await expect(page.getByRole('log').getByText(attempt)).toBeVisible();
+    await expect(input).toHaveValue('');
+    await expect(page.getByText(accepted ? 'attempt logged' : 'no attempt yet')).toBeVisible();
+    await expect(page.getByTestId('attempt-note')).toHaveCount(accepted ? 0 : 1);
+  });
+}
+
+test('a send that fails before anything is stored still takes the bubble back', async ({ page }) => {
+  // The keyless e2e API refuses the send before storing anything; the re-read finds no attempt.
+  const topic = await seededTopic(page);
+  await page.goto(`/topics/${topic.id}/tutor`);
+  await settle(page);
+  const input = page.getByRole('textbox', { name: 'Message the tutor' });
+  await input.fill('my attempt: scale by sqrt(d_k)');
+  await page.getByRole('button', { name: 'Submit attempt' }).click();
+  await expect(page.getByTestId('toaster')).toContainText(/ANTHROPIC_API_KEY/);
+  await expect(page.getByTestId('toaster')).not.toContainText('Your attempt was saved');
+  await expect(input).toHaveValue('my attempt: scale by sqrt(d_k)');
+  await expect(page.getByText('no attempt yet')).toBeVisible();
+});
