@@ -453,3 +453,114 @@ def test_fixture_recorder_refuses_other_backends(monkeypatch, capsys, tmp_path):
     assert module.main(["--live", "--yes", "--out", str(tmp_path)]) == 2
     assert "Unset AA_LLM_BACKEND" in capsys.readouterr().err
     assert list(tmp_path.iterdir()) == []
+
+
+# --- regression pass: the unreported-cost block is per day and visible -----------------------
+
+
+def _usage_row(session, when, *, model="deepseek/deepseek-v4", reported=None):
+    from datetime import timezone
+
+    session.add(LLMUsage(created_at=when.astimezone(timezone.utc).replace(tzinfo=None),
+                         backend="openrouter", model=model, role="reasoning",
+                         operation="complete", cost_usd=None, reported_cost_usd=reported))
+    session.commit()
+
+
+def test_unreported_cost_block_clears_at_local_midnight(session):
+    from datetime import timedelta
+
+    # Today's local midnight, in the server's zone (local_day_start reads an aware time in its
+    # own zone, as the rest of usage.py passes it).
+    midnight = usage.local_day_start().astimezone()
+    _usage_row(session, midnight - timedelta(minutes=1))  # a cost-less call at 23:59 yesterday
+    # Just before midnight it blocks; just after, it is yesterday's and no longer counts.
+    assert usage.last_call_unreported("deepseek/deepseek-v4", "openrouter",
+                                      now=midnight - timedelta(seconds=30))
+    assert not usage.last_call_unreported("deepseek/deepseek-v4", "openrouter",
+                                          now=midnight + timedelta(minutes=1))
+
+
+def test_yesterdays_cost_less_call_does_not_block_today(session, openrouter, monkeypatch):
+    from datetime import timedelta
+
+    monkeypatch.setattr(settings, "daily_budget_usd", 5.0)
+    monkeypatch.setattr(settings, "reasoning_model", "deepseek/deepseek-v4")
+    _usage_row(session, usage.local_day_start() - timedelta(hours=2))
+    usage.check_budget("deepseek/deepseek-v4", reports_cost=True, backend="openrouter")
+    assert usage.budget_warnings() == []
+
+
+def test_todays_cost_less_call_blocks_and_says_how_it_clears(session, openrouter, monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(settings, "daily_budget_usd", 5.0)
+    monkeypatch.setattr(settings, "reasoning_model", "deepseek/deepseek-v4")
+    _usage_row(session, datetime.now(timezone.utc))
+    with pytest.raises(usage.UnreportedCostError) as caught:
+        usage.check_budget("deepseek/deepseek-v4", reports_cost=True, backend="openrouter")
+    message = str(caught.value)
+    assert "clears at midnight" in message and "AA_DAILY_BUDGET_USD unset" in message
+    # Visible on the Setup / Usage pages too, with the same explanation.
+    [warning] = usage.budget_warnings()
+    assert "deepseek/deepseek-v4" in warning and "clears at midnight" in warning
+    # A later call today that reports its cost (made with the limit unset) clears it.
+    _usage_row(session, datetime.now(timezone.utc), reported=0.001)
+    usage.check_budget("deepseek/deepseek-v4", reports_cost=True, backend="openrouter")
+    assert usage.budget_warnings() == []
+
+
+def test_setup_shows_the_unreported_cost_block(client, session, openrouter, monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(settings, "daily_budget_usd", 5.0)
+    monkeypatch.setattr(settings, "reasoning_model", "deepseek/deepseek-v4")
+    _usage_row(session, datetime.now(timezone.utc))
+    warnings = client.get("/api/setup").json()["warnings"]
+    assert len(warnings) == 1 and "did not report the cost" in warnings[0]
+
+
+# --- regression pass: hosts read the way httpx reads them -------------------------------------
+
+
+@pytest.mark.parametrize("url", [
+    "https://openrouter。ai/api",  # ideographic full stop: httpx sends to openrouter.ai
+    "https://openrouter．ai/api",  # full-width full stop
+    "https://ｏｐｅｎｒｏｕｔｅｒ.ai/api",  # full-width
+    "https://OPENROUTER.AI./api",
+    "not a url",
+])
+def test_lookalike_or_unreadable_base_urls_fall_back_to_anthropic(monkeypatch, url):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", url)
+    assert anthropic_base_url() == "https://api.anthropic.com"
+
+
+def test_ideographic_dot_url_never_carries_the_anthropic_key(session, monkeypatch):
+    monkeypatch.delenv("AA_LLM_BACKEND", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", ANTHROPIC_KEY)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://openrouter。ai/api")
+    monkeypatch.setattr(settings, "reasoning_model", "")
+    wire = Wire(_message("claude-sonnet-5-5"))
+    AnthropicLLMClient(http_client=wire.http_client()).complete("S", [USER], [])
+    assert wire.requests[0].url.host == "api.anthropic.com"
+
+
+# --- regression pass: a mistyped backend is not echoed if it could be a secret -----------------
+
+
+@pytest.mark.parametrize("value", ["sk-ant-api03-SECRETVALUE", "sk-or-v1-SECRETVALUE",
+                                   "SK-proj-SECRET", "x" * 21, "open router!"])
+def test_backend_warning_does_not_echo_secret_looking_values(monkeypatch, value):
+    from adaptive_academy.llm.backends import backend_setting_problem
+
+    monkeypatch.setenv("AA_LLM_BACKEND", value)
+    warning = backend_setting_problem()
+    assert warning and "AA_LLM_BACKEND is set to a value" in warning
+    assert value not in warning and "SECRET" not in warning
+
+
+def test_backend_warning_echoes_a_plain_typo(monkeypatch):
+    from adaptive_academy.llm.backends import backend_setting_problem
+
+    monkeypatch.setenv("AA_LLM_BACKEND", "agent-sdk")
+    assert "'agent-sdk'" in backend_setting_problem()

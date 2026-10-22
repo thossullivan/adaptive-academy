@@ -15,11 +15,14 @@ llm/model_catalog.py.
 
 import logging
 import os
+import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
-from urllib.parse import urlsplit
+
+import httpx
 
 from adaptive_academy.settings import DEFAULT_MODEL_COPY, DEFAULT_MODEL_REASONING
 
@@ -37,6 +40,9 @@ logger = logging.getLogger(__name__)
 ANTHROPIC_API_URL = "https://api.anthropic.com"
 OPENROUTER_BASE_URL = "https://openrouter.ai/api"
 OPENROUTER_HOST = "openrouter.ai"
+
+# A plausible backend name (letters, `_`, `-`), short enough that it can't be a secret.
+_NAME_LIKE = re.compile(r"[A-Za-z_-]{1,20}")
 
 # OpenRouter provider routing, sent on every request (as `provider` in the body). The default,
 # `data_collection: "allow"`, includes "providers which store user data non-transiently and may
@@ -120,9 +126,13 @@ def backend_setting_problem() -> str | None:
     raw = os.getenv("AA_LLM_BACKEND", "").strip()
     if not raw or raw.lower() in BACKENDS:
         return None
-    return (f"AA_LLM_BACKEND is set to '{raw[:40]}', which is not a backend this app knows, so "
-            "it is using the Anthropic API. Use anthropic, openrouter, or agent_sdk (or leave "
-            "it unset), then restart the API.")
+    # Echo the value only when it looks like a mistyped name: a pasted key (sk-…) or anything
+    # longer or stranger is never repeated back.
+    shown = (f"set to '{raw}'" if _NAME_LIKE.fullmatch(raw) and not raw.lower().startswith("sk")
+             else "set to a value")
+    return (f"AA_LLM_BACKEND is {shown}, which is not a backend this app knows, so it is "
+            "using the Anthropic API. Use anthropic, openrouter, or agent_sdk (or leave it "
+            "unset), then restart the API.")
 
 
 def use_agent_sdk() -> bool:
@@ -149,7 +159,17 @@ def agent_sdk_unavailable() -> bool:
 
 
 def _is_openrouter_url(url: str) -> bool:
-    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    """True when `url` would reach openrouter.ai, or can't be read safely. The host is read
+    the way httpx (the SDK's client) reads it, so IDNA forms such as `openrouter。ai` (an
+    ideographic full stop) count as the host they resolve to; a URL httpx can't parse, or
+    one without a host, is treated as unsafe too."""
+    try:
+        host = httpx.URL(url).host
+    except Exception:  # noqa: BLE001 - httpx.InvalidURL and friends
+        return True
+    host = unicodedata.normalize("NFKC", host).lower().rstrip(".")
+    if not host:
+        return True
     return host == OPENROUTER_HOST or host.endswith("." + OPENROUTER_HOST)
 
 
@@ -162,9 +182,9 @@ def anthropic_base_url() -> str:
     if not url:
         return ANTHROPIC_API_URL
     if _is_openrouter_url(url):
-        logger.warning("ANTHROPIC_BASE_URL points at OpenRouter; the Anthropic backend ignores "
-                       "it and calls %s. Set AA_LLM_BACKEND=openrouter to use OpenRouter.",
-                       ANTHROPIC_API_URL)
+        logger.warning("ANTHROPIC_BASE_URL points at OpenRouter (or can't be read); the "
+                       "Anthropic backend ignores it and calls %s. Set "
+                       "AA_LLM_BACKEND=openrouter to use OpenRouter.", ANTHROPIC_API_URL)
         return ANTHROPIC_API_URL
     return url
 

@@ -55,7 +55,11 @@ FAMILIES: dict[str, ModelCapabilities] = {
     ),
 }
 
-# Strict tool use arrived with the Claude 4.5 generation.
+# Strict tool use (and structured outputs, the same grammar pipeline) is listed for Claude 4.5
+# and later only: Sonnet 4.5, Haiku 4.5, Opus 4.5 and every newer model (the structured-outputs
+# page's supported-models list, platform.claude.com/docs/en/build-with-claude/
+# structured-outputs, read 2026-10-22). Opus 4.1, which had it at the beta launch, is not on
+# the current list, so it is sent without `strict` (prose answers still get the retry).
 STRICT_TOOLS_SINCE = (4, 5)
 _DATE_SUFFIX = re.compile(r"-\d{8}$")
 
@@ -68,9 +72,19 @@ OTHER = ModelCapabilities(
 )
 
 # Request shapes. The Anthropic tool is the one the API-key path has always used. OpenRouter's
-# server tool: `{"type": "openrouter:web_search", "parameters": {...}}`, where `max_uses` is
-# "Maximum number of searches the model may perform in a single request" (OpenRouter docs,
-# guides/features/server-tools/web-search, read 2026-10-22).
+# server tool: `{"type": "openrouter:web_search", "parameters": {...}}`, where `max_uses` is the
+# documented hard cap: "To hard-cap how many searches the model may perform in a single
+# request, set `max_uses`" (`max_results` caps results per search, not searches). OpenRouter
+# behaviour to expect (same docs, guides/features/server-tools/web-search, read 2026-10-22):
+# - past the cap the model may still issue searches, which "return a message telling the
+#   model the limit was hit", and `usage.server_tool_use.web_search_requests` "counts the
+#   total number of search queries the model made", so it can exceed max_uses (the live
+#   check saw 2 with max_uses=1 on deepseek/deepseek-v4.1-flash-1017);
+# - with the default engine (`auto`: native search when the provider has it, else Exa),
+#   native search forwards max_uses only to Anthropic; other native providers ignore it.
+# A stricter cap would be OpenRouter's top-level `max_tool_calls` (server-tool steps per
+# request, default 30). It is documented for its own API, not confirmed on the Messages
+# endpoint, so it is not sent. Cost stays capped by the reported usage.cost either way.
 ANTHROPIC_WEB_SEARCH_TYPE = "web_search_20250305"
 OPENROUTER_WEB_SEARCH_TYPE = "openrouter:web_search"
 

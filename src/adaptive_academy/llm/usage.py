@@ -98,18 +98,24 @@ class UnpricedModelError(BudgetExceededError):
 
 class UnreportedCostError(BudgetExceededError):
     """A daily limit is set, the model has no list price, and the backend didn't report the
-    cost of this model's last call, so its spend can't be counted (→ HTTP 429)."""
+    cost of this model's last call today, so its spend can't be counted (→ HTTP 429)."""
 
     def __init__(self, model: str, limit_usd: float, provider: str = "OpenRouter"):
         self.model = model
         self.spent_usd = None
         self.limit_usd = limit_usd
-        RuntimeError.__init__(
-            self,
-            f"A daily spending limit is set (AA_DAILY_BUDGET_USD) but {provider} did not report "
-            f"the cost of the last call on '{model}', and this app has no price for it, so its "
-            "spend can't be capped. Use a Claude model (AA_MODEL_REASONING / AA_MODEL_COPY) "
-            "or unset AA_DAILY_BUDGET_USD, then restart the API.")
+        RuntimeError.__init__(self, unreported_cost_message(model, provider))
+
+
+def unreported_cost_message(model: str, provider: str = "OpenRouter") -> str:
+    return (
+        f"A daily spending limit is set (AA_DAILY_BUDGET_USD) but {provider} did not report "
+        f"the cost of today's last call on '{model}', and this app has no price for it, so its "
+        "spend can't be capped and its calls are refused. This clears at midnight (the "
+        "server's local day), or once a call on it made with AA_DAILY_BUDGET_USD unset "
+        "reports its cost. To use it now, unset AA_DAILY_BUDGET_USD or switch to a Claude "
+        "model (AA_MODEL_REASONING / AA_MODEL_COPY), then restart the API."
+    )
 
 
 class BudgetUnreadableError(BudgetExceededError):
@@ -386,16 +392,20 @@ def spent_today_usd(now: datetime | None = None) -> float:
     return float(total or 0.0)
 
 
-def last_call_unreported(model: str, backend: str) -> bool:
-    """True when this model's most recent call on `backend` was recorded with neither a
-    reported cost nor a list price: the service stopped reporting what it charged."""
+def last_call_unreported(model: str, backend: str, now: datetime | None = None) -> bool:
+    """True when this model's most recent call on `backend` TODAY (the server's local day,
+    like the limit) was recorded with neither a reported cost nor a list price: the service
+    stopped reporting what it charged. Scoped to today because a refused call writes no row,
+    so an unscoped lookup would block the model under a limit for good."""
     bind = get_usage_bind()
     if bind is None:
         return False
+    start = _db_time(local_day_start(now))
     with Session(bind) as session:
         row = session.exec(
             select(LLMUsage.reported_cost_usd, LLMUsage.cost_usd)
-            .where(LLMUsage.backend == backend, LLMUsage.model == model)
+            .where(LLMUsage.backend == backend, LLMUsage.model == model,
+                   LLMUsage.created_at >= start)
             .order_by(LLMUsage.id.desc())
             .limit(1)
         ).first()
@@ -411,7 +421,7 @@ def check_budget(model: str | None = None, *, reports_cost: bool = False,
     - UnpricedModelError: `model` has no list price on a backend that doesn't report what
       it charged (`reports_cost` False, see llm/backends.py);
     - UnreportedCostError: no list price, and the reporting backend left this model's last
-      call without a cost;
+      call today without a cost (clears at local midnight);
     - BudgetUnreadableError: today's spend (or that last call) can't be read. Fails closed:
       with a limit set, an unreadable usage store must not mean unlimited spend;
     - BudgetExceededError: today's spend meets the limit.
@@ -439,23 +449,36 @@ def check_budget(model: str | None = None, *, reports_cost: bool = False,
 def budget_warnings() -> list[str]:
     """Configuration problems with the daily limit, for GET /api/setup (empty when fine).
 
-    Today: a limit is set but a configured role's model has no known price, so every
-    API-key call on that role will be refused (see check_budget). Never on a backend that
-    reports each call's cost: there every model's spend is counted.
+    A limit is set and a configured role's model has no known price: on a backend that
+    doesn't report cost, every API-key call on that role will be refused; on one that does
+    (OpenRouter), only once today's last call on that model came back without a cost (see
+    check_budget), and the warning says how that clears.
     """
-    if settings.daily_budget_usd is None or api_backend().reports_cost:
+    if settings.daily_budget_usd is None:
         return []
     from adaptive_academy.llm.registry import MODEL_ENV_VARS, resolved_models
 
+    backend = api_backend()
     by_model: dict[str, list[str]] = {}
     for role, model in resolved_models().items():
         if pricing.price_for(model) is None:
             by_model.setdefault(model, []).append(MODEL_ENV_VARS[role])
-    return [
-        f"{unpriced_model_message(model)} Until then, calls on {' / '.join(env_vars)} are "
-        "refused."
-        for model, env_vars in by_model.items()
-    ]
+    if not backend.reports_cost:
+        return [
+            f"{unpriced_model_message(model)} Until then, calls on {' / '.join(env_vars)} "
+            "are refused."
+            for model, env_vars in by_model.items()
+        ]
+    warnings = []
+    for model in by_model:
+        try:
+            blocked = last_call_unreported(model, backend.name)
+        except Exception:  # noqa: BLE001 - a setup diagnostic; check_budget fails closed itself
+            logger.warning("could not read today's usage for the setup check", exc_info=True)
+            continue
+        if blocked:
+            warnings.append(unreported_cost_message(model, backend.provider))
+    return warnings
 
 
 # --- reporting (GET /api/usage) -------------------------------------------------------
