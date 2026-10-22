@@ -99,7 +99,7 @@ def submit_attempt(session: Session, convo: Conversation, message: Message,
 
 
 def with_attempt_state(system: str, outcome: AttemptOutcome | None, *,
-                       attempt_logged: bool) -> str:
+                       attempt_logged: bool, emit=None) -> str:  # noqa: ANN001
     """The turn's system prompt with the attempt state last, on every turn.
 
     On a Submit attempt turn that is the outcome note, which already says whether the gate is
@@ -107,7 +107,9 @@ def with_attempt_state(system: str, outcome: AttemptOutcome | None, *,
     it is the state line for `attempt_logged`, so the tutor knows on every later turn that it
     may reveal, not only on the turn the attempt was accepted."""
     if outcome is not None:
-        line = outcome.note
+        line = outcome.note  # submit_attempt already traced its tag
     else:
         line = TUTOR_STATE_UNLOCKED if attempt_logged else TUTOR_STATE_LOCKED
+        if emit is not None:
+            emit("prompt", line.tag)  # every prompt tag is traced (CLAUDE.md)
     return f"{system}\n\n{line}"

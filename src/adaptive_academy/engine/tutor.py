@@ -109,7 +109,7 @@ def run_tutor_turn(
         levels,
         memory_block=memory_block,
         covered_block=covered_block,
-    ), outcome, attempt_logged=convo.attempt_logged)
+    ), outcome, attempt_logged=convo.attempt_logged, emit=emit)
 
     step = 0
     max_steps = _MAX_STEPS

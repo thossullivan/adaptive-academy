@@ -95,12 +95,15 @@
       const error = e instanceof Error ? e.message : String(e);
       // An attempt is stored before the tutor runs, so the reply can fail after it was saved.
       const id = convoId;
-      const stored = attempt && id != null ? await storedAttempt(() => api.getConversation(id), content) : null;
+      // The page's transcript before this send: everything but the optimistic bubble.
+      const priorCount = messages.length - 1;
+      const stored =
+        attempt && id != null ? await storedAttempt(() => api.getConversation(id), content, priorCount) : null;
       if (stored) {
         const c = stored.conversation;
         messages = [...messages.slice(0, -1), stored.message];
         levels = { assistance: c.assistance_level, challenge: c.challenge_level, attempt: c.attempt_logged };
-        toasts.show(attemptSavedMessage(error), 'error', 12000);
+        toasts.show(attemptSavedMessage(error, stored.message.attempt_outcome ?? null), 'error', 12000);
       } else {
         // Nothing was sent (e.g. no API key): take the bubble back, keep the draft, say why.
         messages = messages.slice(0, -1);

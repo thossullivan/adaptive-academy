@@ -51,19 +51,37 @@ export function messageNote(m: MessageOut): string | null {
 /**
  * After a Submit attempt send fails: did the attempt reach the server anyway? The attempt is
  * checked and stored before the tutor runs, so a failed tutor call (an overload, say) can
- * leave it saved, and logged. Re-read the conversation: the attempt was stored when the
- * transcript ends with it (no reply after it). Null when it wasn't, or the re-read fails.
+ * leave it saved. Re-read the conversation: the attempt was stored when the transcript has
+ * exactly one more message than before the send (`priorCount`) and ends with it, with no
+ * reply after it. The count stops an identical earlier attempt from matching. Null when it
+ * wasn't stored, or the re-read fails.
  */
 export async function storedAttempt(
   read: () => Promise<Conversation>,
-  content: string
+  content: string,
+  priorCount: number
 ): Promise<{ conversation: Conversation; message: MessageOut } | null> {
   const conversation = await read().catch(() => null);
   const last = conversation?.messages.at(-1);
-  if (!conversation || !last || last.role !== 'user' || !last.is_attempt || last.content !== content) return null;
-  return { conversation, message: last };
+  if (!conversation || conversation.messages.length !== priorCount + 1) return null;
+  if (!last || last.role !== 'user' || !last.is_attempt || last.content !== content) return null;
+  // What the check decided: logged, not logged, or not checked (no Attempt row written).
+  const outcome: AttemptOutcome =
+    last.attempt_accepted === true || conversation.attempt_logged
+      ? 'accepted'
+      : last.attempt_accepted === false
+        ? 'rejected'
+        : 'unverified';
+  return { conversation, message: { ...last, attempt_outcome: outcome } };
 }
 
-export function attemptSavedMessage(error: string): string {
-  return `Your attempt was saved, but the tutor's reply failed (${error}). Send a message when you're ready to carry on.`;
+/** The toast after a failed reply to a stored attempt, worded for what happened to it. */
+export function attemptSavedMessage(error: string, outcome: AttemptOutcome | null = 'accepted'): string {
+  if (outcome === 'rejected') {
+    return `Your attempt was saved but not logged: add your reasoning or a first step and submit again. The tutor's reply also failed (${error}).`;
+  }
+  if (outcome === 'unverified') {
+    return `Your attempt was saved but couldn't be checked, so it isn't logged yet. Submit it again in a moment. The tutor's reply failed (${error}).`;
+  }
+  return `Your attempt was saved and logged, but the tutor's reply failed (${error}). Send a message when you're ready to carry on.`;
 }

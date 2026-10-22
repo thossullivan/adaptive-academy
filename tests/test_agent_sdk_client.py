@@ -130,12 +130,16 @@ def test_the_subscription_client_and_researcher_turn_off_built_in_tools():
     from adaptive_academy.llm import agent_sdk_researcher
     from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
 
-    assert AgentSDKLLMClient()._options("s").tools == []
+    opts = AgentSDKLLMClient()._options("s")
+    assert opts.tools == [] and opts.strict_mcp_config is True
+    assert opts.env.get("ENABLE_CLAUDEAI_MCP_SERVERS") == "false"
 
     seen = {}
 
     async def fake_query(prompt, options):
         seen["tools"], seen["mode"] = options.tools, options.permission_mode
+        seen["strict"], seen["no_connectors"] = (
+            options.strict_mcp_config, options.env.get("ENABLE_CLAUDEAI_MCP_SERVERS"))
         if False:
             yield None
 
@@ -145,4 +149,5 @@ def test_the_subscription_client_and_researcher_turn_off_built_in_tools():
         asyncio.run(agent_sdk_researcher.AgentSDKResearcherClient()._run("q"))
     finally:
         agent_sdk_researcher.query = original
-    assert seen == {"tools": ["WebSearch"], "mode": "bypassPermissions"}
+    assert seen == {"tools": ["WebSearch"], "mode": "bypassPermissions", "strict": True,
+                    "no_connectors": "false"}

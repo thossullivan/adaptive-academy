@@ -369,6 +369,8 @@ def _sdk_turn(session, monkeypatch, *, learner, guard_llm, attempt, attempt_logg
         seen["allowed_tools"] = options.allowed_tools
         seen["tools"] = options.tools
         seen["permission_mode"] = options.permission_mode
+        seen["strict_mcp_config"] = options.strict_mcp_config
+        seen["env"] = options.env
         seen["system"] = options.system_prompt
         revealed = await captured["reveal_solution"].handler({"text": SECRET})
         yield _FakeResult(SECRET if not revealed.get("is_error") else HINT)
@@ -391,6 +393,9 @@ def test_sdk_the_tutor_has_only_the_reveal_tool(session, monkeypatch):
     # Security: with bypassPermissions, `tools` must turn off every built-in Claude Code tool
     # (Bash, Read, Write, ...). allowed_tools alone only auto-approves; it doesn't restrict.
     assert seen["permission_mode"] == "bypassPermissions" and seen["tools"] == []
+    # ...and only the in-process MCP server: no claude.ai connectors or other MCP servers.
+    assert seen["strict_mcp_config"] is True
+    assert seen["env"].get("ENABLE_CLAUDEAI_MCP_SERVERS") == "false"
 
 
 def test_sdk_an_accepted_attempt_opens_the_gate(session, monkeypatch):
@@ -711,3 +716,36 @@ def test_sdk_a_blocked_reveal_never_becomes_the_reply(session, monkeypatch):
     result = tutor_sdk.run_tutor_turn_sdk(
         session, convo, "show me", guard_llm=ScriptedLLMClient([_verdict(attempted=False)]))
     assert SECRET not in result.reply
+
+
+def test_sdk_a_reveal_survives_an_sdk_error_after_it(session, monkeypatch):
+    # Review: the run can error (e.g. max turns) after an allowed reveal; the answer was given,
+    # so it is the reply instead of a failed turn.
+    from adaptive_academy.llm.types import AgentSDKError
+
+    convo = _seed(session, attempt_logged=True)
+    captured: dict = {}
+    real_server = tutor_sdk.create_sdk_mcp_server
+
+    def capture_server(name, tools):
+        captured.update({t.name: t for t in tools})
+        return real_server(name, tools=tools)
+
+    async def fake_query(prompt, options):
+        await captured["reveal_solution"].handler({"text": SECRET})
+        raise AgentSDKError("max turns")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(tutor_sdk, "create_sdk_mcp_server", capture_server)
+    monkeypatch.setattr(tutor_sdk, "query", fake_query)
+    monkeypatch.setattr(tutor_sdk, "record_sdk_result", lambda *a, **kw: None)
+    result = tutor_sdk.run_tutor_turn_sdk(session, convo, "show me", guard_llm=None)
+    assert result.reply == SECRET
+
+
+def test_the_state_line_is_traced_on_ordinary_turns(session, monkeypatch):
+    from adaptive_academy.prompts import TUTOR_STATE_LOCKED
+
+    _, result, _, _ = _sdk_turn(session, monkeypatch, learner="hi", attempt=False,
+                                guard_llm=ScriptedLLMClient([_verdict(attempted=False)]))
+    assert ("prompt", TUTOR_STATE_LOCKED.tag) in [(e.kind, e.detail) for e in result.events]

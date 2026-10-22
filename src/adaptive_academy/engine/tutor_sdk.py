@@ -34,7 +34,7 @@ from adaptive_academy.engine.solution_guard import (
 )
 from adaptive_academy.engine.tools import reveal_gate
 from adaptive_academy.engine.tutor import TurnResult, _FALLBACK
-from adaptive_academy.llm.agent_sdk_client import record_sdk_result
+from adaptive_academy.llm.agent_sdk_client import SDK_ISOLATION, record_sdk_result
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.llm.today import with_today
@@ -134,7 +134,7 @@ def run_tutor_turn_sdk(
         levels,
         memory_block=memory_block,
         covered_block=covered_block,
-    ), outcome, attempt_logged=convo.attempt_logged)
+    ), outcome, attempt_logged=convo.attempt_logged, emit=emit)
 
     # The text of an allowed reveal. As on the API path, an allowed reveal is the reply: the
     # tool result only goes back to the model, which may then just say "see above", and the
@@ -169,7 +169,7 @@ def run_tutor_turn_sdk(
                 tools=[],
                 allowed_tools=["mcp__tutor__reveal_solution"],
                 permission_mode="bypassPermissions", max_turns=_MAX_TURNS,
-                setting_sources=[]),
+                setting_sources=[], **SDK_ISOLATION),
         ):
             if isinstance(msg, ResultMessage):
                 record_sdk_result(msg, model=model, role=role, operation="tutor_sdk")
@@ -185,7 +185,14 @@ def run_tutor_turn_sdk(
     # query, so no autoflush) until the reply is persisted below.
     session.commit()
     session.refresh(convo)
-    reply = asyncio.run(_run(prompt))
+    try:
+        reply = asyncio.run(_run(prompt))
+    except AgentSDKError:
+        # The run errored after an allowed reveal (e.g. max turns): the answer was given, so
+        # keep it as the reply rather than failing the turn. Otherwise fail as before.
+        if not revealed:
+            raise
+        reply = ""
     if revealed:
         reply = revealed[-1]  # the tool is the authoritative source of the answer
     elif not reply:

@@ -93,29 +93,43 @@ describe('after a Submit attempt send fails', () => {
 
   it('finds the attempt the server stored when only the reply failed', async () => {
     const read = vi.fn().mockResolvedValue(convo([{ role: 'user', content: 'hi' }, { role: 'tutor', content: 'yes?' }, attempt], true));
-    const stored = await storedAttempt(read, 'divide by sqrt(d_k)');
+    const stored = await storedAttempt(read, 'divide by sqrt(d_k)', 2);
     expect(read).toHaveBeenCalledOnce();
-    expect(stored?.message).toEqual(attempt);
+    expect(stored?.message).toEqual({ ...attempt, attempt_outcome: 'accepted' });
     expect(stored?.conversation.attempt_logged).toBe(true);
   });
 
   it('says nothing was stored when the attempt never reached the server', async () => {
     const before = convo([{ role: 'user', content: 'hi' }, { role: 'tutor', content: 'yes?' }]);
-    expect(await storedAttempt(vi.fn().mockResolvedValue(before), 'divide by sqrt(d_k)')).toBeNull();
+    expect(await storedAttempt(vi.fn().mockResolvedValue(before), 'divide by sqrt(d_k)', 2)).toBeNull();
     // A tutor reply after it means it is an older, answered message, not this send.
     const answered = convo([attempt, { role: 'tutor', content: 'good' }]);
-    expect(await storedAttempt(vi.fn().mockResolvedValue(answered), 'divide by sqrt(d_k)')).toBeNull();
+    expect(await storedAttempt(vi.fn().mockResolvedValue(answered), 'divide by sqrt(d_k)', 1)).toBeNull();
     // An ordinary message with the same text is not the attempt.
     const plain = convo([{ role: 'user', content: 'divide by sqrt(d_k)' }]);
-    expect(await storedAttempt(vi.fn().mockResolvedValue(plain), 'divide by sqrt(d_k)')).toBeNull();
+    expect(await storedAttempt(vi.fn().mockResolvedValue(plain), 'divide by sqrt(d_k)', 0)).toBeNull();
     // The re-read failing too: fall back to "nothing was sent".
-    expect(await storedAttempt(vi.fn().mockRejectedValue(new Error('down')), 'divide by sqrt(d_k)')).toBeNull();
+    expect(await storedAttempt(vi.fn().mockRejectedValue(new Error('down')), 'divide by sqrt(d_k)', 0)).toBeNull();
+    // An identical earlier attempt is not this send: the transcript didn't grow.
+    const earlier = convo([attempt]);
+    expect(await storedAttempt(vi.fn().mockResolvedValue(earlier), 'divide by sqrt(d_k)', 1)).toBeNull();
   });
 
   it('says plainly that the attempt was saved and the reply failed', () => {
     const text = attemptSavedMessage('529 Overloaded');
-    expect(text).toMatch(/^Your attempt was saved, but the tutor's reply failed/);
+    expect(text).toMatch(/^Your attempt was saved and logged, but the tutor's reply failed/);
     expect(text).toContain('529 Overloaded');
+  });
+
+  it("marks a stored attempt the check couldn't run on, and says to submit again", async () => {
+    const unchecked: MessageOut = { ...attempt, attempt_accepted: null };
+    const stored = await storedAttempt(vi.fn().mockResolvedValue(convo([unchecked])), 'divide by sqrt(d_k)', 0);
+    expect(stored?.message.attempt_outcome).toBe('unverified');
+    expect(attemptSavedMessage('529', 'unverified')).toMatch(/couldn't be checked, so it isn't logged yet/);
+    const rejected: MessageOut = { ...attempt, attempt_accepted: false };
+    const r = await storedAttempt(vi.fn().mockResolvedValue(convo([rejected])), 'divide by sqrt(d_k)', 0);
+    expect(r?.message.attempt_outcome).toBe('rejected');
+    expect(attemptSavedMessage('529', 'rejected')).toMatch(/saved but not logged/);
   });
 });
 

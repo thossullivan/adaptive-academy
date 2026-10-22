@@ -16,7 +16,7 @@ import asyncio
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
-from adaptive_academy.llm.agent_sdk_client import record_sdk_result
+from adaptive_academy.llm.agent_sdk_client import SDK_ISOLATION, record_sdk_result
 from adaptive_academy.llm.anthropic_researcher import parse_sources_json
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
@@ -44,7 +44,7 @@ class AgentSDKResearcherClient:
                 tools=["WebSearch"],
                 allowed_tools=["WebSearch"],
                 max_turns=self._max_turns, setting_sources=[],
-                permission_mode="bypassPermissions"),
+                permission_mode="bypassPermissions", **SDK_ISOLATION),
         ):
             if isinstance(msg, ResultMessage):
                 record_sdk_result(msg, model=self._model, role=self._role,

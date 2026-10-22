@@ -58,6 +58,20 @@ def flatten_messages(messages: list[dict]) -> str:
                        for m in messages)
 
 
+# Isolation for every Agent SDK call, on top of `tools` (built-in tools) and
+# setting_sources=[] (user/project MCP servers on disk). strict_mcp_config makes the CLI load
+# ONLY the MCP servers passed in `mcp_servers` (none, or the tutor's in-process reveal tool):
+# without it the CLI also attaches the account's claude.ai connectors (Gmail, Drive, Notion,
+# ...) and a first-party server, and the tutor and researcher run with bypassPermissions over
+# untrusted web and vault text. The env flag turns the claude.ai connectors off as well.
+# Verified live (claude-agent-sdk 0.2.103): without these the CLI's init listed a claude.ai
+# connector; with them, no MCP servers.
+SDK_ISOLATION: dict = {
+    "strict_mcp_config": True,
+    "env": {"ENABLE_CLAUDEAI_MCP_SERVERS": "false"},
+}
+
+
 class AgentSDKLLMClient:
     """LLMClient over the Claude Agent SDK (subscription auth). Sync, single-turn."""
 
@@ -71,7 +85,7 @@ class AgentSDKLLMClient:
         # single completion.
         return ClaudeAgentOptions(
             model=self._model, system_prompt=with_today(system),
-            tools=[], allowed_tools=[], max_turns=1, setting_sources=[])
+            tools=[], allowed_tools=[], max_turns=1, setting_sources=[], **SDK_ISOLATION)
 
     async def _run(self, system: str, prompt: str) -> tuple[str, str | None]:
         text, stop_reason = "", None
