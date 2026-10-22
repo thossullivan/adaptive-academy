@@ -54,6 +54,24 @@ def test_source_quiz_rules_layer_penalizes_omitted_key_point(session):
     assert any("omitted required element" in g for g in res.assessment.gaps)
 
 
+def test_source_quiz_formula_key_point_goes_to_the_grader(session):
+    # criteria == key_points for a source quiz: a formula key point is a soft check, so it
+    # must still reach the grader under EXPECTED FORMULAS (whose 0.70 rule is in GRADE).
+    topic, concept, anchor = _seed(session)
+    anchor.key_points = ["numerical stability", "softmax(x - max(x))"]
+    session.add(anchor)
+    session.commit()
+    grade = json.dumps({"score": 0.9, "verdict": "good", "gaps": []})
+    llm = ScriptedLLMClient([LLMResponse(text=grade)])
+    res = assess_concept(session, concept, "source_quiz",
+                         "for numerical stability subtract the largest logit", llm=llm)
+    user = llm.calls[0]["messages"][0]["content"]
+    expected = user.split("EXPECTED FORMULAS:", 1)[1].split("REFERENCE ANSWER", 1)[0]
+    assert "- softmax(x - max(x))" in expected
+    assert "numerical stability" not in expected
+    assert not any("omitted required element" in g for g in res.assessment.gaps)
+
+
 def test_source_quiz_without_anchor_raises(session):
     topic, concept, anchor = _seed(session)
     session.delete(anchor)

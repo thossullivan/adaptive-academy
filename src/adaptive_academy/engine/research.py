@@ -174,11 +174,21 @@ def synthesize_foundation(
         {"role": "assistant", "content": resp.text if resp.text.strip() else "(empty reply)"},
         {"role": "user", "content": concept_names.correction_message(report)},
     ]
-    retry = llm.complete(system=RESEARCH_FOUNDATION, messages=messages, tools=[])
+    # The retry is optional polish on an answer already paid for (and, in research_topic,
+    # after the source fan-out): any failure here — a budget or rate limit, the network, an
+    # unparseable or shrunken answer — falls back to repairing the first answer.
+    second: Foundation | None = None
     try:
+        retry = llm.complete(system=RESEARCH_FOUNDATION, messages=messages, tools=[])
         second = _parse_foundation_json(retry.text)
-    except (json.JSONDecodeError, ValueError, AttributeError, TypeError):
-        second = None  # keep the first answer; its names are repaired below
+    except Exception as exc:  # noqa: BLE001 — see above; the first answer is still good
+        record("concepts:retry_failed", f"{type(exc).__name__}; repairing the first answer")
+    if second is not None and not (
+            second.key_concepts and len(second.key_concepts) >= len(foundation.key_concepts)):
+        record("concepts:retry_failed",
+               f"retry returned {len(second.key_concepts)} key concept(s), first had "
+               f"{len(foundation.key_concepts)}; repairing the first answer")
+        second = None
     if second is not None:
         foundation = second
         report = _name_report(foundation)

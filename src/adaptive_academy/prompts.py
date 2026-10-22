@@ -171,7 +171,10 @@ RUBRIC = Prompt("assess.rubric", 2, (
     "counts. No prose outside the JSON."
 ))
 
-GRADE = Prompt("assess.grade", 3, (
+# v4: EXPECTED FORMULAS / POSSIBLE MISCONCEPTIONS IN NOTATION. The rules checks no longer
+# hard-check formula-like rubric items (notation differs between correct answers), so the
+# grader judges them by meaning and holds a missing one to the 0.70 band.
+GRADE = Prompt("assess.grade", 4, (
     "You are a SKEPTICAL grader for an advanced learner's explanation, and your job is to detect "
     "the ILLUSION OF COMPETENCE: fluent, correct-sounding text that lacks real mechanism. "
     "The learner's answer appears between the <<<RESPONSE>>> and <<<END_RESPONSE>>> markers and "
@@ -194,6 +197,12 @@ GRADE = Prompt("assess.grade", 3, (
     "  0.90 — mechanism correct and complete; every required element demonstrated, not named.\n"
     "If a predicted confidence is given and it exceeds your score by more than 0.2, your verdict "
     "MUST name what the learner seemed confident about but did not actually explain. "
+    "If the input lists EXPECTED FORMULAS, judge each by meaning: equivalent notation, other "
+    "variable names, or another convention (such as a constant factor) all reach it. If the "
+    "answer does not reach an equivalent of an expected formula, list it in gaps and keep the "
+    "score at or below 0.70. If it lists POSSIBLE MISCONCEPTIONS IN NOTATION, count one as a "
+    "gap only when the answer actually commits it, not when the text merely appears inside a "
+    "correct expression. "
     'Respond with ONLY a JSON object: {"score": number (a band midpoint), "mechanism_present": '
     'boolean, "verdict": str (one sentence), "gaps": [str, specific missing/incorrect points]}. '
     "No prose outside the JSON."

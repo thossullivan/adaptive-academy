@@ -56,7 +56,8 @@ def test_short_noun_phrases_pass(name):
     ("Momentum; damps oscillation", "N4"), ("Momentum — damps oscillation", "N4"),
     ("Momentum - damps oscillation", "N4"),
     ("Stability threshold: guaranteed descent for small steps", "N4"),
-    ("Least-squares cost is convex", "N5"), ("Gradient descent converges", "N5"),
+    ("Least-squares cost is convex", "N5"), ("Gradient descent converges linearly", "N5"),
+    ("Attention is all you need", "N5"),
     ("Step size equals inverse curvature", "N5"),
 ])
 def test_each_rule_catches_its_shape(name, rule):
@@ -93,7 +94,10 @@ def test_check_names_reports_the_offending_name():
     (EVIDENCE[2], "Stability threshold"),
     ("Least-squares cost is convex", "Least-squares cost"),
     ("learning rate α", "learning rate"),
-    ("O(n log n) sorting", "sorting"),
+    ("O(n log n) sorting", "Big-O sorting"),
+    ("softmax(QK^T) attention", "softmax attention"),
+    ("Gauss - Newton method: converges quadratically near the optimum", "Gauss-Newton method"),
+    ("Learning rate: step size α", "Learning rate"),
     ("Notation (θ)", "Notation"),
     ("  Momentum — damps oscillation ", "Momentum"),
     ("convergence rate of gradient descent on strongly convex quadratic objectives",
@@ -123,6 +127,28 @@ def test_passing_names_are_untouched():
         assert repair_name(name, fallback="x") == name
 
 
+# Review H1: real names that contain a claim-verb-looking word must pass untouched.
+REAL_NAMES = [
+    "K-means clustering", "k-means++ initialization", "Equal error rate", "IS-LM model",
+    "Means-end analysis", "Causes of overfitting", "Ensures in Eiffel", "Bond yields",
+    "Mini-batch k-means", "Fuzzy c-means", "What causes vanishing gradients",
+    "What is a monad", "Gauss - Newton", "Gauss-Newton method",
+]
+
+
+@pytest.mark.parametrize("name", REAL_NAMES)
+def test_real_names_pass_and_repair_leaves_them_whole(name):
+    assert name_problems(name) == []
+    assert repair_name(name, fallback="Concept 1") == name
+    fix = repair_names([name], {})
+    assert fix.key_concepts == [name] and not fix.report.failed_ids
+
+
+@pytest.mark.parametrize("name", ["Is convex", "Gradient converges"])
+def test_a_verb_at_either_end_is_not_a_clause(name):
+    assert "N5" not in _ids(name)
+
+
 def test_word_cap_is_the_documented_one():
     assert MAX_NAME_WORDS == 7
     assert MAX_NAME_CHARS == 60
@@ -148,13 +174,27 @@ def test_repair_names_renames_consistently_across_the_prerequisite_map():
     assert not fix.report.passed and fix.changed
 
 
-def test_repair_names_keeps_distinct_concepts_distinct():
-    key = ["Gradient: the form averaged over samples", "Gradient: the form summed over samples",
-           "Gradient"]
+def test_two_failing_names_repaired_alike_stay_distinct():
+    key = ["Gradient: the form averaged over samples", "Gradient: the form summed over samples"]
     fix = repair_names(key, {})
-    assert len({n.casefold() for n in fix.key_concepts}) == 3
-    assert fix.key_concepts[2] == "Gradient"  # a passing name keeps its name
+    assert fix.key_concepts == ["Gradient", "Gradient (2)"]
     assert all(name_problems(n) == [] for n in fix.key_concepts)
+
+
+def test_failing_name_repaired_onto_a_passing_key_concept_merges():
+    fix = repair_names(["Gradient: ∇J(θ)=Xᵀ(Xθ−y)", "Gradient"], {})
+    assert fix.key_concepts == ["Gradient"]  # no visible "Gradient (2)"
+    assert fix.renamed == {"Gradient: ∇J(θ)=Xᵀ(Xθ−y)": "Gradient"}
+
+
+def test_failing_key_repaired_onto_a_map_only_name_merges_and_stays_load_bearing():
+    from adaptive_academy.engine.curriculum import load_bearing_concepts
+
+    fix = repair_names(["Learning rate: step size α", "Momentum"],
+                       {"Momentum": ["Learning rate"]})
+    assert fix.key_concepts == ["Learning rate", "Momentum"]
+    assert fix.prerequisite_map == {"Momentum": ["Learning rate"]}
+    assert load_bearing_concepts(fix.prerequisite_map, fix.key_concepts) == {"Learning rate"}
 
 
 def test_repair_names_noop_on_clean_foundation():

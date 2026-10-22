@@ -13,7 +13,8 @@ def test_prompt_is_a_str_with_metadata():
 
 
 def test_registry_prompts_have_tags():
-    assert GRADE.tag == "assess.grade@v3"  # v2 injection clause, v3 bands + mechanism cap
+    # v2 injection clause, v3 bands + mechanism cap, v4 expected formulas judged by meaning
+    assert GRADE.tag == "assess.grade@v4"
     assert STORY.tag == "story.compose@v1"
     # The skeptical-grader phrasing the assessor relies on is preserved.
     assert "SKEPTICAL grader" in GRADE
@@ -64,6 +65,15 @@ def test_untrusted_input_prompts_carry_injection_clause():
 
     for p in (GRADE, TEACH, PF_CONSOLIDATE, ANCHOR, RESEARCH_FOUNDATION):
         assert "UNTRUSTED" in p, p.tag
+
+
+def test_grade_prompt_says_what_a_missing_expected_formula_costs():
+    # The rules checks leave formula-like items to the grader (assess.check_anchor_terms), so
+    # the grader must be told both how to judge them and what a missing one costs.
+    assert "EXPECTED FORMULAS" in GRADE
+    assert ("If the answer does not reach an equivalent of an expected formula, list it in "
+            "gaps and keep the score at or below 0.70.") in " ".join(GRADE.split())
+    assert "POSSIBLE MISCONCEPTIONS IN NOTATION" in GRADE
 
 
 def test_grade_builder_delimits_the_learner_response():

@@ -30,22 +30,34 @@ because a failing name is regenerated or repaired, never written as is):
             (" — ", " – ", " - "), and a ":" only before a short subtitle of at most
             MAX_SUBTITLE_WORDS words ("Sampling: Temperature and Top-k", a demo concept,
             passes; "Stability threshold: guaranteed descent for small steps" fails).
-            Hyphenated words ("1-D") pass.
-  N5  FAIL  The name states no claim: none of the whole words in CLAIM_VERBS (is, are,
-            equals, implies, converges, ...). "Least-squares cost is convex" fails.
+            Hyphenated words ("1-D") pass, and so does " - " between two capitalised
+            words, read as a hyphen ("Gauss - Newton").
+  N5  FAIL  The name states no claim: a CLAIM_VERBS word (is, are, was, were, equals,
+            implies, guarantees, converges, diverges, becomes) standing as a whole
+            whitespace token with words on both sides, i.e. a clause ("Least-squares cost is
+            convex"). Hyphenated tokens stay whole ("IS-LM model", "K-means"), a verb at
+            either end is not a clause, nor is a question ("What is a monad"). Words that
+            are also nouns or adjectives (means, yields, causes, equal, ensures) are not
+            claim verbs: "Equal error rate", "Bond yields", "Causes of overfitting" pass.
 
 Repair (repair_name), for a failing name only — a passing name is returned untouched:
-  1. take the first ":" / ";" / spaced-dash segment that has a letter or digit;
-  2. drop function-notation tokens ("J(θ)=…", "O(n log n)") whole, then parenthetical groups;
-  3. cut at the first claim verb;
+  1. read " - " between capitalised words as a hyphen; take the first ":" / ";" /
+     spaced-dash segment that has a letter or digit (the head); if the head passes, use it;
+  2. otherwise build a fragment: function-notation tokens become their function name when it
+     is a word ("softmax(QK^T)" -> "softmax", "O(n log n)" -> "Big-O") and are dropped when
+     it is one letter ("J(θ)=…"); parenthetical groups are dropped;
+  3. cut at the first claim clause;
   4. glue spaced operators to their operands ("1 / L" -> "1/L"), then drop every token that
      holds a formula and every token with no letter or digit;
   5. cap to MAX_NAME_WORDS words, cutting at the last phrase boundary (a stopword) inside the
      window when the next word continues the phrase, drop trailing stopwords, cap characters;
-  6. if nothing passes, use the caller's fallback ("Concept 3").
-repair_names applies it across a foundation: every name in key_concepts and the
-prerequisite map, case variants of a key concept folded onto it, distinct concepts kept
-distinct (" (2)" suffix), and the map rewritten with the new names.
+  6. if the fragment is lossy (one word left of three or more, or fewer than half the head's
+     words) and the head trimmed to the caps passes, use that instead;
+  7. if nothing passes, use the caller's fallback ("Concept 3").
+repair_names applies it across a foundation: every passing name (key concept or map-only)
+keeps its name; a failing name whose repair equals a passing name (any case) merges into it;
+two failing names that repair to the same text stay distinct (" (2)"); the map is rewritten
+with the new names.
 """
 
 import re
@@ -67,10 +79,14 @@ from adaptive_academy.prompts import CONCEPT_NAME_CORRECTION
 MAX_NAME_WORDS = 7
 MAX_NAME_CHARS = 60
 
+# Verbs only: words that double as nouns or adjectives (means, yields, causes, equal,
+# ensures) name real concepts ("K-means", "Bond yields", "Equal error rate").
 CLAIM_VERBS = frozenset({
-    "is", "are", "was", "were", "equals", "equal", "implies", "guarantees", "ensures",
-    "yields", "converges", "diverges", "means", "causes", "becomes",
+    "is", "are", "was", "were", "equals", "implies", "guarantees", "converges", "diverges",
+    "becomes",
 })
+_INTERROGATIVES = frozenset({"what", "why", "how", "when", "where", "which", "who", "whether"})
+_TOKEN_PUNCT = ",.;:!?()[]{}\"'"
 _STOPWORDS = frozenset({
     "a", "an", "the", "of", "and", "or", "for", "to", "in", "on", "with", "by", "at",
     "from", "along", "via", "vs", "into", "over", "under", "as", "when", "if", "using",
@@ -88,6 +104,24 @@ _PARENTHETICAL = re.compile(r"\s*\([^()]*\)")
 _APPLIED_TOKEN = re.compile(r"\S*[^\W_]\([^()]*\)\S*")
 _SPACED_OPERATOR = re.compile(r"\s*([/=<>^≤≥≠≈−×·*])\s*")
 _WORD = re.compile(r"[^\W_]+")
+_SPACED_COMPOUND = re.compile(r"\b([A-Z][\w]*) - (?=[A-Z])")  # "Gauss - Newton"
+_FUNCTION_NAME = re.compile(r"^[^\W\d_]+(?=\()")
+
+
+def _join_compounds(text: str) -> str:
+    """Read " - " between two capitalised words as a hyphen ("Gauss - Newton")."""
+    return _SPACED_COMPOUND.sub(r"\1-", text)
+
+
+def _claim_index(words: list[str]) -> int | None:
+    """Index of the first claim verb that forms a clause (words on both sides), or None."""
+    for i in range(1, len(words) - 1):
+        if words[i].strip(_TOKEN_PUNCT).casefold() not in CLAIM_VERBS:
+            continue
+        if words[i - 1].strip(_TOKEN_PUNCT).casefold() in _INTERROGATIVES:
+            continue  # a question names a topic, it does not state the answer
+        return i
+    return None
 
 
 def _is_greek(ch: str) -> bool:
@@ -180,7 +214,8 @@ def _n4(d, _ctx):
     if not isinstance(name, str):
         return None
     _, colon, tail = name.partition(":")
-    if _CLAIM_SEPARATOR.search(name) or (colon and len(tail.split()) > MAX_SUBTITLE_WORDS):
+    if (_CLAIM_SEPARATOR.search(_join_compounds(name))
+            or (colon and len(tail.split()) > MAX_SUBTITLE_WORDS)):
         return f"{_quoted(name)} is a 'Name: claim' sentence, not a noun phrase"
     return None
 
@@ -189,9 +224,10 @@ def _n5(d, _ctx):
     name = d["name"]
     if not isinstance(name, str):
         return None
-    verbs = [w for w in _WORD.findall(name) if w.casefold() in CLAIM_VERBS]
-    if verbs:
-        return f"{_quoted(name)} states a claim ('{verbs[0]}')"
+    words = name.split()
+    i = _claim_index(words)
+    if i is not None:
+        return f"{_quoted(name)} states a claim ('{words[i].strip(_TOKEN_PUNCT)}')"
     return None
 
 
@@ -277,33 +313,60 @@ def _strip_stopwords(words: list[str]) -> list[str]:
     return words
 
 
+def _function_head(match: re.Match) -> str:
+    """A function-notation token reduced to its function name, when that is a word."""
+    head = _FUNCTION_NAME.match(match.group(0))
+    name = head.group(0) if head else ""
+    if name == "O":
+        return " Big-O "  # asymptotic notation: "O(n log n) sorting" -> "Big-O sorting"
+    return f" {name} " if len(name) >= 2 else " "  # J(θ)=…, f(x): a symbol, not a name
+
+
+def _cap_text(words: list[str]) -> str:
+    words = _strip_stopwords(_cap_words(words))
+    text = " ".join(words)
+    while len(text) > MAX_NAME_CHARS and len(words) > 1:
+        words = _strip_stopwords(words[:-1]) or words[:1]
+        text = " ".join(words)
+    return text[:MAX_NAME_CHARS].strip()
+
+
+def _fragment(head: str) -> str:
+    text = _APPLIED_TOKEN.sub(_function_head, head)
+    while _PARENTHETICAL.search(text):
+        text = _PARENTHETICAL.sub("", text)
+    words = text.split()
+    cut = _claim_index(words)
+    if cut is not None:
+        words = words[:cut]
+    text = _SPACED_OPERATOR.sub(r"\1", " ".join(words))
+    words = [w.strip(_TOKEN_PUNCT) for w in text.split()]
+    words = [w for w in words if w and _WORD.search(w) and formula_problem(w) is None]
+    return _cap_text(words)
+
+
+def _lossy(fragment: str, head: str) -> bool:
+    kept, total = len(fragment.split()), len(head.split())
+    return (kept == 1 and total >= 3) or kept * 2 < total
+
+
 def repair_name(name: Any, *, fallback: str) -> str:
     """A short, formula-free noun phrase for a failing name; a passing name unchanged."""
     if not name_problems(name):
         return name
     if not isinstance(name, str):
         return fallback
-    text = " ".join(name.split())
+    text = _join_compounds(" ".join(name.split()))
     segments = [s for s in _SEPARATOR.split(text) if s and _WORD.search(s)]
-    text = segments[0] if segments else ""
-    text = _APPLIED_TOKEN.sub(" ", text)  # "O(n log n) sorting" -> " sorting", not "O sorting"
-    while _PARENTHETICAL.search(text):
-        text = _PARENTHETICAL.sub("", text)
-    words = text.split()
-    for i, word in enumerate(words):
-        if any(w.casefold() in CLAIM_VERBS for w in _WORD.findall(word)):
-            words = words[:i]
-            break
-    text = _SPACED_OPERATOR.sub(r"\1", " ".join(words))
-    words = [w.strip(",.;:()[]{}\"'") for w in text.split()]
-    words = [w for w in words if w and _WORD.search(w) and formula_problem(w) is None]
-    words = _strip_stopwords(_cap_words(words))
-    text = " ".join(words)
-    while len(text) > MAX_NAME_CHARS and len(words) > 1:
-        words = _strip_stopwords(words[:-1]) or words[:1]
-        text = " ".join(words)
-    text = text[:MAX_NAME_CHARS].strip()
-    return text if text and not name_problems(text) else fallback
+    head = segments[0].strip() if segments else ""
+    if head and not name_problems(head):
+        return head  # "Learning rate: step size α" -> "Learning rate"
+    fragment = _fragment(head)
+    if fragment and _lossy(fragment, head):
+        trimmed = _cap_text(head.split())
+        if trimmed and not name_problems(trimmed):
+            return trimmed
+    return fragment if fragment and not name_problems(fragment) else fallback
 
 
 @dataclass
@@ -335,8 +398,13 @@ def repair_names(key_concepts: Any, prerequisite_map: Any) -> NameRepair:
     map_in = prerequisite_map if isinstance(prerequisite_map, dict) else {}
     report = check_names(foundation_names(keys_in, map_in))
 
-    taken: set[str] = set()      # normalized final names in use
-    by_norm: dict[str, str] = {}  # normalized original string name -> final name
+    # Every passing name — key concept or map-only — keeps its name and is reserved first.
+    passing: dict[str, str] = {}  # normalized passing name -> its (first) spelling
+    for name in foundation_names(keys_in, map_in):
+        if isinstance(name, str) and not name_problems(name):
+            passing.setdefault(_norm(name), name)
+    taken: set[str] = set(passing)  # normalized final names in use
+    by_norm: dict[str, str] = dict(passing)  # normalized original string name -> final name
     renamed: dict[str, str] = {}
 
     def unique(base: str) -> str:
@@ -350,17 +418,16 @@ def repair_names(key_concepts: Any, prerequisite_map: Any) -> NameRepair:
                 return candidate
             n += 1
 
-    # Passing key concepts keep their names and are reserved first, so a repaired name
-    # never takes a name the model already used for a different concept.
-    for name in keys_in:
-        if isinstance(name, str) and not name_problems(name) and _norm(name) not in by_norm:
-            by_norm[_norm(name)] = name
-            taken.add(_norm(name))
-
     def assign(name: Any, fallback: str) -> str:
         if isinstance(name, str) and _norm(name) in by_norm:
             return by_norm[_norm(name)]
-        final = unique(repair_name(name, fallback=fallback))
+        repaired = repair_name(name, fallback=fallback)
+        if repaired != fallback and _norm(repaired) in passing:
+            # "Learning rate: step size α" next to a passing "Learning rate": the same
+            # concept, so merge — a suffixed copy would strip the real one of its edges.
+            final = passing[_norm(repaired)]
+        else:
+            final = unique(repaired)  # two failing names repaired alike stay distinct
         taken.add(_norm(final))
         if isinstance(name, str):
             by_norm[_norm(name)] = final

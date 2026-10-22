@@ -43,8 +43,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "5c465941979c061e48cd7d45f19bbcce6127cca1fbbfae4ccce004a9474120a6",
-          "chars": 1999
+          "sha256": "8e89e353ce36856f02de615b1f223e8b3a2a1f35646e5ab3fd05fdf287cc7600",
+          "chars": 2459
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
@@ -155,8 +155,8 @@
       "max_tokens": 20000,
       "system": [
         {
-          "sha256": "5c465941979c061e48cd7d45f19bbcce6127cca1fbbfae4ccce004a9474120a6",
-          "chars": 1999
+          "sha256": "8e89e353ce36856f02de615b1f223e8b3a2a1f35646e5ab3fd05fdf287cc7600",
+          "chars": 2459
         },
         {
           "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",

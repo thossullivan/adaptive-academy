@@ -128,16 +128,26 @@ def _is_revisit(item: ItemView) -> bool:
     return item.text.startswith(REVISIT_PREFIX)
 
 
-def _revisit_targets(phases: list[PhaseView], refs: list[int],
-                     dependents: set[str]) -> list[int]:
-    """Phases to try, in order, for a concept's missing touches."""
-    if refs:
-        start = refs[0] + 1  # spaced: the phases after its first touch, then before it
-    else:
-        uses = [i for d in dependents for i in _phases_referencing(phases, d)]
-        # a prerequisite the model never placed: just before its first dependent uses it
-        start = max(min(uses) - 1, 0) if uses else 0
-    return [*range(start, len(phases)), *range(start - 1, -1, -1)]
+def _first_use(phases: list[PhaseView], dependents: set[str]) -> int | None:
+    """The first phase that references something depending on the concept."""
+    uses = [i for d in dependents for i in _phases_referencing(phases, d)]
+    return min(uses) if uses else None
+
+
+def _revisit_targets(n: int, p: int, first_use: int | None) -> list[int]:
+    """Phases to try, in order, for the second touch of a concept the model put in phase p."""
+    if first_use is not None and first_use < p:
+        # the model introduced it after a dependent already used it: touch it earlier
+        return list(range(first_use, -1, -1))
+    return [*range(p + 1, n), *range(p - 1, -1, -1)]
+
+
+def _intro_targets(n: int, first_use: int | None) -> list[int]:
+    """Phases to try for the first touch of a concept the model never placed: just before
+    its first dependent's phase, then that phase, then earlier — never after it."""
+    if first_use is None:
+        return list(range(n))
+    return [i for i in (first_use - 1, first_use, *range(first_use - 2, -1, -1)) if i >= 0]
 
 
 def insert_spaced_revisits(
@@ -154,10 +164,13 @@ def insert_spaced_revisits(
 
     - referenced in >=2 phases -> already spaced, no-op
     - referenced in exactly 1 phase p -> a 'revisit' write-item in the nearest later phase
-      with room (else the nearest earlier one)
-    - referenced in 0 phases -> two touches starting just before the first phase that uses
-      one of its dependents (the first phase if none does), in consecutive phases with room
-    - single phase total -> cannot space; at least one touch in that phase
+      with room (else the nearest earlier one); if a dependent already used it before p,
+      in the nearest phase at or before that use instead
+    - referenced in 0 phases -> two touches, placed only when both fit: the first just
+      before the first phase that uses one of its dependents (never after it; the first
+      phase if no dependent is used), the second in the nearest later phase with room
+    - single phase total -> cannot space; ONE revisit item touches every unreferenced
+      load-bearing concept (its concept_refs list them all)
 
     Bounded: no phase gets more than `cap` injected revisits (existing ones count), and a
     phase that already references a concept never gets a revisit of it. Concepts with the
@@ -166,22 +179,40 @@ def insert_spaced_revisits(
     if not phases:
         return phases
     dependents = dependents or {}
+    order = sorted(load_bearing, key=lambda c: (-len(dependents.get(c, ())), c))
+    if len(phases) == 1:
+        missing = [c for c in order if not _phases_referencing(phases, c)]
+        if missing:
+            phases[0].items.append(ItemView(text=REVISIT_PREFIX + ", ".join(missing),
+                                            type="write", concept_refs=missing))
+        return phases
+    n = len(phases)
     used = [sum(1 for it in p.items if _is_revisit(it)) for p in phases]
-    want = 1 if len(phases) == 1 else 2
-    for concept in sorted(load_bearing, key=lambda c: (-len(dependents.get(c, ())), c)):
+
+    def free(i: int) -> bool:
+        return used[i] < cap
+
+    def place(i: int, concept: str) -> None:
+        phases[i].items.append(_revisit_item(concept))
+        used[i] += 1
+
+    for concept in order:
         refs = _phases_referencing(phases, concept)
-        need = want - len(refs)
-        if need <= 0:
+        if len(refs) >= 2:
             continue
-        for target in _revisit_targets(phases, refs, dependents.get(concept, set())):
-            if need == 0:
+        first_use = _first_use(phases, dependents.get(concept, set()))
+        if len(refs) == 1:
+            target = next((i for i in _revisit_targets(n, refs[0], first_use)
+                           if i != refs[0] and free(i)), None)
+            if target is not None:
+                place(target, concept)
+            continue
+        for first in (i for i in _intro_targets(n, first_use) if free(i)):
+            second = next((i for i in range(first + 1, n) if free(i)), None)
+            if second is not None:
+                place(first, concept)
+                place(second, concept)
                 break
-            if target in refs or used[target] >= cap:
-                continue
-            phases[target].items.append(_revisit_item(concept))
-            used[target] += 1
-            refs.append(target)
-            need -= 1
     return phases
 
 
@@ -318,6 +349,11 @@ def generate_curriculum(
         return _generate_curriculum_locked(session, topic, intent, foundation, sources, llm=llm)
 
 
+def _topic_has_concepts(session: Session, topic_id: int) -> bool:
+    return session.exec(
+        select(Concept.id).join(Track).where(Track.topic_id == topic_id)).first() is not None
+
+
 def _generate_curriculum_locked(
     session: Session,
     topic: Topic,
@@ -337,26 +373,39 @@ def _generate_curriculum_locked(
     emit("curriculum:plan", f"{len(foundation.key_concepts)} concepts, {len(sources)} sources")
     # Concept names become Concept rows, Tutor headings and probe text here. Research checks
     # them, but a foundation stored before that check (or edited) may still state its
-    # answer: repair it in place first, so the prompt, the Concept rows and the anchors
-    # (which resolve against foundation.key_concepts) all agree on the short names.
+    # answer: repair the names first, so the prompt, the Concept rows and the anchors
+    # (which resolve against foundation.key_concepts) all agree on the short names. The
+    # stored foundation is rewritten only together with the new track (below), and never
+    # once the topic has Concept rows: those rows, their anchors and alias groups match the
+    # stored names exactly, and renaming under them would break every lookup.
+    key_concepts = list(foundation.key_concepts)
+    prerequisite_map = dict(foundation.prerequisite_map)
     renamed: dict[str, str] = {}
-    fix = concept_names.repair_names(foundation.key_concepts, foundation.prerequisite_map)
+    fix = concept_names.repair_names(key_concepts, prerequisite_map)
+    repair_foundation = False
     if not fix.report.passed:
-        foundation.key_concepts = fix.key_concepts
-        foundation.prerequisite_map = fix.prerequisite_map
-        session.add(foundation)
-        renamed = fix.renamed
-        emit("concepts:repaired", fix.summary())
+        if _topic_has_concepts(session, topic.id):
+            emit("concepts:repair_skipped",
+                 "WARN " + ",".join(dict.fromkeys(fix.report.failed_ids))
+                 + ": topic already has concepts under these names; left unchanged")
+        else:
+            key_concepts, prerequisite_map, renamed = (
+                fix.key_concepts, fix.prerequisite_map, fix.renamed)
+            repair_foundation = True
+            emit("concepts:repaired", fix.summary())
     emit("prompt", CURRICULUM.tag)
-    system, user = build_curriculum_prompt(topic.title, intent, foundation, sources)
+    prompt_foundation = TopicFoundation(
+        topic_id=foundation.topic_id, overview=foundation.overview,
+        key_concepts=key_concepts, prerequisite_map=prerequisite_map)  # never added
+    system, user = build_curriculum_prompt(topic.title, intent, prompt_foundation, sources)
     session.commit()  # release the lock before the LLM call (F5)
     data = structured_json(
         llm, system, [{"role": "user", "content": user}],
         schema=CURRICULUM_SCHEMA, tool_name="emit_track")
     draft = parse_curriculum_obj(data, title=topic.title)
 
-    canonicalize_concept_refs(draft.phases, foundation.key_concepts, renamed)
-    dependents = dependents_of(foundation.prerequisite_map, foundation.key_concepts)
+    canonicalize_concept_refs(draft.phases, key_concepts, renamed)
+    dependents = dependents_of(prerequisite_map, key_concepts)
     lb = set(dependents)
     before = sum(len(p.items) for p in draft.phases)
     insert_spaced_revisits(draft.phases, lb, dependents)
@@ -371,6 +420,10 @@ def _generate_curriculum_locked(
              f"(cap {MAX_REVISITS_PER_PHASE} revisits/phase): {', '.join(left[:5])}"
              + (" …" if len(left) > 5 else ""))
 
+    if repair_foundation:  # committed with the track below, so never without it
+        foundation.key_concepts = key_concepts
+        foundation.prerequisite_map = prerequisite_map
+        session.add(foundation)
     track = Track(topic_id=topic.id, title=topic.title, overview=draft.overview)
     session.add(track)
     session.commit()
@@ -394,7 +447,7 @@ def _generate_curriculum_locked(
                             body=sv.body, position=si))
 
     lb_count = 0
-    for name in foundation.key_concepts:
+    for name in key_concepts:
         is_lb = name in lb
         lb_count += int(is_lb)
         concept = Concept(track_id=track.id, name=name, is_load_bearing=is_lb)
@@ -404,13 +457,13 @@ def _generate_curriculum_locked(
         session.add(KnowledgeEstimate(concept_id=concept.id, level="high", confidence=0.5))
 
     concepts = session.exec(select(Concept).where(Concept.track_id == track.id)).all()
-    pairs, unresolved = graph.edges_from_prerequisite_map(foundation.prerequisite_map, concepts)
+    pairs, unresolved = graph.edges_from_prerequisite_map(prerequisite_map, concepts)
     for topic_track in session.exec(select(Track).where(Track.topic_id == topic.id)).all():
         graph.invalidate_track_edges(session, topic_track.id)
     inserted = graph.insert_edges(session, pairs, kind="prerequisite", origin="researcher",
                                   origin_ref=f"foundation:{topic.id}")
     emit("graph:edges", f"{inserted} edges, {len(unresolved)} unresolved")
-    emit("curriculum:concepts", f"{len(foundation.key_concepts)} concepts, {lb_count} load-bearing")
+    emit("curriculum:concepts", f"{len(key_concepts)} concepts, {lb_count} load-bearing")
 
     emit("curriculum:done", f"track {track.id}")
     session.commit()

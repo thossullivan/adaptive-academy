@@ -89,9 +89,52 @@ def test_no_phase_gets_more_than_the_cap():
     insert_spaced_revisits(phases, lb)
     per_phase = [len(x) for x in _injected(phases)]
     assert max(per_phase) <= MAX_REVISITS_PER_PHASE, per_phase
-    # 12 concepts x 2 touches = 24 > 7 x 2 slots: the most depended-on get the slots,
-    # the rest are reported, never crammed into the first and last phases
-    assert sum(per_phase) == 7 * MAX_REVISITS_PER_PHASE
+    # 12 concepts x 2 touches = 24 > 7 x 2 slots: a concept is placed only when BOTH of its
+    # touches fit, so six get two touches each, the last slot stays free, and the other six
+    # are reported, never crammed into the first and last phases or left with one touch.
+    placed = [c for c in sorted(lb) if _phases_referencing(phases, c)]
+    assert all(len(_phases_referencing(phases, c)) == 2 for c in placed)
+    assert sum(per_phase) == 12
+    assert len(unspaced(phases, lb)) == 6
+
+
+def test_no_partial_placement_when_only_one_slot_is_free():
+    phases = _empty(2)
+    phases[1].items += [ItemView(text=REVISIT_PREFIX + "x", type="write", concept_refs=["x"]),
+                        ItemView(text=REVISIT_PREFIX + "y", type="write", concept_refs=["y"])]
+    insert_spaced_revisits(phases, {"ghost"})
+    assert _phases_referencing(phases, "ghost") == []  # not a lone touch in P0
+    assert unspaced(phases, {"ghost"}) == ["ghost"]
+
+
+def test_first_touch_never_lands_after_a_dependent_uses_it():
+    phases = _empty(4)
+    phases[0].items += [ItemView(text=REVISIT_PREFIX + "x", type="write", concept_refs=["x"]),
+                        ItemView(text=REVISIT_PREFIX + "y", type="write", concept_refs=["y"])]
+    phases[0].items.append(ItemView(text="use", concept_refs=["dependent"]))
+    # P0 (where the dependent is used) is full: introducing the prerequisite in P1-P3 would
+    # come after it was needed, so it is not placed at all.
+    insert_spaced_revisits(phases, {"prereq"}, dependents={"prereq": {"dependent"}})
+    assert _phases_referencing(phases, "prereq") == []
+
+
+def test_single_reference_after_its_dependent_is_revisited_before_it():
+    phases = _empty(5)
+    phases[1].items.append(ItemView(text="use", concept_refs=["dependent"]))
+    phases[3].items.append(ItemView(text="late intro", concept_refs=["prereq"]))
+    insert_spaced_revisits(phases, {"prereq"}, dependents={"prereq": {"dependent"}})
+    assert _phases_referencing(phases, "prereq") == [1, 3]
+
+
+def test_single_phase_track_touches_every_concept_in_one_item():
+    one = _empty(1)
+    lb = {f"c{i}" for i in range(5)}
+    insert_spaced_revisits(one, lb)
+    revisits = [it for it in one[0].items if it.text.startswith(REVISIT_PREFIX)]
+    assert len(revisits) == 1 and sorted(revisits[0].concept_refs) == sorted(lb)
+    assert unspaced(one, lb) == []
+    insert_spaced_revisits(one, lb)  # idempotent
+    assert len([it for it in one[0].items if it.text.startswith(REVISIT_PREFIX)]) == 1
 
 
 def test_unspaced_reports_what_the_cap_left_out():

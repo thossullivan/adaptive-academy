@@ -50,8 +50,8 @@ def test_live_gradient_case_has_no_omission_gap():
 @pytest.mark.parametrize("item", [
     "Xᵀ(Xθ − y)", "(1/m)Xᵀ(Xθ − y)", "residual r = Xθ − y", "∇J(θ)", "½‖Xθ − y‖²",
     "QK^T", "scale by sqrt(d)", "O(n^2)", "x - y", "x-y", "learning rate η", "√d_k",
-    "softmax(QK^T/sqrt(d))", "f(x)", "x theta", "KL", "a_i", "p(y|x)", "w <- w - lr * g",
-    "dJ/dθ",
+    "softmax(QK^T/sqrt(d))", "f(x)", "x theta", "a_i", "p(y|x)", "w <- w - lr * g",
+    "dJ/dθ", "d_k", "X.T", "KL(p||q)", "1/m", "x/y",
 ])
 def test_formula_like_items(item):
     assert is_formula_like(item)
@@ -62,6 +62,11 @@ def test_formula_like_items(item):
     "derivative of the squared error via the chain rule", "p-value", "k-means",
     "self-attention", "Bayes' rule", "L2 regularization", "top-1 accuracy", "overflow",
     "residual (error) vector", "MSE", "ReLU",
+    # Code identifiers and acronyms are words, matched exactly as tokens.
+    "log_softmax", "__init__", "requires_grad", "np.dot", "TCP/IP", "C++", "KL", "L2",
+    "A* search", "and/or", "GPT-3", "encoder/decoder",
+    # Non-Latin scripts are words, including Greek-language prose.
+    "градиентный спуск", "梯度下降", "الانحدار التدريجي", "η κλίση", "κλίση",
 ])
 def test_word_items(item):
     assert not is_formula_like(item)
@@ -156,3 +161,105 @@ def test_formula_weak_sign_is_left_to_the_grader():
 
 def test_absent_formula_weak_sign_is_not_noted():
     assert check_anchor_terms("softmax over scores", [], ["Xθ"]).left_to_grader == []
+
+
+# ── Word matching is not fooled by near misses (review H2) ───────────────────
+
+@pytest.mark.parametrize("response, item", [
+    ("L1 regularization (lasso) shrinks weights to zero", "L2 regularization"),
+    ("we report the top-5 error", "top-1 error"),
+    ("GPT-3 is a decoder-only transformer", "GPT-2"),
+    ("a 1D convolution over the sequence", "2D convolution"),
+    ("we generate text by sampling while learning", "learning rate"),
+    ("The error is not squared.", "squared error"),
+    ("The loss isn't convex here.", "convex"),
+    ("the error went up; much later, after many epochs, the gradient was squared", "squared error"),
+])
+def test_near_miss_is_still_a_hard_gap(response, item):
+    assert apply_rules_checks(response, [item], []) == [f"omitted required element: {item}"]
+
+
+@pytest.mark.parametrize("response, item", [
+    ("L2 regularization adds a penalty", "L2 regularization"),
+    ("the top-1 error drops", "top-1 error"),
+    ("the learning rates were tuned", "learning rate"),
+    ("errors get squared", "squared error"),
+    ("the residuals shrink", "residual"),
+    ("we normalized the activations", "normalize"),
+    ("the loss is not only squared error but also a penalty", "squared"),
+])
+def test_word_item_matches_inflections_and_reordering(response, item):
+    assert apply_rules_checks(response, [item], []) == []
+
+
+# ── weak_signs match common inflections (review M1) ──────────────────────────
+
+@pytest.mark.parametrize("response, sign", [
+    ("SGD always converges to the global minimum", "always converge"),
+    ("the model is overfitting the data", "overfit"),
+    ("the network memorizes the training set", "memorize"),
+    ("it simply memorized the answers", "memorize"),
+])
+def test_weak_sign_matches_inflected_forms(response, sign):
+    assert apply_rules_checks(response, [], [sign]) == [
+        f"contains likely misconception: {sign}"]
+
+
+def test_negated_weak_sign_is_not_the_misconception():
+    assert apply_rules_checks("SGD does not always converge", [], ["always converge"]) == []
+
+
+# ── Non-Latin scripts keep the hard check (review M2) ────────────────────────
+
+def test_cyrillic_word_item_missing_is_a_hard_gap():
+    assert apply_rules_checks("мы используем обратное распространение", ["градиентный спуск"],
+                              []) == ["omitted required element: градиентный спуск"]
+
+
+def test_cyrillic_word_item_present_matches():
+    assert apply_rules_checks("Градиентный спуск обновляет веса", ["градиентный спуск"],
+                              []) == []
+
+
+def test_cjk_word_item_present_and_missing():
+    assert apply_rules_checks("我们使用梯度下降法训练模型", ["梯度下降"], []) == []
+    assert apply_rules_checks("我们使用反向传播", ["梯度下降"], []) == [
+        "omitted required element: 梯度下降"]
+
+
+def test_arabic_weak_sign_is_a_hard_misconception():
+    assert apply_rules_checks("النموذج يحفظ البيانات", [], ["يحفظ البيانات"]) == [
+        "contains likely misconception: يحفظ البيانات"]
+
+
+def test_greek_prose_is_matched_as_words_not_letter_names():
+    assert apply_rules_checks("Η κλίση δείχνει προς τα πάνω", ["κλίση"], []) == []
+    assert apply_rules_checks("Η παράγωγος", ["κλίση"], []) == [
+        "omitted required element: κλίση"]
+
+
+# ── Identifiers and acronyms are exact tokens (review M3) ────────────────────
+
+@pytest.mark.parametrize("response, item", [
+    ("call np.dot on the matrices", "np.dot"),
+    ("use F.log_softmax for stability", "log_softmax"),
+    ("set requires_grad=True", "requires_grad"),
+    ("the __init__ method builds layers", "__init__"),
+    ("TCP/IP stacks", "TCP/IP"),
+    ("written in C++", "C++"),
+    ("the KL divergence", "KL"),
+    ("A* search with an admissible heuristic", "A* search"),
+])
+def test_identifier_and_acronym_items_match_exactly(response, item):
+    assert apply_rules_checks(response, [item], []) == []
+
+
+@pytest.mark.parametrize("response, item", [
+    ("take the dot product", "np.dot"),
+    ("use softmax then log", "log_softmax"),
+    ("written in C", "C++"),
+    ("TCP handles retransmission", "TCP/IP"),
+    ("the L1 penalty", "L2"),
+])
+def test_identifier_and_acronym_items_are_hard_gaps_when_missing(response, item):
+    assert apply_rules_checks(response, [item], []) == [f"omitted required element: {item}"]

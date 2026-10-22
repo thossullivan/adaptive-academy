@@ -118,6 +118,70 @@ def test_unparseable_regeneration_falls_back_to_repairing_the_first_answer():
     assert any(k == "concepts:repaired" for k, _ in events)
 
 
+class _RetryRaises(ScriptedLLMClient):
+    """First call answers; the correction retry fails (budget, rate limit, network)."""
+
+    def complete(self, system, messages, tools):
+        if self.calls:
+            self.calls.append({"system": system, "messages": messages, "tools": tools})
+            raise RuntimeError("daily budget reached")
+        return super().complete(system, messages, tools)
+
+
+def test_retry_exception_repairs_the_first_answer():
+    llm = _RetryRaises([LLMResponse(text=_leaky_payload())])
+    events, emit = _recorder()
+    f = synthesize_foundation("LLMs", "learn", [], llm, emit=emit)
+    assert len(llm.calls) == 2
+    assert f.key_concepts == ["Gradient of the cost", "Batch gradient descent update"]
+    kinds = [k for k, _ in events]
+    assert "concepts:retry_failed" in kinds and "concepts:repaired" in kinds
+    assert "RuntimeError" in dict(events)["concepts:retry_failed"]
+
+
+def _payload_with(key_concepts) -> str:
+    return json.dumps({"overview": "o", "key_concepts": key_concepts, "prerequisite_map": {}})
+
+
+def test_retry_with_fewer_key_concepts_is_ignored():
+    # The clean retry dropped a concept: keep (and repair) the fuller first answer.
+    llm = ScriptedLLMClient([LLMResponse(text=_leaky_payload()),
+                             LLMResponse(text=_payload_with(["Gradient of the cost"]))])
+    events, emit = _recorder()
+    f = synthesize_foundation("LLMs", "learn", [], llm, emit=emit)
+    assert f.key_concepts == ["Gradient of the cost", "Batch gradient descent update"]
+    assert any(k == "concepts:retry_failed" for k, _ in events)
+
+
+def test_retry_with_no_key_concepts_is_ignored():
+    llm = ScriptedLLMClient([LLMResponse(text=_leaky_payload()),
+                             LLMResponse(text=_payload_with([]))])
+    f = synthesize_foundation("LLMs", "learn", [], llm)
+    assert f.key_concepts == ["Gradient of the cost", "Batch gradient descent update"]
+
+
+def test_retry_failure_keeps_paid_for_sources(session):
+    from sqlmodel import select
+
+    from adaptive_academy.engine.research import research_topic
+    from adaptive_academy.llm.scripted_researcher import ScriptedResearcherClient
+    from adaptive_academy.models import SourceDoc, Topic, TopicFoundation, TopicIntent
+
+    topic = Topic(title="GD")
+    session.add(topic)
+    session.commit()
+    intent = TopicIntent(topic_id=topic.id, goal="g", prior_knowledge="p", time_budget="t")
+    session.add(intent)
+    session.commit()
+    researcher = ScriptedResearcherClient(
+        {"foundational_papers": [RawSource(title="A", url="https://example.org/a", tier=1)]})
+    research_topic(session, topic, intent, researcher=researcher,
+                   llm=_RetryRaises([LLMResponse(text=_leaky_payload())]), max_subagents=1)
+    assert len(session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic.id)).all()) == 1
+    fnd = session.exec(select(TopicFoundation).where(TopicFoundation.topic_id == topic.id)).one()
+    assert fnd.key_concepts == ["Gradient of the cost", "Batch gradient descent update"]
+
+
 def test_research_topic_persists_repaired_names_and_traces_them(session):
     from sqlmodel import select
 
