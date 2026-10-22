@@ -139,6 +139,14 @@ def _is_safe_vault_path(path: Path, vault: Path) -> bool:
     return resolved == root or root in resolved.parents
 
 
+def _inside_skipped(root: Path, vault: Path, skip_dirs: frozenset[str]) -> bool:
+    try:
+        relative = root.resolve().relative_to(vault.resolve())
+    except ValueError:
+        return False
+    return any(part in skip_dirs for part in relative.parts)
+
+
 def _scan_notes_with_skips(
     root: Path,
     *,
@@ -149,9 +157,13 @@ def _scan_notes_with_skips(
     """List safe notes, rejected paths, and whether the scan reached its end.
 
     The scan stops (complete=False) at the file cap or when the absolute deadline passes.
+    A root at or inside a skipped export folder (a subfolder of "Adaptive Academy/...") lists
+    nothing: the app's own notes are never read back as the learner's.
     """
     notes: list[Path] = []
     rejected: list[Path] = []
+    if _inside_skipped(root, vault, skip_dirs):
+        return notes, rejected, True
     for directory, dirnames, filenames in os.walk(root, followlinks=False):
         if deadline is not None and time.perf_counter() >= deadline:
             return sorted(notes), sorted(rejected), False
@@ -435,12 +447,16 @@ class IngestResult:
 @dataclass
 class ExportResult:
     written: list[str] = field(default_factory=list)
+    # Concept notes left as they were, with why (engine/notebook_sync.py: unbalanced
+    # notebook markers, a symlink, a note too large to update safely).
+    problems: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ExportAllResult:
     topics: int
     written: list[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
 
 
 def _sync_vault_links(
@@ -808,7 +824,17 @@ def ingest_vault(
 
 def export_vault(session: Session, topic_id: int, vault_path: str) -> ExportResult:
     """Write the topic's hub note + per-concept notes into `<vault>/Adaptive Academy/<topic>/`.
-    Idempotent — we own that folder and regenerate it; the learner's own notes are never touched."""
+    Idempotent. The hub note is regenerated. A concept note is created with its header and
+    notebook section, or, when it exists, only its notebook section is rewritten
+    (engine/notebook_sync.py): what the learner wrote outside the markers stays as it is."""
+    from adaptive_academy.engine.notebook import MarkerError
+    from adaptive_academy.engine.notebook_sync import (
+        NOTEBOOK_SYNC,
+        UnsafeNote,
+        problem_text,
+        write_concept_note,
+    )
+
     vault = safe_vault_dir(vault_path)
     topic = session.get(Topic, topic_id)
     if topic is None:
@@ -831,21 +857,24 @@ def export_vault(session: Session, topic_id: int, vault_path: str) -> ExportResu
         encoding="utf-8")
     written.append(str(hub_path))
 
-    if concepts:
-        concepts_dir = safe_child(base, "Concepts")
-        concepts_dir.mkdir(parents=True, exist_ok=True)
-        for c in concepts:
-            verdict, summary = _concept_verdict_summary(session, c)
-            note_path = safe_child(concepts_dir, f"{slugify(c.name)}.md")
-            note_path.write_text(
-                render_concept_note(c.name, verdict, c.is_load_bearing, summary, topic_slug),
-                encoding="utf-8")
-            written.append(str(note_path))
+    problems: list[str] = []
+    for c in concepts:
+        try:
+            note_path = write_concept_note(session, vault, topic, c)
+        except (MarkerError, UnsafeNote) as exc:
+            message = f"{slugify(c.name)}.md: {problem_text(exc)}"
+            problems.append(message)
+            NOTEBOOK_SYNC.record_problem(c.id, f"Couldn't update {message}")
+            continue
+        NOTEBOOK_SYNC.note_ok(c.id)
+        written.append(str(note_path))
 
-    session.add(AgentEvent(
-        topic_id=topic_id, kind="vault:export", detail=f"{len(written)} note(s) to vault"))
+    detail = f"{len(written)} note(s) to vault"
+    if problems:
+        detail += f", {len(problems)} left unchanged"
+    session.add(AgentEvent(topic_id=topic_id, kind="vault:export", detail=detail))
     session.commit()
-    return ExportResult(written=written)
+    return ExportResult(written=written, problems=problems)
 
 
 def export_all_topics(session: Session, vault_path: str) -> ExportAllResult:
@@ -855,6 +884,12 @@ def export_all_topics(session: Session, vault_path: str) -> ExportAllResult:
     safe_vault_dir(vault_path)  # validate once, up front
     topics = session.exec(select(Topic).where(col(Topic.is_demo).is_(False))).all()
     written: list[str] = []
+    problems: list[str] = []
     for t in topics:
-        written.extend(export_vault(session, t.id, vault_path).written)
-    return ExportAllResult(topics=len(topics), written=written)
+        res = export_vault(session, t.id, vault_path)
+        written.extend(res.written)
+        problems.extend(res.problems)
+    from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC
+
+    NOTEBOOK_SYNC.clear_problem("queue")  # every topic's notes were just rewritten
+    return ExportAllResult(topics=len(topics), written=written, problems=problems)

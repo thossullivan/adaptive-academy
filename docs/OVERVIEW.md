@@ -37,6 +37,11 @@ On top of that loop:
   slow week never looks like failing.
 - **Obsidian.** Use your vault notes as sources, and export concepts and tracks back as linked
   markdown.
+- **Notebook.** Each concept keeps your own notes, your attempts, your graded explanations, and
+  the worked solutions the tutor showed you, in one place. Write notes from the Tutor page's
+  Notes panel, and read them all under Library, Notebook. With a vault set, each concept's note
+  in Obsidian gets the same notebook in a section between two marker lines. The app rewrites
+  only that section, so anything you write around it stays yours.
 - **Memory.** One local search index (SQLite full-text search, with optional vector search)
   covers your notes, sources, papers, answers, tutor replies, and generated questions. The
   tutor uses it and doesn't repeat what it already explained. Practice questions that are too

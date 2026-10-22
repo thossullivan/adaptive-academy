@@ -42,6 +42,11 @@ repo (gitignored), and exports land there.
 
 - `just up` creates `./data/vault` for you. If you run `docker compose up` yourself on
   Linux, run `mkdir -p data/vault` first, or Docker creates it owned by root.
+- Concept notebooks sync to the vault too: when you save notes, submit an attempt, or get an
+  answer graded, that concept's note under `Adaptive Academy/` is updated in the background.
+  Only the part between the `adaptive-academy:notebook` marker lines changes. If a note can't
+  be updated (for example, you deleted one of its marker lines), the Vault page says which one.
+  Without Docker, the path you check on the Vault page is used, or `AA_OBSIDIAN_VAULT_PATH`.
 - If the path has spaces, put it in quotes, for example
   `OBSIDIAN_VAULT_PATH="/Users/you/Library/Mobile Documents/..."`. Without quotes, `just`
   can't read the file.

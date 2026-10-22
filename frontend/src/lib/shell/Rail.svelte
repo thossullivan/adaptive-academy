@@ -91,8 +91,11 @@
           },
           {
             label: 'Library',
+            // Four short links: two per row, so the rail still fits a 1366x768 laptop.
+            pair: true,
             items: [
               { label: 'Sources', icon: 'sources', href: `/topics/${tid}/review`, match: (p) => p.endsWith('/review') },
+              { label: 'Notebook', icon: 'notebook', href: `/topics/${tid}/notebook`, match: (p) => p.endsWith('/notebook') },
               { label: 'Vault', icon: 'vault', href: `/topics/${tid}/vault`, match: (p) => p.endsWith('/vault') },
               { label: 'Story', icon: 'story', href: `/topics/${tid}/story`, match: (p) => p.endsWith('/story') }
             ]

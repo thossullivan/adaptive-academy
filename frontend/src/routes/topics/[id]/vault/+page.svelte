@@ -3,7 +3,8 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import { toasts } from '$lib/toast.svelte';
-  import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult } from '$lib/types';
+  import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, VaultSync } from '$lib/types';
+  import { timeAgo } from '$lib/events';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Input, Badge, LiveStatus } from '$lib/ui';
   import MemorySearchResults from './MemorySearchResults.svelte';
@@ -14,6 +15,8 @@
 
   let path = $state('');
   let status = $state<VaultStatus | null>(null);
+  // Concept notebooks sync to the checked vault (engine/notebook_sync.py).
+  let sync = $state<VaultSync | null>(null);
   let checking = $state(false);
   let exporting = $state(false);
   let exportingAll = $state(false);
@@ -60,6 +63,9 @@
     try {
       localStorage.setItem(STORE_KEY, path.trim());
       status = await api.vaultStatus(path.trim());
+      sync = status.sync ?? null;
+      // A readable folder is also where concept notebooks sync from now on.
+      if (status.is_dir) sync = await api.vaultSync(path.trim()).catch(() => sync);
     } catch (e) {
       error = String(e);
     } finally {
@@ -118,6 +124,7 @@
     exportRes = null;
     try {
       exportRes = await api.vaultExport(topicId, path.trim());
+      await refreshSync();
     } catch (e) {
       error = String(e);
     } finally {
@@ -131,11 +138,16 @@
     exportAllRes = null;
     try {
       exportAllRes = await api.vaultExportAll(path.trim());
+      await refreshSync();
     } catch (e) {
       error = String(e);
     } finally {
       exportingAll = false;
     }
+  }
+
+  async function refreshSync() {
+    sync = (await api.vaultStatus(path.trim()).catch(() => null))?.sync ?? sync;
   }
 
   async function runIngest() {
@@ -185,6 +197,22 @@
             </p>
           {/if}
         {/if}
+        {#if status?.is_dir && sync}
+          <div class="text-sm text-fg-dim" data-testid="vault-sync">
+            {#if sync.path}
+              <p>
+                Concept notebooks sync here: notes, attempts, explanations, and worked solutions go into each concept's note,
+                between two marker lines. Everything else in the note stays yours.
+                {#if sync.last_synced_at}<span class="text-faint">Last synced {timeAgo(sync.last_synced_at)}.</span>{/if}
+              </p>
+            {/if}
+            {#if sync.last_error}
+              <p class="mt-1 text-danger" role="status">
+                {sync.last_error}{#if sync.problems > 1} ({sync.problems} notes need attention){/if}
+              </p>
+            {/if}
+          </div>
+        {/if}
         <p class="text-xs text-faint">
           The path is remembered in this browser only. You can also set a default with the
           <code>AA_OBSIDIAN_VAULT_PATH</code> environment variable.
@@ -197,8 +225,8 @@
       <Card eyebrow="Export" title="Write learning → vault">
         <p class="mb-3 text-sm text-muted">
           Writes a topic hub note + per-concept notes (with verdicts and <code>[[links]]</code>)
-          into a dedicated <code>Adaptive Academy/</code> folder we own — your own notes are never
-          touched. Re-run anytime to refresh.
+          into a dedicated <code>Adaptive Academy/</code> folder. A concept note's notebook section is
+          rewritten; anything you add outside it is kept. Re-run anytime to refresh.
         </p>
         <div class="flex flex-wrap items-center gap-2">
           <Button size="sm" onclick={runExport} disabled={!ready || exporting}>
@@ -212,6 +240,13 @@
           <p class="mt-3 text-sm text-fg-dim">
             Wrote <span class="nums">{exportRes.written.length}</span> note{exportRes.written.length === 1 ? '' : 's'} for this topic.
           </p>
+          {#if exportRes.problems?.length}
+            <ul class="mt-2 list-disc pl-5 text-sm text-danger" data-testid="export-problems">
+              {#each exportRes.problems as problem (problem)}
+                <li>Left unchanged: {problem}</li>
+              {/each}
+            </ul>
+          {/if}
         {/if}
         {#if exportAllRes}
           <p class="mt-3 text-sm text-fg-dim">

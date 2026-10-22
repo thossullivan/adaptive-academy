@@ -437,6 +437,24 @@ class VaultExportIn(BaseModel):
 
 class VaultExportOut(BaseModel):
     written: list[str] = []
+    # Concept notes left unchanged, with why (e.g. notebook markers that don't pair up).
+    problems: list[str] = []
+
+
+class VaultSyncIn(BaseModel):
+    vault_path: str = ""  # "" stops syncing to a browser-set vault
+
+
+class VaultSyncOut(BaseModel):
+    """Concept-notebook sync to the vault (engine/notebook_sync.py)."""
+
+    path: str = ""  # where notebooks sync; "" = nowhere
+    last_synced_at: Optional[datetime] = None
+    # The most recent problem still unresolved (a note that couldn't be updated), else "".
+    last_error: str = ""
+    last_error_at: Optional[datetime] = None
+    problems: int = 0
+    pending: int = 0
 
 
 class VaultStatusOut(BaseModel):
@@ -445,11 +463,77 @@ class VaultStatusOut(BaseModel):
     exists: bool = False
     is_dir: bool = False
     note_count: int = 0
+    sync: VaultSyncOut = VaultSyncOut()
 
 
 class VaultExportAllOut(BaseModel):
     topics: int
     written: list[str] = []
+    problems: list[str] = []
+
+
+class NoteIn(BaseModel):
+    body: str
+    # The browser's vault path, if it has one: registered as the sync target (like
+    # PUT /api/vault/sync) so the note reaches the vault. A bad path never fails the save.
+    vault_path: str = ""
+
+
+class NoteOut(BaseModel):
+    concept_id: int
+    body: str
+    updated_at: datetime
+
+
+class NotebookNoteOut(BaseModel):
+    body: str
+    updated_at: datetime
+
+
+class NotebookItemOut(BaseModel):
+    kind: Literal["attempt", "explanation", "solution"]
+    id: int
+    created_at: datetime
+    source: Literal["tutor", "assess", "teach", "retention"]
+    text: str
+    conversation_id: Optional[int] = None
+    accepted: Optional[bool] = None
+    assessment_kind: Optional[str] = None
+    label: str = ""
+    prompt: str = ""
+    score: Optional[float] = None
+    verdict: str = ""
+    gaps: list[str] = []
+
+
+class NotebookCountsOut(BaseModel):
+    attempts: int
+    explanations: int
+    solutions: int
+
+
+class NotebookOut(BaseModel):
+    concept_id: int
+    concept_name: str
+    topic_id: Optional[int]
+    note: Optional[NotebookNoteOut] = None
+    counts: NotebookCountsOut
+    items: list[NotebookItemOut]  # newest first
+
+
+class NotebookConceptOut(BaseModel):
+    concept_id: int
+    name: str
+    has_note: bool
+    attempts: int
+    explanations: int
+    solutions: int
+    last_activity_at: datetime
+
+
+class TopicNotebookOut(BaseModel):
+    topic_id: int
+    concepts: list[NotebookConceptOut]  # latest activity first
 
 
 class WindStateOut(BaseModel):

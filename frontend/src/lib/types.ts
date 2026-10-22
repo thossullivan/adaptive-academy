@@ -146,12 +146,25 @@ export interface Challenge { problem: string; }
 export interface Consolidation { canonical: string; feedback: string; score: number; }
 export interface TeachResult { score: number; feedback: string; strengths: string[]; gaps: string[]; }
 
+/** Concept-notebook sync to the vault (engine/notebook_sync.py). */
+export interface VaultSync {
+  /** Where notebooks sync; "" when nowhere. */
+  path: string;
+  last_synced_at: string | null;
+  /** The most recent note that couldn't be updated, and why; "" when none. */
+  last_error: string;
+  last_error_at: string | null;
+  problems: number;
+  pending: number;
+}
 export interface VaultStatus {
   configured: boolean;
   path: string;
   exists: boolean;
   is_dir: boolean;
   note_count: number;
+  /** Absent from an older API. */
+  sync?: VaultSync;
 }
 export interface VaultIngestResult {
   count: number;
@@ -159,10 +172,61 @@ export interface VaultIngestResult {
 }
 export interface VaultExportResult {
   written: string[];
+  /** Concept notes left unchanged, and why. Absent from an older API. */
+  problems?: string[];
 }
 export interface VaultExportAllResult {
   topics: number;
   written: string[];
+  problems?: string[];
+}
+
+/** Where a notebook item was made: the page it links back to. */
+export type NotebookSource = 'tutor' | 'assess' | 'teach' | 'retention';
+export interface NotebookItem {
+  kind: 'attempt' | 'explanation' | 'solution';
+  id: number;
+  created_at: string;
+  source: NotebookSource;
+  /** The attempt, the answer that was graded, or the worked solution. */
+  text: string;
+  conversation_id: number | null;
+  /** Attempts only: whether the check accepted it. */
+  accepted: boolean | null;
+  /** Explanations only: self_explanation | calibration | teach | recall. */
+  assessment_kind: string | null;
+  label: string;
+  prompt: string;
+  score: number | null;
+  verdict: string;
+  gaps: string[];
+}
+export interface ConceptNote {
+  concept_id: number;
+  body: string;
+  updated_at: string;
+}
+/** GET /api/concepts/{id}/notebook: notes plus work, newest first. */
+export interface Notebook {
+  concept_id: number;
+  concept_name: string;
+  topic_id: number | null;
+  note: { body: string; updated_at: string } | null;
+  counts: { attempts: number; explanations: number; solutions: number };
+  items: NotebookItem[];
+}
+export interface NotebookConcept {
+  concept_id: number;
+  name: string;
+  has_note: boolean;
+  attempts: number;
+  explanations: number;
+  solutions: number;
+  last_activity_at: string;
+}
+export interface TopicNotebook {
+  topic_id: number;
+  concepts: NotebookConcept[];
 }
 export interface MemorySearchResult { hits: MemoryHit[]; }
 export interface MemoryReindexBody {

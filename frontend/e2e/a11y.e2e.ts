@@ -28,6 +28,7 @@ const TOPIC_PAGES = [
   'teach',
   'retention',
   'review',
+  'notebook',
   'story',
   'vault',
   'wayfinder',
@@ -186,6 +187,27 @@ test('axe: a submitted attempt that was not logged, with its note', async ({ pag
     await page.getByRole('button', { name: 'Submit attempt' }).click();
     await expect(page.getByTestId('attempt-note')).toBeVisible();
     await expect(page.getByText('your attempt', { exact: true })).toBeVisible();
+  });
+});
+
+test('axe: the tutor with the notes panel open and a draft unsaved', async ({ page }) => {
+  // The unsaved draft makes the browser ask before the next theme's page load: leave anyway.
+  page.on('dialog', (dialog) => dialog.accept());
+  await auditState(page, (id) => `/topics/${id}/tutor`, async () => {
+    await page.getByRole('button', { name: 'Notes', exact: true }).click();
+    const box = page.locator('#tutor-notes').getByRole('textbox', { name: /^My notes on / });
+    await expect(box).toBeVisible();
+    await box.fill('An unsaved draft for the audit.');
+    await expect(page.getByTestId('note-status')).toHaveText('Unsaved changes');
+  });
+});
+
+test('axe: the notebook for a concept with notes, attempts, and a worked solution', async ({ page }) => {
+  await auditState(page, (id) => `/topics/${id}/notebook`, async () => {
+    const list = page.getByRole('navigation', { name: 'Concepts with notes or work' });
+    await list.getByRole('link', { name: /Causal Self-Attention/ }).click();
+    await expect(page.getByTestId('notebook-solutions')).toContainText('Worked solution');
+    await expect(page.getByRole('textbox', { name: 'My notes on Causal Self-Attention' })).not.toHaveValue('');
   });
 });
 

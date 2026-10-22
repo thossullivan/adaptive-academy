@@ -138,7 +138,8 @@ def run_tutor_turn_sdk(
 
     # The text of an allowed reveal. As on the API path, an allowed reveal is the reply: the
     # tool result only goes back to the model, which may then just say "see above", and the
-    # learner would never see the solution.
+    # learner would never see the solution. A non-empty list also marks the stored reply as
+    # a worked solution (Message.reveals_solution) so the concept notebook can list it.
     revealed: list[str] = []
 
     @tool("reveal_solution", "Reveal the full worked solution (only after an attempt)",
@@ -201,7 +202,9 @@ def run_tutor_turn_sdk(
     elif not convo.attempt_logged:
         reply = _guarded_reply(session, convo, guard, reply, prompt, _run)
 
-    tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply)
+    is_solution = bool(revealed) and reply not in (_FALLBACK, GUARD_FALLBACK)
+    tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply,
+                            reveals_solution=True if is_solution else None)
     session.add(tutor_message)
     session.flush()
     index_message(

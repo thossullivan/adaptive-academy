@@ -4,11 +4,11 @@
   import { api } from '$lib/api';
   import { topics } from '$lib/topics.svelte';
   import { toasts } from '$lib/toast.svelte';
-  import type { Conversation, EventOut, MessageOut, Topic } from '$lib/types';
-  import { Badge, Select } from '$lib/ui';
+  import type { Conversation, EventOut, MessageOut, Notebook, Topic } from '$lib/types';
+  import { Badge, Button, NotesEditor, Select } from '$lib/ui';
   import MemoryDisclosure from '$lib/ui/MemoryDisclosure.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
-  import { scrollBehavior } from '$lib/utils';
+  import { cn, scrollBehavior } from '$lib/utils';
   import Composer from './Composer.svelte';
   import { attemptSavedMessage, messageNote, storedAttempt } from './attempt';
 
@@ -24,6 +24,12 @@
   let showEvents = $state(false);
   let isMac = $state(false);
   let scroller: HTMLDivElement | null = null;
+  // My notes for the current concept, in a panel beside the conversation (over it on
+  // narrower screens). Loaded when the panel opens and on each concept switch.
+  let notesOpen = $state(false);
+  let notebook = $state<Notebook | null>(null);
+  let notebookError = $state('');
+  let notesSeq = 0;
 
   onMount(async () => {
     isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -59,8 +65,30 @@
   }
 
   async function onConceptChange() {
+    if (notesOpen) loadNotes();
     await start();
   }
+
+  async function loadNotes() {
+    if (conceptId == null) return;
+    const seq = ++notesSeq;
+    const forConcept = conceptId;
+    notebookError = '';
+    try {
+      const nb = await api.getNotebook(forConcept);
+      if (seq === notesSeq) notebook = nb;
+    } catch (e) {
+      if (seq === notesSeq) notebookError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function toggleNotes() {
+    notesOpen = !notesOpen;
+    if (notesOpen) loadNotes();
+  }
+
+  // The panel's notebook belongs to the concept it was loaded for.
+  const panelNotebook = $derived(notebook && notebook.concept_id === conceptId ? notebook : null);
 
   /** This session's conversation: created on the first Send, reused by later sends and retries. */
   async function ensureConversation(forConcept: number): Promise<Conversation> {
@@ -138,13 +166,24 @@
         {/if}
       </div>
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <Button
+        variant={notesOpen ? 'primary' : 'outline'}
+        size="sm"
+        aria-expanded={notesOpen}
+        aria-controls="tutor-notes"
+        disabled={conceptId == null}
+        onclick={toggleNotes}>{notesOpen ? 'Hide notes' : 'Notes'}</Button
+      >
       <Badge tone="info" dot>assistance · {levels.assistance}</Badge>
       <Badge tone="accent" dot>challenge · {levels.challenge}</Badge>
       <Badge tone={levels.attempt ? 'success' : 'neutral'} dot>{levels.attempt ? 'attempt logged' : 'no attempt yet'}</Badge>
     </div>
   </header>
 
+  <div class="flex min-h-0 flex-1">
+  <!-- The conversation; on narrower screens the notes panel takes its place while open. -->
+  <div class={cn('flex min-w-0 flex-1 flex-col', notesOpen && 'max-lg:hidden')}>
   <!-- Messages -->
   <!-- Focusable so the transcript scrolls from the keyboard; a log, so a new reply is read out. -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -215,5 +254,43 @@
         {/if}
       </div>
     {/if}
+  </div>
+  </div>
+
+  {#if notesOpen && conceptId != null}
+    <aside
+      id="tutor-notes"
+      aria-labelledby="tutor-notes-title"
+      class="flex w-full min-w-0 flex-col gap-4 overflow-y-auto border-border px-6 py-5 lg:w-96 lg:shrink-0 lg:border-l lg:px-5"
+    >
+      <h2 id="tutor-notes-title" class="eyebrow">Notes · {conceptName}</h2>
+      {#if panelNotebook}
+        {#key panelNotebook.concept_id}
+          <NotesEditor
+            conceptId={panelNotebook.concept_id}
+            conceptName={panelNotebook.concept_name}
+            saved={panelNotebook.note?.body ?? ''}
+            savedAt={panelNotebook.note?.updated_at ?? null}
+            rows={10}
+            onsaved={(n) => {
+              if (notebook?.concept_id === n.concept_id) notebook.note = { body: n.body, updated_at: n.updated_at };
+            }}
+          />
+        {/key}
+        <p class="text-xs text-muted" data-testid="tutor-notes-counts">
+          <span class="nums">{panelNotebook.counts.attempts}</span> attempt{panelNotebook.counts.attempts === 1 ? '' : 's'} ·
+          <span class="nums">{panelNotebook.counts.explanations}</span> graded explanation{panelNotebook.counts.explanations === 1 ? '' : 's'} ·
+          <span class="nums">{panelNotebook.counts.solutions}</span> worked solution{panelNotebook.counts.solutions === 1 ? '' : 's'}
+        </p>
+        <a class="text-sm text-accent underline underline-offset-2" href="/topics/{topicId}/notebook?concept={panelNotebook.concept_id}">
+          Open the notebook for {panelNotebook.concept_name}
+        </a>
+      {:else if notebookError}
+        <p class="text-sm text-danger" role="alert">Couldn't load your notes. {notebookError}</p>
+      {:else}
+        <p class="text-sm text-muted">Loading your notes…</p>
+      {/if}
+    </aside>
+  {/if}
   </div>
 </div>

@@ -29,6 +29,7 @@ const TOPIC_SUBPAGES = [
   'teach',
   'retention',
   'review',
+  'notebook',
   'story',
   'vault',
   'wayfinder',
