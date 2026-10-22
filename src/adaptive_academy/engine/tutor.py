@@ -235,10 +235,12 @@ def _execute_tool(
         # attempt in the learner's own message (engine/solution_guard.py). While a withheld
         # draft is being rewritten the attempt is deferred instead (recorded after the turn
         # if the reply passes review), so reveal_solution stays gated either way until then.
-        # Release the write lock first (F5): the check may make a model call.
+        # A conversation already unlocked needs no check. Release the write lock first (F5):
+        # the check may make a model call.
         session.commit()
-        recorded, payload = guard.attempt_tool(call.input.get("summary", ""))
-        if recorded:
+        recorded, payload = guard.attempt_tool(call.input.get("summary", ""),
+                                               attempt_logged=convo.attempt_logged)
+        if recorded and not convo.attempt_logged:
             convo.attempt_logged = True
             session.add(convo)
             session.commit()

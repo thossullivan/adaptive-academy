@@ -34,7 +34,15 @@ const empty: QualityWindow = {
     rejected_share: null,
     top_failed_rules: []
   },
-  guard: { checks: 0, blocked: 0, blocked_share: null, fallbacks: 0, unavailable: 0, unavailable_share: null }
+  guard: {
+    checks: 0,
+    blocked: 0,
+    blocked_share: null,
+    fallbacks: 0,
+    unavailable: 0,
+    unavailable_share: null,
+    attempt_unavailable: 0
+  }
 };
 
 const busy: QualityWindow = {
@@ -64,7 +72,15 @@ const busy: QualityWindow = {
       { rule_id: 'G1', count: 1 }
     ]
   },
-  guard: { checks: 5, blocked: 1, blocked_share: 0.2, fallbacks: 1, unavailable: 1, unavailable_share: 0.2 }
+  guard: {
+    checks: 5,
+    blocked: 1,
+    blocked_share: 0.2,
+    fallbacks: 1,
+    unavailable: 1,
+    unavailable_share: 0.2,
+    attempt_unavailable: 0
+  }
 };
 
 const report = (w: QualityWindow): QualityReport => ({
@@ -105,6 +121,19 @@ describe('QualityScorecard', () => {
     expect(body).toContain('No tutor replies checked in this window yet.');
     expect(body).toContain('No model calls in this window yet.');
     expect(body).not.toContain('NaN');
+  });
+
+  it('shows attempt checks that could not run on their own line', () => {
+    // Only for a window that has some: none in the busy window.
+    expect(render(QualityScorecard, { props: { report: report(busy) } }).body).not.toContain(
+      'quality-guard-attempt-unavailable'
+    );
+    // An attempt-check outage with no reply checked: the card still says so, in plain words.
+    const w = { ...empty, guard: { ...empty.guard, attempt_unavailable: 2 } };
+    const { body } = render(QualityScorecard, { props: { report: report(w) } });
+    expect(body).toContain('No tutor replies checked in this window yet.');
+    expect(body).toMatch(/2 attempt checks could not run, so those attempts\s+were not recorded/);
+    expect(body).not.toContain('%');
   });
 
   it('explains a missing cost per grade when grading spend is unpriced', () => {

@@ -49,7 +49,11 @@ Tutor guard (guard:* AgentEvents, engine/solution_guard.py):
   blocked_share     guard:solution_blocked over checks.
   fallbacks         guard:fallback: the stored reply was the guard's fallback question.
   unavailable_share guard:unavailable over checks: the model check failed and the keyword
-                    screen decided alone.
+                    screen decided alone. Only reply checks emit guard:unavailable (one per
+                    guard:solution_checked at most), so this stays within 0 to 1.
+  attempt_unavailable  guard:attempt_unavailable: the attempt check on log_attempt could
+                    not run, so an attempt was not recorded (fail closed). Counted on its
+                    own, with no share: it has nothing to do with replies checked.
 
 AgentEvents carry neither a feature nor a model, so the grading and guard numbers are per
 window only. The event query reads only the kinds above through ix_agentevent_kind_created_at,
@@ -85,8 +89,9 @@ GUARD_CHECKED = "guard:solution_checked"
 GUARD_BLOCKED = "guard:solution_blocked"
 GUARD_FALLBACK = "guard:fallback"
 GUARD_UNAVAILABLE = "guard:unavailable"
+GUARD_ATTEMPT_UNAVAILABLE = "guard:attempt_unavailable"
 EVENT_KINDS = (GRADE_CHECK, GRADE_REGENERATED, GRADE_REJECTED, GUARD_CHECKED, GUARD_BLOCKED,
-               GUARD_FALLBACK, GUARD_UNAVAILABLE)
+               GUARD_FALLBACK, GUARD_UNAVAILABLE, GUARD_ATTEMPT_UNAVAILABLE)
 TOP_RULES = 5
 
 # Event details these numbers read (engine/output_checks.summarize, engine/grade_gate.py);
@@ -197,6 +202,7 @@ def event_counts_statement(start: datetime | None):
         _count(kind == GUARD_BLOCKED).label("blocked"),
         _count(kind == GUARD_FALLBACK).label("fallbacks"),
         _count(kind == GUARD_UNAVAILABLE).label("unavailable"),
+        _count(kind == GUARD_ATTEMPT_UNAVAILABLE).label("attempt_unavailable"),
     ).where(kind.in_(EVENT_KINDS), _since(AgentEvent.created_at, start))
 
 
@@ -254,6 +260,7 @@ def _window(session: Session, start: datetime | None) -> dict:
             "fallbacks": int(events.fallbacks),
             "unavailable": int(events.unavailable),
             "unavailable_share": _ratio(int(events.unavailable), checks),
+            "attempt_unavailable": int(events.attempt_unavailable),
         },
     }
 

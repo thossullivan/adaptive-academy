@@ -18,7 +18,9 @@ to log is kept, but a tutor caught leaking can't log an attempt the learner neve
 fallback, or screen-only mode, records nothing (`tool:log_attempt:dropped`).
 
 The attempt check: outside a regeneration, a log_attempt counts only if the learner's own
-message contains a real attempt (`attempt_tool` / `confirm_attempt`). Before, the tutor model
+message contains a real attempt (`attempt_tool` / `confirm_attempt`). In a conversation that
+already has an attempt logged there is nothing to unlock, so log_attempt is a plain no-op
+there: no check, no call, no rejection. Before, the tutor model
 alone decided, so "I think it's 42" or "is it 42?" was enough to unlock reveal_solution and
 end every later check. The same model check judges it (`learner_attempted`, defined in
 prompts.TUTOR_SOLUTION_GUARD: an answer with some working, a step, code, or reasoning, right
@@ -30,9 +32,11 @@ recorded, reveal_solution stays gated, the tutor is told to ask for the learner'
 (`ATTEMPT_REJECTED`), and a fixed `tool:log_attempt:rejected` event is traced. A refusal
 stands for the turn: a deferred attempt later in it is dropped too. If the check can't run
 (no client, an API error, the budget, invalid output) the attempt is NOT recorded, failing
-closed, and the turn still completes (`guard:unavailable`, `ATTEMPT_UNVERIFIED`). By design
-that makes the tutor stricter during an outage: a learner who really tried is asked to show
-their working again rather than unlocking the answer unchecked.
+closed, and the turn still completes (`ATTEMPT_UNVERIFIED`, and one
+`guard:attempt_unavailable` per failure: its own kind, so engine/scorecard.py's reply-check
+"screen only" share, guard:unavailable over guard:solution_checked, never counts it). By
+design that makes the tutor stricter during an outage: a learner who really tried is asked
+to show their working again rather than unlocking the answer unchecked.
 
 Detection:
 1. `screen_reply`: a deterministic screen, no model call. It names a rule ("phrase" for an
@@ -277,7 +281,7 @@ def _warn_attempt_unchecked_once(category: str) -> None:
     _warned_attempt_unchecked = True
     logger.warning(
         "Attempt check failed (%s); log_attempt is not recorded while it fails. Later "
-        "failures are traced as guard:unavailable events, not logged again.", category)
+        "failures are traced as guard:attempt_unavailable events, not logged again.", category)
 
 
 class SolutionGuard:
@@ -373,11 +377,10 @@ class SolutionGuard:
                        f"source=reused attempted={str(attempted).lower()}")
             return attempted
         if self._attempt_check_failed:
-            self._emit("guard:unavailable", "reused: attempt check failed, attempt not recorded")
-            return False
+            return False  # already traced once, when it failed
         if self._llm is None:
             self._attempt_check_failed = True
-            self._emit("guard:unavailable",
+            self._emit("guard:attempt_unavailable",
                        "no_client: attempt check unavailable, attempt not recorded")
             return False
         self._emit("prompt", TUTOR_SOLUTION_GUARD.tag)
@@ -389,7 +392,9 @@ class SolutionGuard:
             # The category is one of llm/errors.py's fixed keys, never upstream text.
             category = classify_llm_error(exc)
             self._attempt_check_failed = True
-            self._emit("guard:unavailable",
+            # Its own kind, not guard:unavailable: the scorecard's "screen only" share counts
+            # reply checks only (engine/scorecard.py).
+            self._emit("guard:attempt_unavailable",
                        f"{category}: attempt check failed, attempt not recorded")
             _warn_attempt_unchecked_once(category)
             return False
@@ -400,14 +405,20 @@ class SolutionGuard:
                    f"source=model attempted={str(verdict.learner_attempted).lower()}")
         return verdict.learner_attempted
 
-    def attempt_tool(self, summary: str) -> tuple[bool, str]:
+    def attempt_tool(self, summary: str, *, attempt_logged: bool = False) -> tuple[bool, str]:
         """The log_attempt tool on both tutor paths: (record the attempt now?, tool result).
 
-        While regenerating, the attempt is deferred (`defer_attempt`). Otherwise it counts
-        only if `confirm_attempt` finds a real attempt in the learner's own message. A refusal
-        returns ATTEMPT_REJECTED (ATTEMPT_UNVERIFIED when the check couldn't run), traces a
-        fixed `tool:log_attempt:rejected`, and stands for the rest of the turn."""
+        `attempt_logged` is the conversation's flag: if an attempt is already logged the
+        answer is unlocked and there is nothing to decide, so it is a plain "ok" with no
+        check, no model call and no rejection. While regenerating, the attempt is deferred
+        (`defer_attempt`). Otherwise it counts only if `confirm_attempt` finds a real attempt
+        in the learner's own message. A refusal returns ATTEMPT_REJECTED (ATTEMPT_UNVERIFIED
+        when the check couldn't run), traces a fixed `tool:log_attempt:rejected`, and stands
+        for the rest of the turn."""
         summary = str(summary or "")
+        if attempt_logged:
+            self._emit("tool:log_attempt", summary)
+            return True, "ok: attempt recorded"
         if self.regenerating:
             return False, self.defer_attempt(summary)
         if self.confirm_attempt():

@@ -19,7 +19,12 @@ from adaptive_academy.api.deps import get_session
 from adaptive_academy.engine import scorecard
 from adaptive_academy.engine.grade_gate import checked_completion
 from adaptive_academy.engine.output_checks import OUTCOME_RUBRIC, GradeCheckError
-from adaptive_academy.engine.solution_guard import FALLBACK, REGENERATE, SolutionGuard
+from adaptive_academy.engine.solution_guard import (
+    ATTEMPT_UNVERIFIED,
+    FALLBACK,
+    REGENERATE,
+    SolutionGuard,
+)
 from adaptive_academy.llm.types import LLMResponse, StructuredOutputError
 from adaptive_academy.engine.artifact import review_artifact
 from adaptive_academy.models import (
@@ -127,7 +132,7 @@ def test_empty_database_has_no_rows_and_no_ratios(session):
         assert g["top_failed_rules"] == []
         guard = w["guard"]
         assert (guard["checks"], guard["blocked"], guard["fallbacks"],
-                guard["unavailable"]) == (0, 0, 0, 0)
+                guard["unavailable"], guard["attempt_unavailable"]) == (0, 0, 0, 0, 0)
         assert guard["blocked_share"] is None and guard["unavailable_share"] is None
 
 
@@ -370,8 +375,36 @@ def test_guard_numbers_from_the_real_solution_guard(session, world):
     assert guard_card["fallbacks"] == 1
     assert guard_card["unavailable"] == 1
     assert guard_card["unavailable_share"] == pytest.approx(1 / 3)
+    assert guard_card["attempt_unavailable"] == 0
     assert _card(session)["windows"]["today"]["guard"] == \
         _card(session)["windows"]["all_time"]["guard"]
+
+
+def test_attempt_check_failures_never_inflate_the_screen_only_share(session, world):
+    # One turn: the tutor calls log_attempt three times with the guard model down (one failed
+    # attempt check, reused twice), then its reply is reviewed by the screen alone. Before,
+    # every one of those counted as guard:unavailable over a single check: 400%.
+    emit = _emitter(session, world["topic"])
+    guard = SolutionGuard(concept="c", learner_text="I'd divide by 2 because...",
+                          llm=_Boom(), emit=emit)
+    for _ in range(3):
+        assert guard.attempt_tool("tried") == (False, ATTEMPT_UNVERIFIED)
+    guard.review("What would your first step be?")
+    session.commit()
+
+    g = _card(session)["windows"]["today"]["guard"]
+    assert (g["checks"], g["unavailable"], g["attempt_unavailable"]) == (1, 1, 1)
+    assert g["unavailable_share"] == 1.0
+
+
+def test_an_attempt_check_outage_alone_is_counted_without_reply_checks(session, world):
+    emit = _emitter(session, world["topic"])
+    SolutionGuard(concept="c", learner_text="x", llm=_Boom(), emit=emit).attempt_tool("t")
+    session.commit()
+
+    g = _card(session)["windows"]["today"]["guard"]
+    assert (g["checks"], g["unavailable"], g["attempt_unavailable"]) == (0, 0, 1)
+    assert g["unavailable_share"] is None
 
 
 def test_old_guard_events_fall_out_of_short_windows(session, world):

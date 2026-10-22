@@ -64,8 +64,10 @@ def log_attempt_result(convo: Conversation, args: dict, *, guard: SolutionGuard)
     Extracted so the attempt-gate can be unit-tested without the live SDK. While the guard is
     regenerating a withheld draft the attempt is deferred, not recorded: the tutor can't
     unlock the gate mid-turn (run_tutor_turn_sdk records it after the turn if the reply
-    passed review). The guard writes the events."""
-    recorded, payload = guard.attempt_tool(str(args.get("summary", "")))
+    passed review). In a conversation already unlocked it is a plain "ok", no check. The
+    guard writes the events."""
+    recorded, payload = guard.attempt_tool(str(args.get("summary", "")),
+                                           attempt_logged=bool(convo.attempt_logged))
     if recorded:
         convo.attempt_logged = True
     return _text_result(payload)

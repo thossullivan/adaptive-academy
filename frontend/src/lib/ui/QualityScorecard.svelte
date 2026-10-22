@@ -197,6 +197,12 @@
             </div>
           </dl>
         {/if}
+        {#if w.guard.attempt_unavailable > 0}
+          <p class="mt-3 text-sm text-faint" data-testid="quality-guard-attempt-unavailable">
+            {plural(w.guard.attempt_unavailable, 'attempt check')} could not run, so those attempts
+            were not recorded and the answer stayed locked.
+          </p>
+        {/if}
         <p class="mt-3 text-xs leading-relaxed text-muted">
           Tutor replies written before your first attempt are checked for the answer, and held back
           if they give it away.

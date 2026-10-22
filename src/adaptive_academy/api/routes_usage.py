@@ -120,6 +120,7 @@ class GuardQualityOut(BaseModel):
     fallbacks: int
     unavailable: int
     unavailable_share: float | None
+    attempt_unavailable: int
 
 
 class QualityWindowOut(BaseModel):

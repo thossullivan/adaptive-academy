@@ -377,6 +377,8 @@ export interface QualityGuard {
   fallbacks: number;
   unavailable: number;
   unavailable_share: number | null;
+  /** Attempt checks on log_attempt that could not run (no attempt recorded). */
+  attempt_unavailable: number;
 }
 export interface QualityWindow {
   by_feature: (QualityCalls & { feature: string | null })[];

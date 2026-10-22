@@ -1093,8 +1093,11 @@ def test_an_unavailable_attempt_check_fails_closed_without_crashing(session, mon
     session.refresh(convo)
     assert convo.attempt_logged is False  # not recorded: fail closed
     category = "unknown" if exc else "budget"
-    unavailable = [e.detail for e in result.events if e.kind == "guard:unavailable"]
-    assert unavailable[0] == f"{category}: attempt check failed, attempt not recorded"
+    # Its own kind, so the scorecard's reply-check "screen only" share never counts it.
+    assert [e.detail for e in result.events if e.kind == "guard:attempt_unavailable"] == [
+        f"{category}: attempt check failed, attempt not recorded"]
+    assert [e.detail for e in result.events if e.kind == "guard:unavailable"] == [
+        f"{category}: model check failed, screen used"]  # the reply review only
     assert ("tool:log_attempt:rejected", "not recorded: the attempt check was unavailable") in [
         (e.kind, e.detail) for e in result.events]
     assert "tool:reveal_solution:blocked" in _kinds(result)
@@ -1124,8 +1127,10 @@ def test_without_a_guard_client_log_attempt_is_never_recorded(session):
 
     session.refresh(convo)
     assert convo.attempt_logged is False and result.reply == HINT
-    assert ("guard:unavailable", "no_client: attempt check unavailable, attempt not recorded"
+    assert ("guard:attempt_unavailable",
+            "no_client: attempt check unavailable, attempt not recorded"
             ) in [(e.kind, e.detail) for e in result.events]
+    assert "guard:unavailable" not in _kinds(result)  # screen-only reviews are not failures
 
 
 def test_a_second_log_attempt_in_the_turn_reuses_the_verdict(session):
@@ -1157,9 +1162,31 @@ def test_a_failed_attempt_check_is_not_retried_in_the_turn(session):
     ])
     broken = _BrokenGuard()
 
-    run_tutor_turn(session, convo, SHORT_REAL, llm, guard_llm=broken)
+    result = run_tutor_turn(session, convo, SHORT_REAL, llm, guard_llm=broken)
 
     assert broken.calls == 2  # one attempt check, one review: the failure was reused
+    # One event per failure: the reused failure traces nothing new.
+    assert _kinds(result).count("guard:attempt_unavailable") == 1
+    assert _kinds(result).count("tool:log_attempt:rejected") == 2
+
+
+def test_log_attempt_in_an_unlocked_conversation_needs_no_check(session):
+    # The answer is already unlocked: a later log_attempt (even on "is it 42?") has nothing
+    # to decide. No model call, no rejection, and no "do not state the solution" text.
+    convo = _seed(session, attempt_logged=True)
+    llm = ScriptedLLMClient(_attempt_then_reveal())
+    guard = ScriptedLLMClient([])  # any call would raise "ran out of responses"
+
+    result = run_tutor_turn(session, convo, "is it 42?", llm, guard_llm=guard)
+
+    assert guard.calls == []
+    assert _tool_result(llm.calls[1], "t1") == "ok: attempt recorded"
+    assert result.reply == SECRET  # the reveal is still allowed
+    kinds = _kinds(result)
+    assert "tool:log_attempt:rejected" not in kinds
+    assert not any(k.startswith("guard:") for k in kinds)
+    session.refresh(convo)
+    assert convo.attempt_logged is True
 
 
 def test_the_attempt_check_reuses_a_review_verdict_on_the_same_message():
@@ -1264,10 +1291,11 @@ def test_no_write_lock_is_held_during_the_attempt_check(tmp_path):
 # --- the attempt check on the subscription path --------------------------------------------
 
 
-def _sdk_attempt_turn(session, monkeypatch, *, learner, guard_llm, reply=HINT):
+def _sdk_attempt_turn(session, monkeypatch, *, learner, guard_llm, reply=HINT,
+                      attempt_logged=False):
     """An SDK turn whose run calls the REAL in-process handlers: log_attempt, then
     reveal_solution(text=SECRET); its reply is `reply` unless the reveal was allowed."""
-    convo = _seed(session)
+    convo = _seed(session, attempt_logged=attempt_logged)
     captured: dict = {}
     real_server = tutor_sdk.create_sdk_mcp_server
 
@@ -1327,7 +1355,21 @@ def test_sdk_an_unavailable_attempt_check_fails_closed(session, monkeypatch):
     assert convo.attempt_logged is False and result.reply == HINT
     assert solution_guard.ATTEMPT_UNVERIFIED in str(logged["content"])
     assert reveal.get("is_error") is True
-    assert "guard:unavailable" in _kinds(result)
+    assert _kinds(result).count("guard:attempt_unavailable") == 1
+
+
+def test_sdk_log_attempt_in_an_unlocked_conversation_needs_no_check(session, monkeypatch):
+    guard = ScriptedLLMClient([])  # any call would raise "ran out of responses"
+    convo, result, (logged, reveal) = _sdk_attempt_turn(
+        session, monkeypatch, learner="is it 42?", guard_llm=guard, attempt_logged=True)
+
+    assert guard.calls == []
+    assert str(logged["content"]) == str([{"type": "text", "text": "ok: attempt recorded"}])
+    assert "is_error" not in reveal and result.reply == SECRET
+    kinds = _kinds(result)
+    assert "tool:log_attempt:rejected" not in kinds
+    assert not any(k.startswith("guard:") for k in kinds)
+    assert convo.attempt_logged is True
 
 
 def test_sdk_attempt_check_runs_off_the_event_loop(session, monkeypatch):
@@ -1346,5 +1388,5 @@ def test_sdk_attempt_check_runs_off_the_event_loop(session, monkeypatch):
     convo, result, (logged, reveal) = _sdk_attempt_turn(
         session, monkeypatch, learner=SHORT_REAL, guard_llm=guard)
 
-    assert "guard:unavailable" not in _kinds(result)
+    assert "guard:attempt_unavailable" not in _kinds(result)
     assert convo.attempt_logged is True and result.reply == SECRET
