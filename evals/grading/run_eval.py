@@ -108,6 +108,16 @@ def check_scratch_db(path: Path) -> str | None:
     if tables - {"llmusage"}:
         return (f"{path} holds other tables ({', '.join(sorted(tables)[:3])}...): it looks "
                 "like an app database. Pass a new file, or leave --scratch-db out.")
+    if "llmusage" in tables:
+        # The file outlives schema changes (create_all never adds a column), and an old
+        # table would silently drop usage rows, so the daily limit would stop holding.
+        from adaptive_academy.models import LLMUsage
+
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+            have = {r[1] for r in conn.execute("PRAGMA table_info(llmusage)")}
+        if have != {c.name for c in LLMUsage.__table__.columns}:
+            return (f"{path} was made by an older version of the app (its usage table has "
+                    "different columns). Delete it and run again; it only holds eval usage.")
     return None
 
 
@@ -172,10 +182,11 @@ def format_estimate(est: dict[str, Any], backend: str) -> str:
 
 # ── One case ─────────────────────────────────────────────────────────────────
 
-def _usage_since(bind, last_id: int, *,
-                 newest_only: bool = False) -> tuple[list[Any], int]:
-    """Usage rows recorded after `last_id`, and the new last id. `newest_only`: just the
-    newest id (the starting point on a scratch database earlier runs wrote to)."""
+def _usage_since(bind, last_id: int, *, newest_only: bool = False,
+                 feature: str | None = None) -> tuple[list[Any], int]:
+    """Usage rows recorded after `last_id` (only this run's `feature` label when given, so a
+    concurrent run on the same file isn't counted), and the new last id. `newest_only`: just
+    the newest id (the starting point on a scratch database earlier runs wrote to)."""
     from sqlalchemy import func
     from sqlmodel import Session, select
 
@@ -188,8 +199,10 @@ def _usage_since(bind, last_id: int, *,
             newest = s.exec(select(func.max(LLMUsage.id))).one()
         return [], int(newest or 0)
     with Session(bind) as s:
-        rows = s.exec(select(LLMUsage).where(LLMUsage.id > last_id)
-                      .order_by(LLMUsage.id)).all()
+        query = select(LLMUsage).where(LLMUsage.id > last_id)
+        if feature is not None:
+            query = query.where(LLMUsage.feature == feature)
+        rows = s.exec(query.order_by(LLMUsage.id)).all()
         s.expunge_all()
     return rows, (rows[-1].id if rows else last_id)
 
@@ -349,7 +362,9 @@ def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False
         stopped: str | None = None
         # The scratch database persists across runs: count only this run's rows.
         _, last_id = _usage_since(engine, 0, newest_only=True)
-        with Session(engine) as session, usage.feature_context("eval_grading"):
+        # A per-run label on its usage rows; the daily limit still sums every row.
+        run_feature = f"eval_grading:{started_at.strftime('%Y%m%dT%H%M%S%fZ')}"
+        with Session(engine) as session, usage.feature_context(run_feature):
             for i, case in enumerate(cases, start=1):
                 if stopped is None and limit is not None and key_billed:
                     try:
@@ -369,7 +384,7 @@ def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False
                     # Stopped inside the case (e.g. the limit refused its regeneration
                     # call): the calls it already made were billed, so they still count.
                     stopped = f"{type(exc).__name__}: {exc}"
-                    rows, last_id = _usage_since(engine, last_id)
+                    rows, last_id = _usage_since(engine, last_id, feature=run_feature)
                     pred = _with_usage(metrics.Prediction(case.id, "not_run"), rows)
                     preds.append(pred)
                     details.append({"id": case.id, "concept": case.concept,
@@ -378,7 +393,7 @@ def run(args: argparse.Namespace, *, llm=None, out=print, isolated: bool = False
                                     "calls": pred.calls, "cost_usd": pred.cost_usd,
                                     "unpriced_calls": pred.unpriced_calls})
                     continue
-                rows, last_id = _usage_since(engine, last_id)
+                rows, last_id = _usage_since(engine, last_id, feature=run_feature)
                 pred = _with_usage(metrics.Prediction(
                     pred.case_id, pred.outcome, pred.final_score, pred.missing_required,
                     pred.misconceptions_committed, latency_s=detail["latency_s"]), rows)

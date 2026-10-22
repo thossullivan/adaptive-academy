@@ -155,7 +155,8 @@ def test_live_run_writes_a_report_scored_with_the_apps_caps(tmp_path, small_case
     assert m["cost"]["calls"] == 6
     with sqlite3.connect(tmp_path / "scratch" / "usage.db") as conn:
         rows = conn.execute("SELECT feature FROM llmusage").fetchall()
-    assert rows == [("eval_grading",)] * 6
+    assert len(rows) == 6 and len(set(rows)) == 1
+    assert rows[0][0].startswith("eval_grading:")  # a per-run label
 
     meta = report["meta"]
     assert meta["model"] == "claude-sonnet-5-5" and meta["prompt_tag"].startswith("assess.grade@")
@@ -357,3 +358,36 @@ def test_main_in_a_fresh_process_prints_the_estimate_and_refuses_without_live(tm
     assert out.returncode == run_eval.EXIT_REFUSED, out.stderr
     assert "Cost estimate for 5 cases" in out.stdout and "Not run" in out.stdout
     assert not (tmp_path / "o").exists()
+
+
+
+def test_it_refuses_a_scratch_database_from_an_older_schema(tmp_path, small_cases):
+    # Review: the file persists, and create_all never adds a column, so an old table
+    # would silently drop usage rows and the daily limit would stop holding.
+    db = tmp_path / "usage.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE llmusage (id INTEGER PRIMARY KEY, model TEXT)")
+    llm = ScriptedLLMClient([])
+    lines: list[str] = []
+    args = run_eval.parse_args(["--cases", str(small_cases), "--out-dir",
+                                str(tmp_path / "out"), "--scratch-db", str(db), "--live"])
+    assert _run(args, llm=llm, out=lines.append) == run_eval.EXIT_REFUSED
+    assert "older version" in "\n".join(lines)
+    assert llm.calls == []
+
+
+def test_rows_from_another_run_on_the_same_file_are_not_counted(tmp_path):
+    from sqlmodel import Session, SQLModel, create_engine
+
+    from adaptive_academy.models import LLMUsage
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'u.db'}")
+    SQLModel.metadata.create_all(engine, tables=[LLMUsage.__table__])
+    with Session(engine) as s:
+        for feature in ("eval_grading:mine", "eval_grading:other", "eval_grading:mine"):
+            s.add(LLMUsage(backend="anthropic", model="m", role="reasoning",
+                           operation="complete", feature=feature))
+        s.commit()
+    rows, last = run_eval._usage_since(engine, 0, feature="eval_grading:mine")
+    assert [r.feature for r in rows] == ["eval_grading:mine"] * 2
+    assert last == 3
