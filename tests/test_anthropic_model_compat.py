@@ -150,8 +150,10 @@ def test_complete_json_sends_auto_and_strict_tool_with_instruction(session, api_
     # `minimum` is not in the strict subset; it must not be sent as a keyword.
     assert "minimum" not in tool["input_schema"]["properties"]["n"]
     # The model is told, in the request, to answer by calling the tool.
-    assert kw["system"].startswith("SYS")
-    assert "emit" in kw["system"][len("SYS"):]
+    # (system is a list of text blocks: the cached stable part, then today's date.)
+    stable = kw["system"][0]["text"]
+    assert stable.startswith("SYS")
+    assert "emit" in stable[len("SYS"):]
     # The caller's schema is not mutated by the strict transform.
     assert "additionalProperties" not in SCHEMA
     assert SCHEMA["properties"]["n"]["minimum"] == 0

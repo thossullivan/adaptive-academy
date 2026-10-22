@@ -24,6 +24,13 @@ export function totalTokens(t: UsageTotals): number {
   return t.input_tokens + t.output_tokens + t.cache_creation_input_tokens + t.cache_read_input_tokens;
 }
 
+/** "64% cached": the share of input tokens read from the prompt cache; null when unknown. */
+export function cacheShareLabel(share: number | null | undefined): string | null {
+  if (share == null) return null;
+  if (share > 0 && share < 0.005) return '<1% cached';
+  return `${Math.round(share * 100)}% cached`;
+}
+
 /** A group's cost — or "price unknown" when none of its calls had a known model price. */
 export function costLabel(t: UsageTotals): string {
   if (t.calls > 0 && t.unpriced_calls === t.calls) return 'price unknown';

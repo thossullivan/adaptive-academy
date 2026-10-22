@@ -1,0 +1,212 @@
+{
+  "assessment_grade": [
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system_sha256": "97e6a218e0b744cd0c2e366e3a795aab291ce5c360bb5230037558de77351ccc",
+      "system_chars": 665,
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "9fad1de9aa242b45dfe7ff59f1c7a78084c719f97605e18660cabc447f01f31f",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system_sha256": "6180f0bde142507ba316efd16bb029624c1859303ef7952862fdad8563a52c8b",
+      "system_chars": 2037,
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "42e5d17fc6cd2d083f76f736805f04616052095b5cb693bc53f3960c0129200d",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "curriculum_generation": [
+    {
+      "operation": "complete_json",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system_sha256": "997c37be9493a0d333c48245ec11e9bcb18b0b49eb7966cd883b8644a3c70dd7",
+      "system_chars": 1663,
+      "tools": [
+        {
+          "name": "emit_track",
+          "type": "custom",
+          "sha256": "46add79da84754fd6575883f1776a770e7c24d43cc8f5d774a9b3510805b207c"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "a33494aad2dd8d36bd8f8e0d803fc748a0db34cced42ac1470ae617003d264b8",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "research_foundation": [
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system_sha256": "83ce44d702df08e5d68a0f141567d4b7de496b376d3ceb04f46a911ac034387d",
+      "system_chars": 842,
+      "tools": [],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "58f4b0d629b2ab5aa422aeb57ad5945123a04f020c57b1f6a2940937f891e513",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
+  "research_search": [
+    {
+      "operation": "research_search",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 16000,
+      "system_sha256": "312d92896411c096384b1a021026c089765ba5a821c1d11aebbf201d568407c0",
+      "system_chars": 408,
+      "tools": [
+        {
+          "name": "web_search",
+          "type": "web_search_20250305",
+          "sha256": "83647c1c1d41a904b6de51b0b241db6e33e7d883cf27f8f391c411ed81d166cd"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "22bf72c492ba6b024c10d74365dd2eeb3028b2f8a5a7ac45f539e0d533264a4d",
+      "other_params": {},
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    }
+  ],
+  "tutor_turn": [
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system_sha256": "4f62af2d468c249136d566319bd00a538d86ba056ef5241a7f6b0e76d835428b",
+      "system_chars": 2387,
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "b378b8dff1202a1aa739370afd66bfae253dab48af70786c07f74d4820521648",
+      "other_params": {},
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system_sha256": "4f62af2d468c249136d566319bd00a538d86ba056ef5241a7f6b0e76d835428b",
+      "system_chars": 2387,
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "2df9def22398fe0f5303292874fecc1a45968bb869bbc25d5a8a6f3056b844e6",
+      "other_params": {},
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system_sha256": "4f62af2d468c249136d566319bd00a538d86ba056ef5241a7f6b0e76d835428b",
+      "system_chars": 2387,
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "a03025c64a638e2147a3f2da1dfc7f96a4d86282a3eb036b1482e3dd00edbc98",
+      "other_params": {},
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    }
+  ]
+}

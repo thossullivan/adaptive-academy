@@ -36,8 +36,9 @@ from adaptive_academy.models import (
     TopicIntent,
     Track,
 )
+from adaptive_academy.prompts import ASSESS_ARTIFACT, GRADE, PF_CONSOLIDATE, TEACH
 
-NOW = datetime(2026, 10, 19, 15, 30, 0)
+NOW =datetime(2026, 10, 19, 15, 30, 0)
 
 
 def _rows(session: Session, model) -> list:
@@ -129,6 +130,14 @@ def test_build_demo_has_data_for_every_page(session):
     assert any(a.delta is not None and a.baseline_assessment_id for a in assessments)
     assert any(a.confidence_predicted is not None for a in assessments)
     assert _rows(session, Rubric) and _rows(session, ReferenceAnchor)
+    # Each row carries the current tag of the prompt that grades its kind, as the real writers
+    # would, and that tag is in the demo's own trace.
+    grading_prompt = {"teach": TEACH, "productive_failure": PF_CONSOLIDATE,
+                      "artifact_review": ASSESS_ARTIFACT}
+    for a in assessments:
+        assert a.prompt_tag == grading_prompt.get(a.kind, GRADE).tag, a.kind
+    traced = {e.detail for e in _rows(session, AgentEvent) if e.kind == "prompt"}
+    assert {a.prompt_tag for a in assessments} <= traced
 
     # Tutor: conversations where the learner logged an attempt (they feed the trace and the
     # memory index).

@@ -81,6 +81,9 @@ USAGE = [
     (3, "curriculum", "claude-sonnet-4-6", 20_000, 12_000, 0, 0.24),
     (12, "tutor", "claude-haiku-4-5", 8_000, 700, 0, 0.0115),
 ]
+# USAGE row index → prompt-cache read tokens. Tutor over 30 days: 36k of 56k input tokens
+# read from cache, so the Usage page shows "64% cached".
+USAGE_CACHE_READS = {0: 36_000}
 
 # (concept index, kind, score)
 ASSESSMENTS = [
@@ -134,11 +137,12 @@ def seed() -> None:
                 score=score,
             ))
         now = datetime.now(timezone.utc)
-        for days, feature, model, inp, out, searches, cost in USAGE:
+        for i, (days, feature, model, inp, out, searches, cost) in enumerate(USAGE):
             session.add(LLMUsage(
                 created_at=now - timedelta(days=days, minutes=1),
                 backend="anthropic", model=model, role="reasoning", operation="complete",
                 feature=feature, input_tokens=inp, output_tokens=out,
+                cache_read_input_tokens=USAGE_CACHE_READS.get(i, 0),
                 web_search_requests=searches, cost_usd=cost,
             ))
         # A second, minimal topic so topic-switching can be exercised. Created last, so the

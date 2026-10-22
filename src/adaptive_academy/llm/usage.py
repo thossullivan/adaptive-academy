@@ -389,6 +389,14 @@ def _totals(row: Any) -> dict:
     return out
 
 
+def cache_read_share(totals: dict) -> float | None:
+    """Share of a group's input tokens (uncached + cache writes + cache reads) that were read
+    from the prompt cache, 0..1; None when the group sent no input tokens."""
+    read = totals["cache_read_input_tokens"]
+    prompt = totals["input_tokens"] + totals["cache_creation_input_tokens"] + read
+    return read / prompt if prompt else None
+
+
 def usage_summary(session: Session, now: datetime | None = None) -> dict:
     """Totals per window, 30-day breakdowns by feature and model, and the budget state.
 
@@ -420,7 +428,8 @@ def usage_summary(session: Session, now: datetime | None = None) -> dict:
         items.sort(key=lambda i: (-i["cost_usd"], -i["calls"], str(i["key"])))
         return items
 
-    by_feature = [{"feature": i.pop("key"), **i} for i in _breakdown(LLMUsage.feature)]
+    by_feature = [{"feature": i.pop("key"), **i, "cache_read_share": cache_read_share(i)}
+                  for i in _breakdown(LLMUsage.feature)]
     by_model = [{"model": i.pop("key"), **i} for i in _breakdown(LLMUsage.model)]
 
     limit = settings.daily_budget_usd

@@ -19,6 +19,7 @@ from adaptive_academy.llm.agent_sdk_client import record_sdk_result
 from adaptive_academy.llm.anthropic_researcher import parse_sources_json
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
+from adaptive_academy.llm.today import with_today
 from adaptive_academy.llm.types import AgentSDKError
 from adaptive_academy.prompts import RESEARCH_SEARCH
 
@@ -36,7 +37,8 @@ class AgentSDKResearcherClient:
         async for msg in query(
             prompt=web_query,
             options=ClaudeAgentOptions(
-                model=self._model, system_prompt=RESEARCH_SEARCH, allowed_tools=["WebSearch"],
+                model=self._model, system_prompt=with_today(RESEARCH_SEARCH),
+                allowed_tools=["WebSearch"],
                 max_turns=self._max_turns, setting_sources=[],
                 permission_mode="bypassPermissions"),
         ):

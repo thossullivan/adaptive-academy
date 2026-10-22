@@ -297,7 +297,8 @@ export interface UsageReport {
     last_30_days: UsageTotals;
     all_time: UsageTotals;
   };
-  by_feature: (UsageTotals & { feature: string | null })[];
+  // cache_read_share: input tokens read from the prompt cache, 0..1; null with no input.
+  by_feature: (UsageTotals & { feature: string | null; cache_read_share: number | null })[];
   by_model: (UsageTotals & { model: string })[];
   budget: UsageBudget;
   priced_models: string[];

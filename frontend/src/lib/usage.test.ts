@@ -3,6 +3,7 @@ import { api } from './api';
 import type { UsageBudget, UsageTotals } from './types';
 import {
   budgetFraction,
+  cacheShareLabel,
   costLabel,
   featureLabel,
   formatTokens,
@@ -86,6 +87,17 @@ describe('budgetFraction', () => {
     expect(budgetFraction(b(4, 1))).toBe(0.25);
     expect(budgetFraction(b(1, 5))).toBe(1);
     expect(budgetFraction(b(0, 0))).toBe(1);
+  });
+});
+
+describe('cacheShareLabel', () => {
+  it('rounds to a whole percent, floors tiny shares, and is null when unknown', () => {
+    expect(cacheShareLabel(0.6429)).toBe('64% cached');
+    expect(cacheShareLabel(0)).toBe('0% cached');
+    expect(cacheShareLabel(1)).toBe('100% cached');
+    expect(cacheShareLabel(0.001)).toBe('<1% cached');
+    expect(cacheShareLabel(null)).toBeNull();
+    expect(cacheShareLabel(undefined)).toBeNull();
   });
 });
 

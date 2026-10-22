@@ -11,6 +11,7 @@ from adaptive_academy.llm.types import LLMResponse
 from adaptive_academy.models import (
     Assessment, Concept, Deliverable, Item, Phase, Topic, Track,
 )
+from adaptive_academy.prompts import ASSESS_ARTIFACT
 
 
 class FixedLLM:
@@ -92,6 +93,7 @@ def test_review_artifact_grades_and_records_shipped_signal(session):
     # a per-concept artifact_review assessment was recorded (the 'shipped' signal)
     a = session.exec(select(Assessment).where(Assessment.kind == "artifact_review")).one()
     assert a.concept_id == c.id and a.score == 0.8
+    assert a.prompt_tag == ASSESS_ARTIFACT.tag
 
 
 def test_review_artifact_merges_fetched_url_text_into_grading(session):

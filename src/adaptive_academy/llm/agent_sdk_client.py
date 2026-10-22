@@ -30,6 +30,7 @@ from claude_agent_sdk import (
 )
 
 from adaptive_academy.llm.registry import get_model
+from adaptive_academy.llm.today import with_today
 from adaptive_academy.llm.types import AgentSDKError, LLMResponse
 from adaptive_academy.llm.usage import BACKEND_AGENT_SDK, record_usage
 
@@ -68,7 +69,7 @@ class AgentSDKLLMClient:
         # setting_sources=[] isolates the call from the project's CLAUDE.md/skills so they
         # don't leak into LLM prompts; max_turns=1 + no tools = a single completion.
         return ClaudeAgentOptions(
-            model=self._model, system_prompt=system,
+            model=self._model, system_prompt=with_today(system),
             allowed_tools=[], max_turns=1, setting_sources=[])
 
     async def _run(self, system: str, prompt: str) -> str:

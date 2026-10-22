@@ -9,6 +9,7 @@ from adaptive_academy.models import (
     Assessment, Concept, KnowledgeEstimate, Milestone, PaperProbe, PaperProbeAnswer,
     Program, ProgramTopicLink, Rubric, Topic, Track,
 )
+from adaptive_academy.prompts import GRADE, PAPER_PROBE_OUTCOME
 
 
 def _materialized(s):
@@ -88,6 +89,8 @@ def test_grade_writes_one_assessment_per_concept_and_outcome(session):
     assert len(out) == 1
     a = out[0]
     assert a.kind == "paper_probe" and a.paper_probe_id == pp.id and a.concept_id == c.id
+    # Graded per concept by assess_concept's GRADE; PAPER_PROBE_OUTCOME only wrote the outcome.
+    assert a.prompt_tag == GRADE.tag != PAPER_PROBE_OUTCOME.tag
     session.refresh(pp)
     assert pp.status == "graded" and pp.outcome["result"] == "sharp critique"
 

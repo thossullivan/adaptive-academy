@@ -4,6 +4,7 @@
   import type { UsageReport, UsageTotals } from '$lib/types';
   import {
     budgetFraction,
+    cacheShareLabel,
     costLabel,
     featureLabel,
     formatTokens,
@@ -147,10 +148,18 @@
           {:else}
             <ul class="flex flex-col gap-3" data-testid="usage-by-feature">
               {#each report.by_feature as row (row.feature ?? '—')}
+                {@const cached = cacheShareLabel(row.cache_read_share)}
                 <li class="min-w-0">
                   <div class="flex items-baseline gap-3 text-sm">
                     <span class="min-w-0 flex-1 truncate text-fg-dim" title={featureLabel(row.feature)}>{featureLabel(row.feature)}</span>
                     <span class="eyebrow hidden text-faint sm:inline">{formatTokens(totalTokens(row))} tok</span>
+                    {#if cached}
+                      <span
+                        class="eyebrow hidden text-faint sm:inline"
+                        title="Share of input tokens read from the prompt cache"
+                        data-testid="cache-share">{cached}</span
+                      >
+                    {/if}
                     <span class="eyebrow text-faint">{row.calls}×</span>
                     <span class="nums w-24 text-right text-fg">{costLabel(row)}</span>
                   </div>

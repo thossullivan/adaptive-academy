@@ -4,7 +4,11 @@ import logging
 from anthropic import Anthropic
 
 from adaptive_academy.jsonout import extract_json
-from adaptive_academy.llm.anthropic_client import content_block_to_param
+from adaptive_academy.llm.anthropic_client import (
+    EPHEMERAL,
+    cached_system,
+    content_block_to_param,
+)
 from adaptive_academy.llm.keys import require_anthropic_api_key
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
@@ -71,9 +75,12 @@ class AnthropicResearcherClient:
             resp = self._client.messages.create(
                 model=self._model,
                 max_tokens=self._max_tokens,
-                system=RESEARCH_SEARCH,
+                system=cached_system(RESEARCH_SEARCH),
                 tools=tools,  # same tools: a paused turn may end on a not-yet-run search
                 messages=messages,
+                # Automatic caching as well: a pause_turn continuation re-sends the search
+                # results (large), and reads them from cache instead of paying full price.
+                cache_control=EPHEMERAL,
             )
             # usage.server_tool_use.web_search_requests is billed per search on top of
             # tokens; every continuation is its own billed call, so its own row.
