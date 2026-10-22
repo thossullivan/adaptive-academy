@@ -162,20 +162,22 @@ def test_non_claude_research_uses_openrouter_web_search(session, openrouter, mon
                                      "parameters": {"max_uses": 5}}]
 
 
-def test_non_claude_structured_output_drops_strict_but_keeps_the_retry(session, openrouter,
-                                                                      monkeypatch):
+def test_non_claude_structured_output_uses_json_schema_and_keeps_the_retry(session, openrouter,
+                                                                          monkeypatch):
+    # No tool for a non-Claude model (model_catalog structured_output "json_schema"): the
+    # strict schema goes in output_config.format, and a prose answer still gets one retry.
     monkeypatch.setattr(settings, "reasoning_model", "deepseek/deepseek-v4")
     wire = Wire(_message(TEXT, model="deepseek/deepseek-v4"),
-                _message([{"type": "tool_use", "id": "toolu_1", "name": "emit",
-                           "input": {"score": 0.5}}], model="deepseek/deepseek-v4",
-                         stop_reason="tool_use"))
+                _message([{"type": "text", "text": '{"score": 0.5}'}],
+                         model="deepseek/deepseek-v4"))
     out = AnthropicLLMClient(http_client=wire.http_client()).complete_json(
         "SYS", [USER], schema=SCHEMA, tool_name="emit")
     assert out == {"score": 0.5}
     assert len(wire.requests) == 2
-    [tool] = wire.sent(0)["tools"]
-    assert "strict" not in tool
-    assert tool["input_schema"]["additionalProperties"] is False
+    first = wire.sent(0)
+    assert "tools" not in first
+    assert first["output_config"]["format"]["type"] == "json_schema"
+    assert first["output_config"]["format"]["schema"]["additionalProperties"] is False
 
 
 def test_claude_structured_output_stays_strict(session, openrouter):

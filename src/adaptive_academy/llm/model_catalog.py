@@ -10,11 +10,27 @@ three features are only known to hold for Claude. So:
   `~anthropic/…` aliases on OpenRouter): full support.
 - `anthropic-legacy` (Claude older than 4.5, e.g. claude-3-5-sonnet, claude-sonnet-4): the
   same, except strict tool use, which those models don't support. Their structured output is
-  sent without `strict`, as for an experimental model, with the same one corrective retry.
-- everything else: allowed, but marked experimental. Its structured-output tool is sent
-  without `strict` (the schema still shapes the answer, and a prose answer still gets the one
-  corrective retry), research uses OpenRouter's own `openrouter:web_search` server tool, and
-  thinking blocks from its responses are not replayed.
+  a tool sent without `strict`; the answer is checked against the schema, with one corrective
+  retry.
+- everything else: allowed, but marked experimental. Its structured output uses no tool at
+  all: `output_config.format` with the strict schema, the JSON read from the text and checked
+  against the schema, with one corrective retry. Research uses OpenRouter's own
+  `openrouter:web_search` server tool, and thinking blocks from its responses are not
+  replayed.
+
+Structured output, by `structured_output` (llm/anthropic_client.py complete_json):
+
+  mode          models               request                          answer checked
+  strict_tool   Claude 4.5 and later tool, `strict: true`             no (the API guarantees it)
+  tool          Claude before 4.5    tool, no `strict`                yes, llm/schema_check.py
+  json_schema   every other model    no tools; output_config.format   yes, llm/schema_check.py
+
+Why json_schema for non-Claude models: on a live run (2026-10-22, OpenRouter,
+deepseek/deepseek-v4.1-flash-1017) the model answered the tool with its own native tool-call
+markup written as text ("<｜DSML｜ calls> <｜DSML｜ invoke name=...>"), which OpenRouter did
+not turn into a tool_use block, so the call failed twice (intermittently; two earlier runs
+worked). The same prompt with no tools and `output_config.format` returned valid,
+schema-conforming JSON on both attempts.
 
 Add a family here (with what a live check showed) rather than branching on model names in a
 client. `experimental` is the one source for the "Experimental" label in the UI.
@@ -25,11 +41,17 @@ from dataclasses import dataclass
 from typing import Any
 
 
+# How complete_json gets structured output from a model (see the table above).
+STRUCTURED_STRICT_TOOL = "strict_tool"
+STRUCTURED_TOOL = "tool"
+STRUCTURED_JSON_SCHEMA = "json_schema"
+
+
 @dataclass(frozen=True)
 class ModelCapabilities:
     family: str
-    # `strict: true` on a tool guarantees schema-valid input.
-    strict_tools: bool
+    # STRUCTURED_STRICT_TOOL, STRUCTURED_TOOL or STRUCTURED_JSON_SCHEMA.
+    structured_output: str
     # Anthropic's `web_search_20250305` server tool (and its pause_turn continuations).
     anthropic_web_search: bool
     # Thinking blocks must (and can) be passed back unchanged within a turn's tool loop.
@@ -37,18 +59,23 @@ class ModelCapabilities:
     # Not an Anthropic Claude model: works through OpenRouter's conversion, unverified here.
     experimental: bool
 
+    @property
+    def strict_tools(self) -> bool:
+        """`strict: true` on a tool guarantees schema-valid input."""
+        return self.structured_output == STRUCTURED_STRICT_TOOL
+
 
 FAMILIES: dict[str, ModelCapabilities] = {
     "anthropic": ModelCapabilities(
         family="anthropic",
-        strict_tools=True,
+        structured_output=STRUCTURED_STRICT_TOOL,
         anthropic_web_search=True,
         thinking_replay=True,
         experimental=False,
     ),
     "anthropic-legacy": ModelCapabilities(
         family="anthropic-legacy",
-        strict_tools=False,
+        structured_output=STRUCTURED_TOOL,
         anthropic_web_search=True,
         thinking_replay=True,
         experimental=False,
@@ -65,7 +92,7 @@ _DATE_SUFFIX = re.compile(r"-\d{8}$")
 
 OTHER = ModelCapabilities(
     family="other",
-    strict_tools=False,
+    structured_output=STRUCTURED_JSON_SCHEMA,
     anthropic_web_search=False,
     thinking_replay=False,
     experimental=True,
@@ -82,9 +109,13 @@ OTHER = ModelCapabilities(
 #   check saw 2 with max_uses=1 on deepseek/deepseek-v4.1-flash-1017);
 # - with the default engine (`auto`: native search when the provider has it, else Exa),
 #   native search forwards max_uses only to Anthropic; other native providers ignore it.
-# A stricter cap would be OpenRouter's top-level `max_tool_calls` (server-tool steps per
-# request, default 30). It is documented for its own API, not confirmed on the Messages
-# endpoint, so it is not sent. Cost stays capped by the reported usage.cost either way.
+# Measured live on the Messages endpoint (2026-10-22, deepseek/deepseek-v4.1-flash-1017): with
+# max_uses=2, OpenRouter EXECUTED 4 searches (usage.server_tool_use.tool_calls_executed=4) and
+# billed them, and so did each documented stricter control tried alongside it: top-level
+# `max_tool_calls: 2`, `stop_server_tools_when: [{"type": "step_count_is", "step_count": 2}]`,
+# and pinning `engine: "exa"`. None is sent: none enforced the cap. Research angles therefore
+# run about 6 to 8 searches against a cap of 5. Spend still counts in full against the daily
+# limit, because the limit uses OpenRouter's reported usage.cost.
 ANTHROPIC_WEB_SEARCH_TYPE = "web_search_20250305"
 OPENROUTER_WEB_SEARCH_TYPE = "openrouter:web_search"
 

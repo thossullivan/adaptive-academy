@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any
 
@@ -12,8 +13,10 @@ from adaptive_academy.llm.backends import (
     request_extra_body,
 )
 from adaptive_academy.llm.keys import require_api_key
-from adaptive_academy.llm.model_catalog import capabilities, replayable
+from adaptive_academy.jsonout import extract_json
+from adaptive_academy.llm.model_catalog import STRUCTURED_JSON_SCHEMA, capabilities, replayable
 from adaptive_academy.llm.registry import get_model
+from adaptive_academy.llm.schema_check import describe_violations, schema_violations
 from adaptive_academy.llm.strict_schema import to_strict_schema
 from adaptive_academy.llm.today import today_line
 from adaptive_academy.llm.types import (
@@ -23,7 +26,14 @@ from adaptive_academy.llm.types import (
     ToolCall,
 )
 from adaptive_academy.llm.usage import check_budget, record_usage
-from adaptive_academy.prompts import STRUCTURED_TOOL_INSTRUCTION, STRUCTURED_TOOL_RETRY
+from adaptive_academy.prompts import (
+    SCHEMA_RESEND_TEXT,
+    SCHEMA_RESEND_TOOL,
+    STRUCTURED_JSON_INSTRUCTION,
+    STRUCTURED_SCHEMA_RETRY,
+    STRUCTURED_TOOL_INSTRUCTION,
+    STRUCTURED_TOOL_RETRY,
+)
 
 
 # Prompt caching (claude-api skill, shared/prompt-caching.md). The prefix renders tools ->
@@ -88,6 +98,18 @@ def content_block_to_param(block: Any) -> dict[str, Any]:
     if isinstance(block, dict):
         return dict(block)
     return dict(vars(block))
+
+
+def _json_object(text: str) -> dict[str, Any] | None:
+    """The JSON object in a text answer (as sent, or inside fences or prose), else None."""
+    for candidate in (text, extract_json(text)):
+        try:
+            data = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
 
 
 class AnthropicLLMClient:
@@ -196,18 +218,31 @@ class AnthropicLLMClient:
         """Strict tool use → schema-valid JSON (no fences, preamble, or shape drift).
 
         Forced tool_choice is a 400 on Claude Sonnet 5.5, so this uses tool_choice=auto with
-        a `strict: true` tool (on every model the catalog says supports it: all Claude models)
-        and tells the model to answer through the tool. `auto` lets the model reply in text
-        instead; that gets one corrective retry (a second, separately recorded call), then a
-        StructuredOutputError (a ValueError; the API maps it to a legible 502). An
-        experimental model gets the same strict-shaped schema without the `strict` flag.
+        a `strict: true` tool (on every model the catalog says supports it: Claude 4.5 and
+        later) and tells the model to answer through the tool. `auto` lets the model reply in
+        text instead; that gets one corrective retry (a second, separately recorded call),
+        then a StructuredOutputError (a ValueError; the API maps it to a legible 502).
+
+        A model without strict tool use (experimental models, Claude before 4.5) gets the same
+        strict-shaped schema without the `strict` flag, so nothing guarantees its answer fits:
+        the answer is checked against that schema (llm/schema_check.py), and a mismatch uses
+        the same single retry, as an error tool_result naming the first few violations. A
+        second mismatch is StructuredOutputError("schema_mismatch"). A strict model's answer
+        is not re-checked: the API guarantees it, and the request stays as it was.
+
+        A non-Claude model (structured_output "json_schema") gets no tool at all: see
+        _complete_json_schema. Which path runs is the catalog's call (llm/model_catalog.py).
         """
+        input_schema = to_strict_schema(schema)
+        if self._caps.structured_output == STRUCTURED_JSON_SCHEMA:
+            return self._complete_json_schema(system, messages, input_schema, tool_name)
         tool: dict[str, Any] = {
             "name": tool_name,
             "description": "Emit the result as structured data matching the schema.",
-            "input_schema": to_strict_schema(schema),
+            "input_schema": input_schema,
         }
-        if self._caps.strict_tools:
+        check_shape = not self._caps.strict_tools
+        if not check_shape:
             tool["strict"] = True
         request = {
             "model": self._model,
@@ -220,13 +255,9 @@ class AnthropicLLMClient:
             "tools": [tool],
             "tool_choice": {"type": "auto", "disable_parallel_tool_use": True},
         }
-        attempts = [
-            list(messages),
-            # Append-only correction: a new user turn, never an edit of earlier history.
-            [*messages, {"role": "user",
-                         "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}],
-        ]
-        for attempt in attempts:
+        attempt = list(messages)
+        failure = "no_tool_use"
+        for retries_left in (1, 0):
             self._check_budget()
             resp = self._client.messages.create(messages=attempt, **request,
                                                 **request_extra_body(self._backend))
@@ -234,7 +265,113 @@ class AnthropicLLMClient:
             stop_reason = getattr(resp, "stop_reason", None)
             if stop_reason in NO_RETRY_STOP_REASONS:
                 raise StructuredOutputError(stop_reason)
-            for block in resp.content:
-                if block.type == "tool_use" and block.name == tool_name:
-                    return block.input
-        raise StructuredOutputError("no_tool_use")
+            call = next((b for b in resp.content
+                         if b.type == "tool_use" and b.name == tool_name), None)
+            if call is None:
+                failure = "no_tool_use"
+                # Append-only correction: a new user turn, never an edit of earlier history.
+                correction = [{"role": "user",
+                               "content": STRUCTURED_TOOL_RETRY.format(tool_name=tool_name)}]
+            else:
+                violations = (schema_violations(call.input, input_schema) if check_shape
+                              else [])
+                if not violations:
+                    return call.input
+                failure = "schema_mismatch"
+                listed = describe_violations(violations)
+                if not retries_left:
+                    raise StructuredOutputError(
+                        failure, "structured completion did not match its schema after a "
+                                 f"corrective retry:\n{listed}")
+                correction = self._schema_correction(resp, tool_name, listed)
+            attempt = [*messages, *correction]
+        raise StructuredOutputError(failure)
+
+    def _complete_json_schema(
+        self,
+        system: str,
+        messages: list[dict[str, Any]],
+        schema: dict[str, Any],
+        tool_name: str,
+    ) -> dict[str, Any]:
+        """Structured output without a tool: `output_config.format` carries the strict schema.
+
+        For non-Claude models through OpenRouter, which converts the format for the model's
+        provider. The answer is the response's text blocks (thinking blocks are skipped),
+        parsed as JSON (fences and surrounding prose tolerated) and checked against the schema.
+        Text that isn't a JSON object, or JSON that doesn't fit, gets one corrective retry: the
+        model's text, then structured.schema_retry naming what was wrong. A second failure is
+        StructuredOutputError ("not_json" or "schema_mismatch"), invalid_output to the API.
+        `tool_name` names the answer in errors only; no tool is sent.
+        """
+        request = {
+            "model": self._model,
+            "max_tokens": self._max_tokens,
+            "system": cached_system(f"{system}\n\n{STRUCTURED_JSON_INSTRUCTION}", self._today),
+            "output_config": {"format": {"type": "json_schema", "schema": schema}},
+        }
+        attempt = list(messages)
+        for retries_left in (1, 0):
+            self._check_budget()
+            # The backend's body fields (OpenRouter's provider privacy preference) still go
+            # in extra_body; output_config is a regular SDK parameter.
+            resp = self._client.messages.create(messages=attempt, **request,
+                                                **request_extra_body(self._backend))
+            self._record(resp, "complete_json")
+            stop_reason = getattr(resp, "stop_reason", None)
+            if stop_reason in NO_RETRY_STOP_REASONS:
+                raise StructuredOutputError(stop_reason)
+            texts = [b.text for b in resp.content if b.type == "text"]
+            text = "".join(texts)
+            # Candidates in order: each text block on its own (two complete objects, or a
+            # stray brace in prose, would spoil the joined text), the joined text (an object
+            # split across blocks), then a tool_use block's input if the model used a tool
+            # anyway. The first that fits the schema wins, so an example object in an early
+            # prose block can't shadow the real answer; if none fits, the first parseable
+            # one's violations go into the retry.
+            candidates = [d for d in (*map(_json_object, texts), _json_object(text))
+                          if d is not None]
+            candidates += [b.input for b in resp.content
+                           if b.type == "tool_use" and isinstance(b.input, dict)]
+            data = None
+            violations: list = []
+            for candidate in candidates:
+                found = schema_violations(candidate, schema)
+                if not found:
+                    return candidate
+                if data is None:
+                    data, violations = candidate, found
+            if data is None:
+                failure = "not_json"
+                begins = (f"it begins {text.strip()[:60]!r}" if text.strip()
+                          else "it had no text")
+                listed = f"- $: the reply is not a JSON object ({begins})"
+            else:
+                failure = "schema_mismatch"
+                listed = describe_violations(violations)
+            if not retries_left:
+                raise StructuredOutputError(
+                    failure, f"structured answer for {tool_name} was unusable after a "
+                             f"corrective retry:\n{listed}")
+            # Append-only: the model's own text (an empty text block would be a 400, so none
+            # when there was no text), then what was wrong with it.
+            echo = [{"role": "assistant", "content": text}] if text.strip() else []
+            attempt = [*messages, *echo, {"role": "user", "content": STRUCTURED_SCHEMA_RETRY.format(
+                violations=listed, resend=SCHEMA_RESEND_TEXT)}]
+        raise AssertionError("unreachable")
+
+    def _schema_correction(self, resp: Any, tool_name: str,
+                           listed: str) -> list[dict[str, Any]]:
+        """The model's own turn, then an error tool_result for each of its tool calls.
+
+        Every tool_use needs its tool_result in the next user turn, and the turn goes back as
+        the model sent it (thinking blocks only for a model that replays them).
+        """
+        content = replayable(self._model, [content_block_to_param(b) for b in resp.content])
+        text = STRUCTURED_SCHEMA_RETRY.format(
+            violations=listed, resend=SCHEMA_RESEND_TOOL.format(tool_name=tool_name))
+        results = [{"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
+                    "content": text}
+                   for b in content if b.get("type") == "tool_use"]
+        return [{"role": "assistant", "content": content},
+                {"role": "user", "content": results}]

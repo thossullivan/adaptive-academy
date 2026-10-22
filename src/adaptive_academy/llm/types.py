@@ -53,6 +53,20 @@ _STRUCTURED_DETAILS = {
         "The model replied without the structured answer this step needs, even after a "
         "corrective retry, so this step didn't complete. Retrying usually helps."
     ),
+    "schema_mismatch": (
+        "The model's structured answer had the wrong shape, even after a corrective retry, "
+        "so this step didn't complete. Retrying may help; if it keeps happening, use a model "
+        "with strict tool support (Claude 4.5 or later)."
+    ),
+    "not_json": (
+        "The model's answer wasn't the JSON this step needs, even after a corrective retry, "
+        "so this step didn't complete. Retrying may help; if it keeps happening, use a "
+        "Claude model."
+    ),
+    "malformed": (
+        "The model's answer was missing the parts this step needs (or had them in the wrong "
+        "form), so this step didn't complete. Retrying may help."
+    ),
 }
 
 
@@ -66,8 +80,14 @@ class StructuredOutputError(ValueError):
     """A structured completion (`complete_json`) ended without a usable tool call.
 
     `reason` is the stop reason that ended it ("max_tokens", "refusal",
-    "model_context_window_exceeded") or "no_tool_use" when the model answered in prose
-    twice. A ValueError subclass so existing `except ValueError` paths still catch it; the
+    "model_context_window_exceeded"), "no_tool_use" when the model answered in prose
+    twice, or "schema_mismatch" when a model without strict tool use answered twice with
+    input that doesn't fit the schema (llm/schema_check.py), or "not_json" when a model in
+    json_schema mode (llm/model_catalog.py) twice answered with text that isn't a JSON
+    object (the live case: its own tool-call markup as text). A parser raises "malformed"
+    for an answer with nothing usable in it (jsonout.require_object), and a caller may add
+    its own reason; llm/errors.py classifies every reason but the stop reasons as
+    invalid_output. A ValueError subclass so existing `except ValueError` paths still catch it; the
     API maps it to a legible 502 (api/app.py) with `detail`.
     """
 

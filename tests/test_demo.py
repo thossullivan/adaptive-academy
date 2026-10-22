@@ -193,6 +193,27 @@ def test_build_demo_is_deterministic(session):
         assert snapshot(s2) == snapshot(session)
 
 
+def test_demo_enforced_gaps_are_ones_the_grader_could_produce():
+    # An enforced gap names a rubric item exactly as sent (the grader's missing_required /
+    # misconceptions_committed, output_checks G13/G14) and carries its ceiling
+    # (assess.penalize_score), so a seeded one must too, or the demo shows data the app can
+    # never produce.
+    from adaptive_academy import demo
+    from adaptive_academy.engine.assess import penalize_score
+
+    key_points = {}
+    for *_, concept, _q, _ref, points in demo.ANCHORS:
+        key_points.setdefault(concept, []).extend(points)
+    for p in demo.PROBES:
+        items = key_points.get(p.concept, []) if p.kind == "source_quiz" \
+            else demo.RUBRIC_TERMS.get(p.concept, [])
+        omitted = [g.split(": ", 1)[1] for g in p.gaps
+                   if g.startswith("omitted required element: ")]
+        assert all(o in items for o in omitted), (p.concept, omitted)
+        assert not any(g.startswith("contains likely misconception: ") for g in p.gaps)
+        assert penalize_score(p.score, p.gaps) == p.score, (p.concept, p.score)
+
+
 def test_startup_graph_backfill_leaves_demo_edges_alone(session):
     build_demo(session, now=NOW)
     before = sorted((e.id, e.src_concept_id, e.dst_concept_id, e.valid_until)

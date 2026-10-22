@@ -40,7 +40,8 @@ def test_generate_anchor_then_source_quiz_updates_estimate(session):
     assert gen.status_code == 200 and len(gen.json()["anchors"]) == 1
 
     app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient(
-        [LLMResponse(text=json.dumps({"score": 0.2, "verdict": "weak", "gaps": []}))])
+        [LLMResponse(text=json.dumps({"score": 0.2, "verdict": "weak", "gaps": [],
+                                      "missing_required": [], "misconceptions_committed": []}))])
     a = client.post(f"/api/concepts/{concept.id}/assess",
                     json={"kind": "source_quiz", "response": "no idea"})
     assert a.status_code == 200 and a.json()["estimate_level"] == "low"

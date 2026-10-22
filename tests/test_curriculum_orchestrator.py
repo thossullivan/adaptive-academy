@@ -1,6 +1,7 @@
 # tests/test_curriculum_orchestrator.py
 import json
 
+import pytest
 from sqlmodel import Session, select
 
 from adaptive_academy.engine.curriculum import CurriculumResult, generate_curriculum
@@ -81,3 +82,102 @@ def test_generate_persists_full_track_and_traces(session: Session):
     assert {"curriculum:plan", "curriculum:generated", "curriculum:concepts",
             "curriculum:done"}.issubset(kinds)
     assert all(e.conversation_id is None for e in events)
+    assert "concepts:repaired" not in kinds  # clean names: nothing to repair
+
+
+_LEAKY = "Gradient of the cost: ∇J(θ)=Xᵀ(Xθ−y) (divided by m if using the averaged cost)"
+
+
+def test_foundation_with_leaky_names_is_repaired_before_concepts_exist(session: Session):
+    """A foundation stored before the name checks (or edited) never reaches a Concept row,
+    a probe, or the curriculum prompt with a name that states its answer."""
+    topic = Topic(title="GD")
+    session.add(topic)
+    session.commit()
+    intent = TopicIntent(topic_id=topic.id, goal="g", prior_knowledge="p", time_budget="t")
+    fnd = TopicFoundation(topic_id=topic.id, overview="ov",
+                          key_concepts=[_LEAKY, "Batch gradient descent update"],
+                          prerequisite_map={"Batch gradient descent update": [_LEAKY]})
+    session.add_all([intent, fnd])
+    session.commit()
+    payload = json.dumps({"overview": "p", "phases": [
+        {"title": "A", "items": [{"type": "build", "text": "derive",
+                                  "concept_refs": [_LEAKY]}],
+         "deliverable": {"kind": "blog", "text": "t"}},
+        {"title": "B", "items": [{"type": "build", "text": "implement",
+                                  "concept_refs": ["Batch gradient descent update"]}],
+         "deliverable": {"kind": "repo", "text": "t"}},
+    ]})
+    llm = ScriptedLLMClient([LLMResponse(text=payload)])
+    generate_curriculum(session, topic, intent, fnd, [], llm=llm)
+
+    sent = llm.calls[0]["messages"][0]["content"]
+    assert "∇" not in sent and "Gradient of the cost" in sent
+    names = {c.name for c in session.exec(select(Concept)).all()}
+    assert names == {"Gradient of the cost", "Batch gradient descent update"}
+    session.refresh(fnd)
+    assert fnd.key_concepts == ["Gradient of the cost", "Batch gradient descent update"]
+    assert fnd.prerequisite_map == {"Batch gradient descent update": ["Gradient of the cost"]}
+    refs = [c for it in session.exec(select(Item)).all() for c in it.concept_refs]
+    assert _LEAKY not in refs and "Gradient of the cost" in refs
+    assert len(session.exec(select(ConceptEdge)).all()) == 1
+    events = session.exec(select(AgentEvent).where(AgentEvent.topic_id == topic.id)).all()
+    repaired = [e.detail for e in events if e.kind == "concepts:repaired"]
+    assert len(repaired) == 1 and repaired[0].startswith("WARN ")
+
+
+def _leaky_topic(session: Session):
+    topic = Topic(title="GD")
+    session.add(topic)
+    session.commit()
+    intent = TopicIntent(topic_id=topic.id, goal="g", prior_knowledge="p", time_budget="t")
+    fnd = TopicFoundation(topic_id=topic.id, overview="ov",
+                          key_concepts=[_LEAKY, "Batch gradient descent update"],
+                          prerequisite_map={"Batch gradient descent update": [_LEAKY]})
+    session.add_all([intent, fnd])
+    session.commit()
+    return topic, intent, fnd
+
+
+def _two_phase_payload() -> str:
+    return json.dumps({"overview": "p", "phases": [
+        {"title": t, "items": [{"type": "build", "text": "x", "concept_refs": []}],
+         "deliverable": {"kind": "blog", "text": "t"}} for t in ("A", "B")]})
+
+
+def test_failed_curriculum_call_leaves_the_stored_foundation_unchanged(session: Session):
+    topic, intent, fnd = _leaky_topic(session)
+
+    class _Down(ScriptedLLMClient):
+        def complete(self, system, messages, tools):
+            raise RuntimeError("network down")
+
+    with pytest.raises(RuntimeError):
+        generate_curriculum(session, topic, intent, fnd, [], llm=_Down([]))
+    session.rollback()
+    stored = session.exec(select(TopicFoundation).where(TopicFoundation.topic_id == topic.id)).one()
+    assert stored.key_concepts == [_LEAKY, "Batch gradient descent update"]
+    assert session.exec(select(Concept)).all() == []
+
+
+def test_existing_concepts_keep_the_stored_names_on_a_rerun(session: Session):
+    """Concept rows, anchors and alias groups already match the stored names exactly;
+    renaming the foundation under them would break those lookups."""
+    topic, intent, fnd = _leaky_topic(session)
+    old_track = Track(topic_id=topic.id, title="GD", overview="old")
+    session.add(old_track)
+    session.commit()
+    session.add(Concept(track_id=old_track.id, name=_LEAKY))
+    session.commit()
+
+    llm = ScriptedLLMClient([LLMResponse(text=_two_phase_payload())])
+    generate_curriculum(session, topic, intent, fnd, [], llm=llm)
+    session.refresh(fnd)
+    assert fnd.key_concepts == [_LEAKY, "Batch gradient descent update"]
+    new_track = session.exec(select(Track).where(Track.id != old_track.id)).one()
+    names = {c.name for c in session.exec(
+        select(Concept).where(Concept.track_id == new_track.id)).all()}
+    assert names == {_LEAKY, "Batch gradient descent update"}  # in sync with the foundation
+    kinds = [e.kind for e in session.exec(
+        select(AgentEvent).where(AgentEvent.topic_id == topic.id)).all()]
+    assert "concepts:repair_skipped" in kinds and "concepts:repaired" not in kinds

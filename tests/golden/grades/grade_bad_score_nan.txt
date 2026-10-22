@@ -1,1 +1,1 @@
-{"score": NaN, "mechanism_present": true, "verdict": "Unsure.", "gaps": ["x"]}
+{"score": NaN, "mechanism_present": true, "verdict": "Unsure.", "gaps": ["x"], "missing_required": [], "misconceptions_committed": []}

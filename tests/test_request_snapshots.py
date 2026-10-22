@@ -256,7 +256,8 @@ def _assessment_grade(session, rec):
         _text(json.dumps({"criteria": ["names QK^T"], "must_include": ["softmax"],
                           "strong_signs": [], "weak_signs": [], "source_refs": []})),
         _text(json.dumps({"score": 0.6, "verdict": "partial", "gaps": ["no scaling"],
-                          "mechanism_present": True})),
+                          "mechanism_present": True,
+                          "missing_required": [], "misconceptions_committed": []})),
     ]
     # Rubric generation, then the grade.
     assess_concept(session, concept, "self_explanation",

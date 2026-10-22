@@ -182,6 +182,8 @@ def _grade_response() -> LLMResponse:
                 "verdict": "solid",
                 "gaps": [],
                 "mechanism_present": True,
+                "missing_required": [],
+                "misconceptions_committed": [],
             }
         )
     )
@@ -917,7 +919,8 @@ def test_assess_route_embeds_scheduled_decay_question(vec_session):
             "source_refs": [],
         }
     )
-    grade = json.dumps({"score": 0.8, "verdict": "solid", "gaps": []})
+    grade = json.dumps({"score": 0.8, "verdict": "solid", "gaps": [],
+                        "missing_required": [], "misconceptions_committed": []})
     app = create_app()
     app.dependency_overrides[get_session] = lambda: session
     app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient(

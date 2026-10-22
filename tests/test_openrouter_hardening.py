@@ -331,6 +331,7 @@ def test_claude_before_4_5_has_no_strict_tools(model):
     caps = model_catalog.capabilities(model)
     assert caps.family == "anthropic-legacy"
     assert not caps.strict_tools and not caps.experimental
+    assert caps.structured_output == model_catalog.STRUCTURED_TOOL
     assert caps.anthropic_web_search and caps.thinking_replay
 
 
@@ -338,6 +339,8 @@ def test_claude_before_4_5_has_no_strict_tools(model):
                                    "anthropic/claude-sonnet-4.5", "claude-sonnet-5-5"])
 def test_claude_4_5_and_later_keep_strict_tools(model):
     assert model_catalog.capabilities(model).strict_tools
+    assert (model_catalog.capabilities(model).structured_output
+            == model_catalog.STRUCTURED_STRICT_TOOL)
 
 
 def test_legacy_claude_structured_output_is_not_strict(session, monkeypatch):

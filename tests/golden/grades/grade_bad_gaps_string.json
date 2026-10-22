@@ -2,5 +2,7 @@
   "score": 0.5,
   "mechanism_present": true,
   "verdict": "Partial.",
-  "gaps": "vague on scaling"
+  "gaps": "vague on scaling",
+  "missing_required": [],
+  "misconceptions_committed": []
 }

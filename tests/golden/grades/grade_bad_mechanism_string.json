@@ -2,5 +2,7 @@
   "score": 0.9,
   "mechanism_present": "false",
   "verdict": "Looks right.",
-  "gaps": []
+  "gaps": [],
+  "missing_required": [],
+  "misconceptions_committed": []
 }

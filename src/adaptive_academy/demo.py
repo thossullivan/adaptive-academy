@@ -278,7 +278,7 @@ RUBRIC_TERMS: dict[str, list[str]] = {
     "backprop": ["topological order", "accumulate"],
     "bpe": ["most frequent pair", "merge"],
     "embed": ["lookup", "one-hot"],
-    "attn": ["softmax", "√d_k"],
+    "attn": ["softmax", "scale"],
     "causal": ["mask", "before softmax"],
     "pos": ["permutation", "relative position"],
     "resid": ["gradient path", "normalize"],
@@ -290,7 +290,7 @@ ANCHORS = [
      "For random q and k with unit-variance components, q·k has variance d_k, so logits grow "
      "with dimension and push the softmax into saturation where gradients vanish; dividing by "
      "√d_k restores unit variance.",
-     ["dot-product variance grows with d_k", "softmax saturation", "small gradients"]),
+     ["variance grows with dimension", "softmax saturation", "small gradients"]),
     (1, "bpe", "Why does BPE start from characters (or bytes) and merge frequent pairs instead "
                "of starting from whole words?",
      "Starting from characters guarantees every word can be encoded, and merging frequent "
@@ -392,7 +392,8 @@ PROBES: list[_Probe] = [
     _Probe(_ago(6, 4), "self_explanation", "attn", 0.42,
            "Attention compares each token with every other token and takes a weighted average.",
            "Describes what, not why: no softmax normalization argument and no scaling.",
-           ["omitted required element: √d_k", "no mechanism for the weights summing to 1"],
+           ["no mechanism for the weights summing to 1",
+            "omitted required element: softmax", "omitted required element: scale"],
            item=(2, 0)),
     _Probe(_ago(5, 2), "self_explanation", "pos", 0.58,
            "Without positions attention can't tell word order; sinusoids add a position "
@@ -413,8 +414,8 @@ PROBES: list[_Probe] = [
            "renormalizing.",
            "Struggled productively toward the right idea; not there yet.", baseline=18),
     _Probe(_ago(1, 4), "self_explanation", "attn", 0.66,
-           "Weights are softmax(QKᵀ/√d_k): dividing by √d_k keeps the logits' variance near 1 "
-           "so the softmax doesn't saturate; each row sums to 1.",
+           "Weights are softmax(QKᵀ/√d_k): dividing by √d_k scales the logits' variance back "
+           "to about 1 so the softmax doesn't saturate; each row sums to 1.",
            "Much improved: scaling argument now present.", ["variance derivation is brief"],
            baseline=17),
     _Probe(_ago(0, 20), "recall", "bpe", 0.79,

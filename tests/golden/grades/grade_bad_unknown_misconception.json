@@ -1,0 +1,12 @@
+{
+  "score": 0.5,
+  "mechanism_present": true,
+  "verdict": "Treats attention as memory.",
+  "gaps": [
+    "memory framing"
+  ],
+  "missing_required": [],
+  "misconceptions_committed": [
+    "attention stores the past"
+  ]
+}

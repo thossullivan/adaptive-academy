@@ -4,7 +4,9 @@ from dataclasses import dataclass, field
 from sqlmodel import Session, col, select
 
 from adaptive_academy.engine.grade_gate import checked_completion
-from adaptive_academy.engine.output_checks import GRADE_RUBRIC, CheckContext
+from adaptive_academy.engine.output_checks import (
+    GRADE_RUBRIC, CheckContext, item_key, match_items,
+)
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
@@ -82,17 +84,38 @@ def compute_delta(score: float, baseline_score: float | None) -> float | None:
     return round(score - baseline_score, 4)
 
 
-def apply_rules_checks(response: str, must_include: list[str], weak_signs: list[str]) -> list[str]:
-    """Deterministic anchor checks (§2.3): the LLM grader cannot paper over these."""
-    text = response.lower()
-    gaps: list[str] = []
-    for term in must_include:
-        if term and term.lower() not in text:
-            gaps.append(f"omitted required element: {term}")
-    for sign in weak_signs:
-        if sign and sign.lower() in text:
-            gaps.append(f"contains likely misconception: {sign}")
-    return gaps
+# ── Rubric items: the grader judges, the code enforces ──────────────────────
+# Every must_include item (a source quiz's key points) and weak sign goes to the grader as a
+# REQUIRED ELEMENT / KNOWN MISCONCEPTION (build_grade_prompt). No string matching decides a
+# cap: a word matcher can't judge meaning, and every cap one applied hit correct answers
+# ("regularised", "GD", "step size") or answers naming a misconception to reject it. The
+# grader names the items an answer misses or commits (missing_required /
+# misconceptions_committed, checked against the items sent by output_checks G11-G14), and
+# rubric_gaps / penalize_score turn those into gaps and ceilings.
+
+
+def _items(raw: list[str]) -> list[str]:
+    """Rubric items to send: stripped, blanks dropped, each once (compared like
+    output_checks.item_key)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw or []:
+        if isinstance(item, str) and item.strip() and item_key(item) not in seen:
+            seen.add(item_key(item))
+            out.append(item.strip())
+    return out
+
+
+def rubric_gaps(grade: "GradeDraft", required: list[str],
+                misconceptions: list[str]) -> list[str]:
+    """The enforced gaps for the items the grader named, each as the item was sent:
+    "omitted required element: <item>" (caps at 0.70) and "contains likely misconception:
+    <item>" (caps at 0.50). Entries that name no sent item are dropped (G13/G14 already
+    rejected them)."""
+    missing, _ = match_items(grade.missing_required, required)
+    committed, _ = match_items(grade.misconceptions_committed, misconceptions)
+    return ([f"omitted required element: {m}" for m in missing]
+            + [f"contains likely misconception: {m}" for m in committed])
 
 
 def penalize_score(llm_score: float, rules_gaps: list[str]) -> float:
@@ -124,7 +147,9 @@ class GradeDraft:
     # The grader's self-report of whether a real causal mechanism was demonstrated. Defaults
     # True so an older/absent value never wrongly caps; a false value triggers the 0.50 cap.
     mechanism_present: bool = True
-
+    # The rubric items (as the grader wrote them) the answer misses / commits: rubric_gaps.
+    missing_required: list[str] = field(default_factory=list)
+    misconceptions_committed: list[str] = field(default_factory=list)
 
 
 def _as_float(v, default: float | None) -> float | None:
@@ -154,7 +179,13 @@ def grade_from_dict(d: dict) -> GradeDraft:
         gaps=list(d.get("gaps", []) or []),
         confidence_actual=_as_float(d.get("confidence_actual"), None),
         mechanism_present=bool(d.get("mechanism_present", True)),
+        missing_required=_strings(d.get("missing_required")),
+        misconceptions_committed=_strings(d.get("misconceptions_committed")),
     )
+
+
+def _strings(v) -> list[str]:
+    return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
 
 
 def parse_grade_json(text: str) -> GradeDraft:
@@ -207,10 +238,23 @@ class AssessmentResult:
 
 
 def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
-                       reference: str, response: str) -> tuple[str, str]:
+                       reference: str, response: str, *,
+                       required: list[str] | None = None,
+                       misconceptions: list[str] | None = None) -> tuple[str, str]:
+    """`required`: the REQUIRED ELEMENTS (must_include / source-quiz key points, word and
+    formula alike); `misconceptions`: the KNOWN MISCONCEPTIONS (weak_signs). Both are always
+    listed, "(none)" when empty, so the grader always answers missing_required /
+    misconceptions_committed against exactly these items (GRADE)."""
     lines = [f"CONCEPT: {concept_name}", f"PROBE KIND: {kind}", "", "RUBRIC / ANCHOR:"]
     for c in criteria:
         lines.append(f"- {c}")
+    for heading, items in (("REQUIRED ELEMENTS:", required),
+                           ("KNOWN MISCONCEPTIONS:", misconceptions)):
+        if items:
+            lines.append(heading)
+            lines += [f"- {i}" for i in items]
+        else:
+            lines.append(f"{heading} (none)")
     if reference:
         lines.append(f"REFERENCE ANSWER: {reference}")
     lines += ["", "<<<RESPONSE>>>", escape_markers(response or "(empty)"), "<<<END_RESPONSE>>>"]
@@ -262,6 +306,7 @@ class CheckedGrade:
     response: str
     probe: str
     grade: GradeDraft
+    # The enforced gaps (rubric_gaps): the items the grader named missing or committed.
     rules_gaps: list[str]
     topic_id: int | None
     rubric_id: int | None = None
@@ -323,15 +368,18 @@ def grade_concept(
             concept=concept.name, question=concept.name)
     emit("assess:probe", kind)
 
-    rules_gaps = apply_rules_checks(response, must_include, weak_signs)
+    required, misconceptions = _items(must_include), _items(weak_signs)
     emit("prompt", GRADE.tag)
-    system, user = build_grade_prompt(concept.name, kind, criteria, reference, response)
+    system, user = build_grade_prompt(
+        concept.name, kind, criteria, reference, response,
+        required=required, misconceptions=misconceptions)
     answer = checked_completion(
         session, llm, system=system, user=user, rubric=GRADE_RUBRIC, emit=emit,
-        ctx=CheckContext(rules_gaps=tuple(rules_gaps)))
+        ctx=CheckContext(required=tuple(required), misconceptions=tuple(misconceptions)))
+    grade = grade_from_dict(answer.data)
     return CheckedGrade(
-        concept=concept, kind=kind, response=response, probe=probe,
-        grade=grade_from_dict(answer.data), rules_gaps=rules_gaps, topic_id=topic_id,
+        concept=concept, kind=kind, response=response, probe=probe, grade=grade,
+        rules_gaps=rubric_gaps(grade, required, misconceptions), topic_id=topic_id,
         rubric_id=rubric_id, anchor_id=anchor_ref_id, item_id=item_id,
         confidence_predicted=confidence_predicted, baseline_id=baseline_id, events=events,
         prompt_tag=answer.prompt_tag(GRADE))

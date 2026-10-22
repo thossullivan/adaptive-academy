@@ -5,5 +5,7 @@
   "gaps": [
     "x"
   ],
-  "confidence_actual": 1.5
+  "confidence_actual": 1.5,
+  "missing_required": [],
+  "misconceptions_committed": []
 }

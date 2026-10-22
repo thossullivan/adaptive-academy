@@ -73,7 +73,8 @@ def test_full_roleplay_flow(session):
     pid, mid = _seed_materialized(session)
     brief = {"persona": "VP", "goal": "resist", "situation": "call",
              "hidden_objections": [], "win_conditions": [], "difficulty": "low"}
-    grade = {"score": 0.8, "verdict": "solid", "mechanism_present": True, "gaps": []}
+    grade = {"score": 0.8, "verdict": "solid", "mechanism_present": True, "gaps": [],
+             "missing_required": [], "misconceptions_committed": []}
     outcome = {"result": "demo booked", "summary": "ok"}
     client = _client(session, [LLMResponse(text=json.dumps(brief)),      # director
                                LLMResponse(text="Who is this? [[END]]"),  # persona turn (ends)

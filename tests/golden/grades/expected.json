@@ -74,6 +74,36 @@
     ],
     "warn": []
   },
+  "grade_bad_rubric_fields_missing.json": {
+    "rubric": "grade",
+    "fail": [
+      "G11",
+      "G12"
+    ],
+    "warn": [],
+    "required": [
+      "softmax",
+      "scaling by sqrt(d_k)"
+    ],
+    "misconceptions": [
+      "attention is memory"
+    ]
+  },
+  "grade_bad_rubric_fields_not_lists.json": {
+    "rubric": "grade",
+    "fail": [
+      "G11",
+      "G12"
+    ],
+    "warn": [],
+    "required": [
+      "softmax",
+      "scaling by sqrt(d_k)"
+    ],
+    "misconceptions": [
+      "attention is memory"
+    ]
+  },
   "grade_bad_score_bool.json": {
     "rubric": "grade",
     "fail": [
@@ -139,6 +169,34 @@
     ],
     "warn": []
   },
+  "grade_bad_unknown_misconception.json": {
+    "rubric": "grade",
+    "fail": [
+      "G14"
+    ],
+    "warn": [],
+    "required": [
+      "softmax",
+      "scaling by sqrt(d_k)"
+    ],
+    "misconceptions": [
+      "attention is memory"
+    ]
+  },
+  "grade_bad_unknown_required.json": {
+    "rubric": "grade",
+    "fail": [
+      "G13"
+    ],
+    "warn": [],
+    "required": [
+      "softmax",
+      "scaling by sqrt(d_k)"
+    ],
+    "misconceptions": [
+      "attention is memory"
+    ]
+  },
   "grade_bad_verdict_empty.json": {
     "rubric": "grade",
     "fail": [
@@ -150,6 +208,18 @@
     "rubric": "grade",
     "fail": [],
     "warn": []
+  },
+  "grade_good_names_rubric_items.json": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": [],
+    "required": [
+      "softmax",
+      "scaling by sqrt(d_k)"
+    ],
+    "misconceptions": [
+      "attention is memory"
+    ]
   },
   "grade_good_partial.json": {
     "rubric": "grade",
@@ -166,14 +236,18 @@
     "fail": [],
     "warn": []
   },
-  "grade_warn_above_rules_ceiling.json": {
+  "grade_warn_above_rubric_ceiling.json": {
     "rubric": "grade",
     "fail": [],
     "warn": [
       "G9"
     ],
-    "rules_gaps": [
-      "omitted required element: softmax"
+    "required": [
+      "softmax",
+      "scaling by sqrt(d_k)"
+    ],
+    "misconceptions": [
+      "attention is memory"
     ]
   },
   "grade_warn_cap_breach.json": {

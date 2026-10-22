@@ -5,5 +5,7 @@
   "gaps": [
     "mechanism asserted"
   ],
-  "confidence_actual": 0.25
+  "confidence_actual": 0.25,
+  "missing_required": [],
+  "misconceptions_committed": []
 }

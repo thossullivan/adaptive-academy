@@ -82,7 +82,7 @@ def test_grade_writes_one_assessment_per_concept_and_outcome(session):
     p, m, c = _materialized(session)
     pp = _answering_probe(session, p, m, c)
     grade_json = json.dumps({"score": 0.82, "verdict": "solid", "mechanism_present": True,
-                             "gaps": []})
+                             "gaps": [], "missing_required": [], "misconceptions_committed": []})
     outcome_json = json.dumps({"result": "sharp critique", "summary": "Good QKV account."})
     llm = ScriptedLLMClient([LLMResponse(text=grade_json), LLMResponse(text=outcome_json)])
     out = grade_paper_probe(session, pp, llm=llm)
@@ -99,7 +99,7 @@ def test_regrade_is_idempotent(session):
     p, m, c = _materialized(session)
     pp = _answering_probe(session, p, m, c)
     grade_json = json.dumps({"score": 0.82, "verdict": "solid", "mechanism_present": True,
-                             "gaps": []})
+                             "gaps": [], "missing_required": [], "misconceptions_committed": []})
     outcome_json = json.dumps({"result": "sharp critique", "summary": "s"})
     llm = ScriptedLLMClient([LLMResponse(text=grade_json), LLMResponse(text=outcome_json),
                              LLMResponse(text=grade_json), LLMResponse(text=outcome_json)])

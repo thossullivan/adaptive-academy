@@ -80,7 +80,7 @@ def test_full_flow_paste_answer_submit(session):
     director_json = json.dumps({"questions": [
         {"axis": "method", "prompt": "How does attention work?", "concept_ids": [cid]}]})
     grade_json = json.dumps({"score": 0.8, "verdict": "solid", "mechanism_present": True,
-                             "gaps": []})
+                             "gaps": [], "missing_required": [], "misconceptions_committed": []})
     outcome_json = json.dumps({"result": "sharp", "summary": "s"})
     client = _client(session, [LLMResponse(text=director_json), LLMResponse(text=grade_json),
                                LLMResponse(text=outcome_json)])
@@ -114,7 +114,8 @@ def test_answer_rejected_when_not_answering(session):
     pid, mid, cid = _seed_materialized(session)
     director_json = json.dumps({"questions": [
         {"axis": "method", "prompt": "q", "concept_ids": [cid]}]})
-    grade_json = json.dumps({"score": 0.8, "verdict": "ok", "mechanism_present": True, "gaps": []})
+    grade_json = json.dumps({"score": 0.8, "verdict": "ok", "mechanism_present": True, "gaps": [],
+                             "missing_required": [], "misconceptions_committed": []})
     outcome_json = json.dumps({"result": "r", "summary": "s"})
     client = _client(session, [LLMResponse(text=director_json), LLMResponse(text=grade_json),
                                LLMResponse(text=outcome_json)])
