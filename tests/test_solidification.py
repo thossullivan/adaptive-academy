@@ -43,7 +43,8 @@ class RouterLLM:
                                "weak_signs": [], "source_refs": []})
         elif "skeptical grader" in s:
             text = json.dumps({"score": 0.5, "verdict": "partial recall", "gaps": [],
-                               "confidence_actual": 0.5})
+                               "confidence_actual": 0.5,
+                               "missing_required": [], "misconceptions_committed": []})
         else:
             text = "{}"
         return LLMResponse(text=text, tool_calls=[])

@@ -1,5 +1,7 @@
 {
   "mechanism_present": true,
   "verdict": "Good explanation.",
-  "gaps": []
+  "gaps": [],
+  "missing_required": [],
+  "misconceptions_committed": []
 }

@@ -2,5 +2,7 @@
   "score": 0.9,
   "mechanism_present": true,
   "verdict": "Explains why scaling by sqrt(d) keeps softmax out of saturation.",
-  "gaps": []
+  "gaps": [],
+  "missing_required": [],
+  "misconceptions_committed": []
 }

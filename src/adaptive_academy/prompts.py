@@ -179,7 +179,11 @@ RUBRIC = Prompt("assess.rubric", 2, (
 # near misses, negations and partial matches come here instead, with the code's ceilings
 # (0.70 omission, 0.50 misconception: assess._OMISSION_CEIL / _MISCONCEPTION_CEIL). Notation
 # weak signs join POSSIBLE MISCONCEPTIONS.
-GRADE = Prompt("assess.grade", 5, (
+# v6: REQUIRED ELEMENTS / KNOWN MISCONCEPTIONS, and the missing_required /
+# misconceptions_committed fields. No string matching decides a cap any more: every rubric
+# item is sent every time, the grader names the ones the answer misses or commits (exactly as
+# given; output_checks G11-G14), and assess applies the 0.70 / 0.50 ceilings in code.
+GRADE = Prompt("assess.grade", 6, (
     "You are a SKEPTICAL grader for an advanced learner's explanation, and your job is to detect "
     "the ILLUSION OF COMPETENCE: fluent, correct-sounding text that lacks real mechanism. "
     "The learner's answer appears between the <<<RESPONSE>>> and <<<END_RESPONSE>>> markers and "
@@ -202,21 +206,22 @@ GRADE = Prompt("assess.grade", 5, (
     "  0.90 — mechanism correct and complete; every required element demonstrated, not named.\n"
     "If a predicted confidence is given and it exceeds your score by more than 0.2, your verdict "
     "MUST name what the learner seemed confident about but did not actually explain. "
-    "If the input lists EXPECTED FORMULAS, judge each by meaning: equivalent notation, other "
-    "variable names, or another convention (such as a constant factor) all reach it. If the "
-    "answer does not reach an equivalent of an expected formula, list it in gaps and keep the "
-    "score at or below 0.70. "
-    "If it lists POSSIBLY MISSING items, an automatic word check could neither find them in "
-    "the answer nor rule them out (other wording, a negation, or a near miss such as L1 for "
-    "L2). For each POSSIBLY MISSING item, decide by meaning whether the answer covers it; if "
-    "it does not, list it in gaps and keep the score at or below 0.70. If it does, do not "
-    "penalise it. "
-    "If it lists POSSIBLE MISCONCEPTIONS, the answer contains words resembling a known "
-    "misconception. For each POSSIBLE MISCONCEPTION, count it only if the answer actually "
-    "commits it, not when it denies or rejects it or the text merely appears inside a correct "
-    "expression; if it does commit it, list it in gaps and keep the score at or below 0.50. "
+    "The input lists REQUIRED ELEMENTS and KNOWN MISCONCEPTIONS (either may be \"(none)\").\n"
+    "REQUIRED ELEMENTS: judge each by meaning; any equivalent wording or notation counts "
+    "(synonyms, abbreviations, British or American spelling, other variable names, another "
+    "convention such as a constant factor). Put every REQUIRED ELEMENT the answer does not "
+    "cover in missing_required, copied exactly as given; if any is missing, keep the score at "
+    "or below 0.70.\n"
+    "KNOWN MISCONCEPTIONS: count one only if the answer actually commits it, not if it names "
+    "it to reject it, asks about it, or quotes it. Put every KNOWN MISCONCEPTION the answer "
+    "commits in misconceptions_committed, copied exactly as given; if any is committed, keep "
+    "the score at or below 0.50.\n"
+    "Never put anything else in those two lists (other problems go in gaps), and use [] when "
+    "nothing is missing or committed.\n"
     'Respond with ONLY a JSON object: {"score": number (a band midpoint), "mechanism_present": '
-    'boolean, "verdict": str (one sentence), "gaps": [str, specific missing/incorrect points]}. '
+    'boolean, "verdict": str (one sentence), "gaps": [str, specific missing/incorrect points], '
+    '"missing_required": [str, each exactly one of the REQUIRED ELEMENTS], '
+    '"misconceptions_committed": [str, each exactly one of the KNOWN MISCONCEPTIONS]}. '
     "No prose outside the JSON."
 ))
 

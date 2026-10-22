@@ -43,7 +43,8 @@ def _seed_concept(session):
 def _llm():
     rubric = json.dumps({"criteria": ["c"], "must_include": ["softmax"],
                          "strong_signs": [], "weak_signs": [], "source_refs": []})
-    grade = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"]})
+    grade = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"],
+                        "missing_required": ["softmax"], "misconceptions_committed": []})
     return ScriptedLLMClient([LLMResponse(text=rubric), LLMResponse(text=grade)])
 
 
@@ -85,7 +86,8 @@ def test_assessments_expose_the_grading_prompt_tag(session):
     # Read-only: a client-sent tag is not an input of the assess route. The rubric is cached
     # now, so this request makes only the grade call (a rubric answer in its place would fail
     # the grade checks and be regenerated, which changes the tag).
-    grade_only = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"]})
+    grade_only = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["vague"],
+                             "missing_required": [], "misconceptions_committed": []})
     app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient(
         [LLMResponse(text=grade_only)])
     r = client.post(f"/api/concepts/{cid}/assess",
@@ -98,7 +100,8 @@ def test_artifact_review_probe_is_the_shipped_signal_not_a_grade(session):
     # An artifact review lights "shipped"; if it also wrote the estimate, one high-scoring
     # review would be both the grade and its own corroboration ("solid" from one action).
     app.dependency_overrides[get_session] = lambda: session
-    grade = json.dumps({"score": 0.9, "verdict": "good", "gaps": [], "mechanism_present": True})
+    grade = json.dumps({"score": 0.9, "verdict": "good", "gaps": [], "mechanism_present": True,
+                        "missing_required": [], "misconceptions_committed": []})
     app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient([LLMResponse(text=grade)])
     cid = _seed_concept(session)
     client = TestClient(app)

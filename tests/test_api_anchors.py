@@ -51,7 +51,8 @@ def test_generate_list_and_has_anchor(session):
     assert sm["has_anchor"] is True
 
     app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient(
-        [LLMResponse(text=json.dumps({"score": 0.8, "verdict": "ok", "gaps": []}))])
+        [LLMResponse(text=json.dumps({"score": 0.8, "verdict": "ok", "gaps": [],
+                                      "missing_required": [], "misconceptions_committed": []}))])
     a = client.post(f"/api/concepts/{cid}/assess",
                     json={"kind": "source_quiz", "response": "numerical stability matters"})
     assert a.status_code == 200

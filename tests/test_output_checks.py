@@ -32,7 +32,8 @@ def test_every_golden_file_is_listed_and_every_listed_file_exists():
 def test_golden_grade_fails_on_exactly_the_expected_rules(name):
     spec = EXPECTED[name]
     rubric = oc.RUBRICS[spec["rubric"]]
-    ctx = oc.CheckContext(rules_gaps=tuple(spec.get("rules_gaps", [])))
+    ctx = oc.CheckContext(required=tuple(spec.get("required", [])),
+                          misconceptions=tuple(spec.get("misconceptions", [])))
     data, report = oc.check_output(rubric, (GOLDEN / name).read_text(), ctx)
     assert list(report.failed_ids) == spec["fail"], report
     assert list(report.warned_ids) == spec["warn"], report
@@ -53,8 +54,10 @@ def test_golden_set_covers_every_rule_and_rubric():
 # ── Rule tables ──────────────────────────────────────────────────────────────
 
 _CTX = oc.CheckContext()
-_OMIT = oc.CheckContext(rules_gaps=("omitted required element: softmax",))
-_MISC = oc.CheckContext(rules_gaps=("contains likely misconception: attention is memory",))
+_ITEMS = oc.CheckContext(required=("softmax", "Xᵀ(Xθ − y)"),
+                         misconceptions=("attention is memory",))
+_OMIT = {"missing_required": ["softmax"]}
+_MISC = {"misconceptions_committed": ["attention is memory"]}
 
 RULE_TABLE = [
     # (rule, answer, ctx, fires)
@@ -109,15 +112,41 @@ RULE_TABLE = [
     (oc.G8, {"score": 0.4}, _CTX, True),
     (oc.G8, {"score": 7}, _CTX, False),  # G1's job
     (oc.G9, {"score": 0.9}, _CTX, False),
-    (oc.G9, {"score": 0.7}, _OMIT, False),
-    (oc.G9, {"score": 0.9}, _OMIT, True),
-    (oc.G9, {"score": 0.5}, _MISC, False),
-    (oc.G9, {"score": 0.7}, _MISC, True),
+    (oc.G9, {"score": 0.9, "missing_required": []}, _CTX, False),
+    (oc.G9, {"score": 0.7, **_OMIT}, _ITEMS, False),
+    (oc.G9, {"score": 0.9, **_OMIT}, _ITEMS, True),
+    (oc.G9, {"score": 0.5, **_MISC}, _ITEMS, False),
+    (oc.G9, {"score": 0.7, **_MISC}, _ITEMS, True),
+    (oc.G9, {"score": 0.7, **_OMIT, **_MISC}, _ITEMS, True),
+    (oc.G9, {"score": 0.9, "missing_required": "softmax"}, _ITEMS, False),  # G11's job
     (oc.G10, {"score": 0.9, "gaps": []}, _CTX, False),
     (oc.G10, {"score": 0.5, "gaps": ["x"]}, _CTX, False),
+    (oc.G10, {"score": 0.5, "gaps": [], **_OMIT}, _ITEMS, False),
+    (oc.G10, {"score": 0.5, "gaps": [], **_MISC}, _ITEMS, False),
     (oc.G10, {"score": 0.5, "gaps": []}, _CTX, True),
     (oc.G10, {"score": 0.5}, _CTX, True),
     (oc.G10, {"score": 0.5, "gaps": [" "]}, _CTX, True),
+    (oc.G11, {"missing_required": []}, _CTX, False),
+    (oc.G11, {"missing_required": ["softmax"]}, _ITEMS, False),
+    (oc.G11, {}, _CTX, True),
+    (oc.G11, {"missing_required": None}, _CTX, True),
+    (oc.G11, {"missing_required": "softmax"}, _ITEMS, True),
+    (oc.G11, {"missing_required": ["softmax", 2]}, _ITEMS, True),
+    (oc.G12, {"misconceptions_committed": []}, _CTX, False),
+    (oc.G12, {}, _CTX, True),
+    (oc.G12, {"misconceptions_committed": {"a": 1}}, _ITEMS, True),
+    (oc.G13, {"missing_required": []}, _CTX, False),
+    (oc.G13, {}, _CTX, False),  # G11's job
+    (oc.G13, {"missing_required": ["softmax"]}, _ITEMS, False),
+    (oc.G13, {"missing_required": ["  SoftMax  "]}, _ITEMS, False),  # trimmed, casefolded
+    (oc.G13, {"missing_required": ["xᵀ(xθ − y)"]}, _ITEMS, False),
+    (oc.G13, {"missing_required": ["the softmax"]}, _ITEMS, True),  # not as given
+    (oc.G13, {"missing_required": ["attention is memory"]}, _ITEMS, True),  # wrong list
+    (oc.G13, {"missing_required": ["softmax"]}, _CTX, True),  # nothing was sent
+    (oc.G13, {"missing_required": [""]}, _ITEMS, True),
+    (oc.G14, {"misconceptions_committed": ["Attention is memory"]}, _ITEMS, False),
+    (oc.G14, {"misconceptions_committed": ["softmax"]}, _ITEMS, True),
+    (oc.G14, {"misconceptions_committed": ["attention = memory"]}, _ITEMS, True),
     (oc.F1, {"feedback": "clear"}, _CTX, False),
     (oc.F1, {}, _CTX, True),
     (oc.F1, {"feedback": ""}, _CTX, True),
@@ -182,8 +211,26 @@ def test_ceilings_match_assess():
     assert oc.OMISSION_CEIL == assess._OMISSION_CEIL
     assert oc.MISCONCEPTION_CEIL == assess._MISCONCEPTION_CEIL
     assert oc.NO_MECHANISM_CEIL == assess._NO_MECHANISM_CEIL
-    gaps = assess.apply_rules_checks("no terms here", ["softmax"], ["here"])
-    assert oc.rules_ceiling(gaps) == assess.penalize_score(1.0, gaps)
+    grade = assess.GradeDraft(missing_required=["softmax"], misconceptions_committed=["here"])
+    gaps = assess.rubric_gaps(grade, ["softmax"], ["here"])
+    assert oc.rules_ceiling(gaps) == assess.penalize_score(1.0, gaps) == oc.MISCONCEPTION_CEIL
+    gaps = assess.rubric_gaps(assess.GradeDraft(missing_required=["softmax"]), ["softmax"], [])
+    assert oc.rules_ceiling(gaps) == assess.penalize_score(1.0, gaps) == oc.OMISSION_CEIL
+
+
+@pytest.mark.parametrize("entries, matched, unknown", [
+    ([], [], []),
+    (["softmax", " SOFTMAX "], ["softmax"], []),
+    (["Xᵀ(Xθ − y)", "the softmax"], ["Xᵀ(Xθ − y)"], ["the softmax"]),
+])
+def test_match_items_maps_entries_to_items_as_given(entries, matched, unknown):
+    assert oc.match_items(entries, ("softmax", "Xᵀ(Xθ − y)")) == (matched, unknown)
+
+
+def test_unknown_item_message_names_the_entry_and_the_items_sent():
+    message = oc.G13.check({"missing_required": ["momentum"]}, _ITEMS)
+    assert '"momentum"' in message and "softmax; Xᵀ(Xθ − y)" in message
+    assert "REQUIRED ELEMENTS" in message
 
 
 # ── Decision + correction ────────────────────────────────────────────────────

@@ -4,5 +4,7 @@
   "verdict": "Fluent but no causal chain.",
   "gaps": [
     "no mechanism"
-  ]
+  ],
+  "missing_required": [],
+  "misconceptions_committed": []
 }

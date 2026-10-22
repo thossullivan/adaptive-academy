@@ -36,14 +36,25 @@ Rules, with the reason each exists:
             not blocked.
   G8  WARN  "score" is a band midpoint (0.1, 0.3, 0.5, 0.7, 0.9). GRADE and ASSESS_ARTIFACT
             say "use the band MIDPOINT, do not invent other floats".
-  G9  WARN  "score" does not exceed the ceiling the deterministic anchor checks imply
-            (an omitted must_include term caps at 0.70, a present misconception at 0.50;
-            assess.penalize_score). The ceiling is applied in code anyway, and the literal
-            substring check can miss a paraphrase the grader rightly credited, so this
-            records the disagreement without blocking it.
-  G10 WARN  A score below the top band (< 0.9) names at least one gap. Every band below
-            0.90 is defined by something missing; a low grade with no gaps tells the
-            learner nothing to fix.
+  G9  WARN  "score" does not exceed the ceiling the grader's own rubric fields imply (a
+            missing_required entry caps at 0.70, a misconceptions_committed entry at 0.50;
+            assess.penalize_score). assess_concept applies the ceiling in code anyway, so
+            this records the grader contradicting itself without blocking it.
+  G10 WARN  A score below the top band (< 0.9) names at least one gap (in gaps,
+            missing_required or misconceptions_committed). Every band below 0.90 is defined
+            by something missing; a low grade with no gaps tells the learner nothing to fix.
+  G11 FAIL  "missing_required" is present and a list of strings. GRADE (v6) requires it:
+            it is how the grader reports a REQUIRED ELEMENT the answer does not cover, and
+            the code caps on it. Absent would read as "nothing missing", an uncapped grade.
+  G12 FAIL  "misconceptions_committed" is present and a list of strings: the same, for a
+            KNOWN MISCONCEPTION the answer commits (the 0.50 cap).
+  G13 FAIL  Every missing_required entry is one of the REQUIRED ELEMENTS sent (compared
+            trimmed and casefolded; CheckContext.required). The entry becomes the recorded
+            gap "omitted required element: <item>"; an invented or paraphrased one would
+            put words the rubric never had into the learner's record, so the regeneration
+            names it.
+  G14 FAIL  Every misconceptions_committed entry is one of the KNOWN MISCONCEPTIONS sent
+            (CheckContext.misconceptions), for the same reason.
   F1  FAIL  "feedback" is a non-empty string. Teach-It and Productive Failure store it as
             Assessment.verdict (the learner's reason for the score).
   T1  FAIL  "strengths", when present, is a list of strings (returned by /teach; a string
@@ -75,7 +86,7 @@ from adaptive_academy.prompts import GRADE_CORRECTION
 FAIL = "FAIL"
 WARN = "WARN"
 
-# Score ceilings from the deterministic anchor checks (kept equal to assess._OMISSION_CEIL /
+# Score ceilings assess_concept enforces (kept equal to assess._OMISSION_CEIL /
 # _MISCONCEPTION_CEIL / _NO_MECHANISM_CEIL; a test pins them together).
 OMISSION_CEIL = 0.70
 MISCONCEPTION_CEIL = 0.50
@@ -93,8 +104,10 @@ _EPS = 1e-9
 class CheckContext:
     """Facts the checks need that are not in the answer itself."""
 
-    # The deterministic anchor-check gaps for this response (assess.apply_rules_checks).
-    rules_gaps: tuple[str, ...] = ()
+    # The rubric items sent to the grader (assess.build_grade_prompt): REQUIRED ELEMENTS
+    # (must_include / source-quiz key points) and KNOWN MISCONCEPTIONS (weak_signs).
+    required: tuple[str, ...] = ()
+    misconceptions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -225,8 +238,30 @@ def _on_band(score: float, bands: tuple[float, ...]) -> bool:
     return any(abs(score - b) < 1e-6 for b in bands)
 
 
+def item_key(item: str) -> str:
+    """How a named rubric item is compared with the items sent: trimmed, inner whitespace
+    collapsed, casefolded."""
+    return " ".join(item.split()).casefold()
+
+
+def match_items(entries: list[str],
+                items: tuple[str, ...] | list[str]) -> tuple[list[str], list[str]]:
+    """The sent items the grader's entries name (each once, as given, in entry order), and
+    the entries that name none of them."""
+    by_key = {item_key(i): i for i in reversed(list(items))}  # first spelling wins
+    found: list[str] = []
+    unknown: list[str] = []
+    for entry in entries:
+        item = by_key.get(item_key(entry))
+        if item is None:
+            unknown.append(entry)
+        elif item not in found:
+            found.append(item)
+    return found, unknown
+
+
 def rules_ceiling(rules_gaps: tuple[str, ...] | list[str]) -> float:
-    """The highest score the deterministic anchor-check gaps allow (assess.penalize_score)."""
+    """The highest score the enforced rubric gaps allow (assess.penalize_score)."""
     ceiling = 1.0
     if any(g.startswith(_OMISSION_PREFIX) for g in rules_gaps):
         ceiling = min(ceiling, OMISSION_CEIL)
@@ -289,23 +324,58 @@ def _band_check(bands: tuple[float, ...]):
     return check
 
 
-def _g9(d, ctx: CheckContext):
+_MISSING = "missing_required"
+_COMMITTED = "misconceptions_committed"
+
+
+def _named(d: dict[str, Any], key: str) -> list[str]:
+    v = d.get(key)
+    return [x for x in v if isinstance(x, str)] if isinstance(v, list) else []
+
+
+def _g9(d, _ctx):
     score = _valid_score(d)
-    ceiling = rules_ceiling(ctx.rules_gaps)
+    ceiling = 1.0
+    if _named(d, _MISSING):
+        ceiling = min(ceiling, OMISSION_CEIL)
+    if _named(d, _COMMITTED):
+        ceiling = min(ceiling, MISCONCEPTION_CEIL)
     if score is not None and score > ceiling + _EPS:
-        return (f"score {score} is above the {ceiling} ceiling the anchor checks set "
-                f"({len(ctx.rules_gaps)} hard gap(s))")
+        return (f"score {score} is above the {ceiling} ceiling its own {_MISSING} / "
+                f"{_COMMITTED} imply")
     return None
 
 
 def _g10(d, _ctx):
     score = _valid_score(d)
     gaps = d.get("gaps")
-    no_gaps = not gaps or (isinstance(gaps, list) and not any(
-        isinstance(g, str) and g.strip() for g in gaps))
-    if score is not None and score < _TOP_BAND - _EPS and no_gaps:
+    if gaps and not isinstance(gaps, list):
+        return None  # a malformed gaps value is G3's job
+    named = [g for key in ("gaps", _MISSING, _COMMITTED) for g in _named(d, key) if g.strip()]
+    if score is not None and score < _TOP_BAND - _EPS and not named:
         return f"score {score} is below the top band but no gaps are named"
     return None
+
+
+def _required_string_list(key: str):
+    def check(d, _ctx):
+        if key not in d:
+            return f"{key} is missing (use [] when there is nothing to list)"
+        if d[key] is None:
+            return f"{key} is null, not a list of strings"
+        return _string_list(d, key)
+    return check
+
+
+def _only_sent_items(key: str, heading: str, sent: Callable[[CheckContext], tuple[str, ...]]):
+    def check(d, ctx: CheckContext):
+        _, unknown = match_items(_named(d, key), sent(ctx))
+        if not unknown:
+            return None
+        allowed = "; ".join(sent(ctx)) or "none were listed"
+        return (f"{key} names {json.dumps(unknown, ensure_ascii=False)}, not one of the "
+                f"{heading} as given ({allowed})")
+    return check
 
 
 def _f1(d, _ctx):
@@ -337,8 +407,16 @@ G5 = Rule("G5", FAIL, "mechanism_present is a boolean", _g5)
 G6 = Rule("G6", WARN, "mechanism_present is present", _g6)
 G7 = Rule("G7", WARN, "no mechanism means score <= 0.50", _g7)
 G8 = Rule("G8", WARN, "score is a grade band midpoint", _band_check(GRADE_BANDS))
-G9 = Rule("G9", WARN, "score respects the anchor-check ceiling", _g9)
+G9 = Rule("G9", WARN, "score respects the ceiling its rubric fields imply", _g9)
 G10 = Rule("G10", WARN, "a below-top-band score names a gap", _g10)
+G11 = Rule("G11", FAIL, "missing_required is a list of strings",
+           _required_string_list(_MISSING))
+G12 = Rule("G12", FAIL, "misconceptions_committed is a list of strings",
+           _required_string_list(_COMMITTED))
+G13 = Rule("G13", FAIL, "missing_required names only REQUIRED ELEMENTS sent",
+           _only_sent_items(_MISSING, "REQUIRED ELEMENTS", lambda ctx: ctx.required))
+G14 = Rule("G14", FAIL, "misconceptions_committed names only KNOWN MISCONCEPTIONS sent",
+           _only_sent_items(_COMMITTED, "KNOWN MISCONCEPTIONS", lambda ctx: ctx.misconceptions))
 F1 = Rule("F1", FAIL, "feedback is a non-empty string", _f1)
 T1 = Rule("T1", FAIL, "strengths is a list of strings", _t1)
 P1 = Rule("P1", FAIL, "canonical is a non-empty string", _p1)
@@ -347,8 +425,10 @@ O1 = Rule("O1", FAIL, "result is a non-empty string", _o1)
 O2 = Rule("O2", FAIL, "summary is a non-empty string", _o2)
 
 # assess.grade (assess_concept, so also roleplay / paper-probe / decay per-concept grades)
-GRADE_RUBRIC = Rubric("grade", (J1, G1, G2, G3, G4, G5, G6, G7, G8, G9, G10))
-# assess.artifact: same answer shape; no anchor checks run on artifacts, so G9 never fires.
+GRADE_RUBRIC = Rubric(
+    "grade", (J1, G1, G2, G3, G4, G5, G6, G7, G8, G9, G10, G11, G12, G13, G14))
+# assess.artifact: same core answer shape, but ASSESS_ARTIFACT sends no rubric items and asks
+# for no rubric fields, so G9 and G11-G14 don't apply.
 ARTIFACT_RUBRIC = Rubric("artifact", (J1, G1, G2, G3, G4, G5, G6, G7, G8, G10))
 TEACH_RUBRIC = Rubric("teach", (J1, G1, F1, T1, G3))
 CONSOLIDATE_RUBRIC = Rubric("consolidate", (J1, G1, F1, P1, P2))

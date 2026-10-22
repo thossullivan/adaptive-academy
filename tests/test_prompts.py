@@ -14,44 +14,22 @@ def test_prompt_is_a_str_with_metadata():
 
 def test_registry_prompts_have_tags():
     # v2 injection clause, v3 bands + mechanism cap, v4 expected formulas judged by meaning,
-    # v5 possibly-missing items and possible misconceptions judged by meaning
-    assert GRADE.tag == "assess.grade@v5"
+    # v5 possibly-missing items and possible misconceptions judged by meaning, v6 every
+    # rubric item judged by the grader (missing_required / misconceptions_committed)
+    assert GRADE.tag == "assess.grade@v6"
     assert STORY.tag == "story.compose@v1"
     # The skeptical-grader phrasing the assessor relies on is preserved.
     assert "SKEPTICAL grader" in GRADE
 
 
-def test_rubric_prompt_asks_for_plain_word_must_include():
-    import re
+def test_rubric_and_anchor_prompts_are_unchanged_by_the_grader_contract():
+    # must_include / key_points no longer feed a word matcher (GRADE v6 sends them to the
+    # grader as REQUIRED ELEMENTS), so their plain-word guidance is harmless, not load-bearing.
+    from adaptive_academy.prompts import ANCHOR, RUBRIC
 
-    from adaptive_academy.engine.assess import is_formula_like
-    from adaptive_academy.prompts import RUBRIC
-
-    # v2: must_include is matched against the learner's words, so it asks for key ideas in
-    # plain words, never formulas (a formula item can't be a hard check; assess.py).
     assert RUBRIC.tag == "assess.rubric@v2"
-    assert "QK^T" not in RUBRIC
-    must_include_spec = RUBRIC.split('"must_include"', 1)[1].split('"strong_signs"', 1)[0]
-    examples = re.findall(r'"([^"]+)"', must_include_spec)
-    assert len(examples) >= 3
-    assert not any(is_formula_like(e) for e in examples), examples
-
-
-def test_anchor_prompt_asks_for_plain_word_key_points():
-    import re
-
-    from adaptive_academy.engine.assess import is_formula_like
-    from adaptive_academy.prompts import ANCHOR
-
-    # v3: key_points are matched against the learner's words like a rubric's must_include
-    # (source_quiz), so they are key ideas in plain words; formulas go in reference_answer.
     assert ANCHOR.tag == "research.anchor@v3"
-    assert "literal" not in ANCHOR.lower()
     assert "reference_answer" in ANCHOR and "equivalent notation" in ANCHOR
-    key_points_spec = ANCHOR.split("key_points:", 1)[1].split("key_points are", 1)[0]
-    examples = re.findall(r'"([^"]+)"', key_points_spec)
-    assert len(examples) >= 3
-    assert not any(is_formula_like(e) for e in examples), examples
 
 
 def test_every_registry_prompt_is_named_and_versioned():
@@ -68,45 +46,25 @@ def test_untrusted_input_prompts_carry_injection_clause():
         assert "UNTRUSTED" in p, p.tag
 
 
-def test_grade_prompt_says_what_a_missing_expected_formula_costs():
-    # The rules checks leave formula-like items to the grader (assess.check_anchor_terms), so
-    # the grader must be told both how to judge them and what a missing one costs.
-    assert "EXPECTED FORMULAS" in GRADE
-    assert ("If the answer does not reach an equivalent of an expected formula, list it in "
-            "gaps and keep the score at or below 0.70.") in " ".join(GRADE.split())
-
-
-def test_grade_prompt_says_how_to_judge_the_uncertain_rules_notes():
-    # The rules checks are hard only on confident absence; everything uncertain reaches the
-    # grader as POSSIBLY MISSING / POSSIBLE MISCONCEPTIONS, with the same ceilings the code
-    # applies to hard gaps (assess._OMISSION_CEIL, assess._MISCONCEPTION_CEIL).
+def test_grade_prompt_states_the_rubric_item_contract():
+    # Every rubric item is sent (assess.build_grade_prompt); the grader names the missed and
+    # committed ones exactly as given, and is told the ceilings the code then enforces
+    # (assess._OMISSION_CEIL, assess._MISCONCEPTION_CEIL).
     from adaptive_academy.engine import assess
 
     text = " ".join(GRADE.split())
-    assert GRADE.version >= 5
-    assert "POSSIBLY MISSING" in text and "POSSIBLE MISCONCEPTIONS" in text
-    assert ("For each POSSIBLY MISSING item, decide by meaning whether the answer covers it; "
-            f"if it does not, list it in gaps and keep the score at or below "
+    assert "REQUIRED ELEMENTS: judge each by meaning; any equivalent wording or notation counts" \
+        in text
+    assert ("Put every REQUIRED ELEMENT the answer does not cover in missing_required, copied "
+            "exactly as given; if any is missing, keep the score at or below "
             f"{assess._OMISSION_CEIL:.2f}.") in text
-    assert ("For each POSSIBLE MISCONCEPTION, count it only if the answer actually commits it"
-            in text)
-    assert (f"list it in gaps and keep the score at or below {assess._MISCONCEPTION_CEIL:.2f}"
-            in text)
-
-
-def test_grade_builder_lists_each_kind_of_rules_note():
-    from adaptive_academy.engine.assess import build_grade_prompt
-
-    _, user = build_grade_prompt(
-        "ridge", "self_explanation", ["c"], "", "L1 shrinks weights",
-        formulas=["||w||^2"], possibly_missing=["L2 regularization"],
-        possible_misconceptions=["always converge"])
-    assert "EXPECTED FORMULAS:\n- ||w||^2" in user
-    assert "POSSIBLY MISSING:\n- L2 regularization" in user
-    assert "POSSIBLE MISCONCEPTIONS:\n- always converge" in user
-    assert user.index("POSSIBLE MISCONCEPTIONS") < user.index("<<<RESPONSE>>>")
-    _, bare = build_grade_prompt("ridge", "self_explanation", ["c"], "", "x")
-    assert "POSSIBLY MISSING" not in bare and "POSSIBLE MISCONCEPTIONS" not in bare
+    assert ("KNOWN MISCONCEPTIONS: count one only if the answer actually commits it, not if it "
+            "names it to reject it, asks about it, or quotes it.") in text
+    assert ("misconceptions_committed, copied exactly as given; if any is committed, keep the "
+            f"score at or below {assess._MISCONCEPTION_CEIL:.2f}.") in text
+    assert '"missing_required": [str' in text and '"misconceptions_committed": [str' in text
+    for old in ("EXPECTED FORMULAS", "POSSIBLY MISSING", "POSSIBLE MISCONCEPTION"):
+        assert old not in text
 
 
 def test_grade_builder_delimits_the_learner_response():

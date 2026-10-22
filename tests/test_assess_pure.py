@@ -1,6 +1,6 @@
 # tests/test_assess_pure.py
 from adaptive_academy.engine.assess import (
-    apply_rules_checks, compute_delta, level_from_score, penalize_score,
+    GradeDraft, compute_delta, level_from_score, penalize_score, rubric_gaps,
 )
 
 
@@ -18,15 +18,16 @@ def test_compute_delta():
     assert compute_delta(0.8, None) is None
 
 
-def test_apply_rules_checks_flags_omissions_and_misconceptions():
-    gaps = apply_rules_checks(
-        response="attention uses softmax over scores; it just picks the max",
-        must_include=["softmax", "QK^T", "scale by sqrt(d)", "weighted sum of values"],
-        weak_signs=["it just picks the max"])
-    assert gaps == ["omitted required element: weighted sum of values",
+def test_rubric_gaps_name_the_items_as_sent():
+    # The grader names items (any case/spacing; output_checks G13/G14 reject unknown ones);
+    # the enforced gaps carry each item exactly as it was sent, once.
+    grade = GradeDraft(missing_required=[" Softmax ", "softmax", "QK^T"],
+                       misconceptions_committed=["it just picks the MAX"])
+    gaps = rubric_gaps(grade, ["softmax", "QK^T", "weighted sum of values"],
+                       ["it just picks the max"])
+    assert gaps == ["omitted required element: softmax", "omitted required element: QK^T",
                     "contains likely misconception: it just picks the max"]
-    # softmax is present; QK^T and "scale by sqrt(d)" are formula-like, so a literal miss is
-    # left to the grader (tests/test_assess_rules_checks.py), not a hard gap.
+    assert rubric_gaps(GradeDraft(), ["softmax"], ["x"]) == []
 
 
 def test_penalize_score_applies_band_ceilings():

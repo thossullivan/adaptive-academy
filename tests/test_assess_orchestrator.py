@@ -30,11 +30,13 @@ def _concept(session, level="high"):
     return topic, concept
 
 
-def _llm(rubric_must, grade_score, gaps=None, mechanism_present=None, weak_signs=()):
+def _llm(rubric_must, grade_score, gaps=None, mechanism_present=None, weak_signs=(),
+         missing=(), committed=()):
     rubric = json.dumps({"criteria": ["c"], "must_include": rubric_must,
                          "strong_signs": [], "weak_signs": list(weak_signs),
                          "source_refs": []})
-    grade_d = {"score": grade_score, "verdict": "v", "gaps": gaps or []}
+    grade_d = {"score": grade_score, "verdict": "v", "gaps": gaps or [],
+               "missing_required": list(missing), "misconceptions_committed": list(committed)}
     if mechanism_present is not None:
         grade_d["mechanism_present"] = mechanism_present
     grade = json.dumps(grade_d)
@@ -44,8 +46,9 @@ def _llm(rubric_must, grade_score, gaps=None, mechanism_present=None, weak_signs
 def test_weak_self_explanation_lowers_estimate_and_traces(session: Session):
     topic, concept = _concept(session, level="high")
     # The grader scores the no-mechanism answer low (band 0.30); rubric requires
-    # "softmax" + "QK^T", which the learner omits -> rules gaps recorded too.
-    llm = _llm(["softmax", "QK^T"], grade_score=0.3, gaps=["vague"])
+    # "softmax" + "QK^T", which the grader names missing -> enforced gaps recorded too.
+    llm = _llm(["softmax", "QK^T"], grade_score=0.3, gaps=["vague"],
+               missing=["softmax", "QK^T"])
     result = assess_concept(session, concept, "self_explanation",
                             "attention is about focusing", llm=llm)
     assert isinstance(result, AssessmentResult)
@@ -116,7 +119,8 @@ def test_assessment_records_the_grading_prompt_tag(session: Session):
 
 def test_artifact_review_through_assess_concept_records_the_grade_tag(session: Session):
     _, concept = _concept(session)
-    grade = json.dumps({"score": 0.9, "verdict": "v", "gaps": [], "mechanism_present": True})
+    grade = json.dumps({"score": 0.9, "verdict": "v", "gaps": [], "mechanism_present": True,
+                        "missing_required": [], "misconceptions_committed": []})
     result = assess_concept(session, concept, "artifact_review", "my repo",
                             llm=ScriptedLLMClient([LLMResponse(text=grade)]))
     # assess_concept grades every kind with GRADE (the ship review's ASSESS_ARTIFACT is a
@@ -136,7 +140,7 @@ def test_assessment_written_without_a_model_has_no_prompt_tag(session: Session):
 def test_formula_must_include_in_other_notation_is_not_capped(session: Session):
     # The live "Gradient of the cost" case: a cached rubric whose must_include items are Unicode
     # formulas, and a correct ASCII answer with other variable names and the MSE convention.
-    # Formula items are left to the grader (named in its prompt), not hard gaps that cap 0.70.
+    # Every item goes to the grader as a REQUIRED ELEMENT; it names none missing, so no cap.
     _, concept = _concept(session)
     formulas = ["Xᵀ(Xθ − y)", "(1/m)Xᵀ(Xθ − y)", "residual r = Xθ − y", "∇J(θ)", "½‖Xθ − y‖²"]
     llm = _llm(formulas, grade_score=0.9, mechanism_present=True)
@@ -146,60 +150,48 @@ def test_formula_must_include_in_other_notation_is_not_capped(session: Session):
     assert a.score == 0.9
     assert not any(g.startswith("omitted required element") for g in a.gaps)
     grade_user = llm.calls[1]["messages"][0]["content"]
-    assert "EXPECTED FORMULAS" in grade_user
-    assert all(f in grade_user for f in formulas)
-    soft = session.exec(select(AgentEvent).where(AgentEvent.kind == "assess:rules-soft")).one()
-    assert soft.detail.startswith("5 item(s) left to the grader")
+    required = grade_user.split("REQUIRED ELEMENTS:")[1].split("KNOWN MISCONCEPTIONS")[0]
+    assert all(f"- {f}" in required for f in formulas)
     assert session.exec(select(AgentEvent).where(AgentEvent.kind == "assess:rules")).first() \
         is None
 
 
-def test_word_must_include_still_caps_when_missing(session: Session):
+def test_generated_rubric_items_reach_the_grader_and_its_verdict_caps(session: Session):
+    # The rubric is generated on first use (RUBRIC), then its must_include and weak_signs go
+    # to the grader; what the grader names missing / committed is enforced in code.
     _, concept = _concept(session)
-    llm = _llm(["chain rule", "Xᵀ(Xθ − y)"], grade_score=0.9, mechanism_present=True)
+    llm = _llm(["chain rule", "Xᵀ(Xθ − y)"], grade_score=0.9, mechanism_present=True,
+               weak_signs=["attention is memory"], missing=["chain rule"])
     assess_concept(session, concept, "self_explanation",
                    "For least squares the gradient is (2/n) X^T (Xw - y)", llm=llm)
     a = session.exec(select(Assessment)).one()
     assert a.score == 0.7
-    assert "omitted required element: chain rule" in a.gaps
-    assert not any("Xᵀ" in g for g in a.gaps)
-
-
-def test_uncertain_word_must_include_goes_to_the_grader_uncapped(session: Session):
-    # "regularization" is there, "L2" is not: a near miss the word check can't settle, so the
-    # grader is asked (POSSIBLY MISSING) and the code doesn't cap the score.
-    _, concept = _concept(session)
-    llm = _llm(["L2 regularization", "residual"], grade_score=0.9, mechanism_present=True)
-    assess_concept(session, concept, "self_explanation",
-                   "L1 regularization shrinks weights toward zero", llm=llm)
-    a = session.exec(select(Assessment)).one()
-    assert a.score == 0.7  # "residual" is confidently absent: a hard gap
-    assert a.gaps == ["omitted required element: residual"]
+    assert a.gaps == ["omitted required element: chain rule"]
     grade_user = llm.calls[1]["messages"][0]["content"]
-    assert "POSSIBLY MISSING:\n- L2 regularization" in grade_user
-    assert "residual" not in grade_user.split("<<<RESPONSE>>>")[0].split("POSSIBLY MISSING")[1]
-    soft = session.exec(select(AgentEvent).where(AgentEvent.kind == "assess:rules-soft")).one()
-    assert soft.detail == "1 item(s) left to the grader: L2 regularization"
+    assert "REQUIRED ELEMENTS:\n- chain rule\n- Xᵀ(Xθ − y)" in grade_user
+    assert "KNOWN MISCONCEPTIONS:\n- attention is memory" in grade_user
+    rules = session.exec(select(AgentEvent).where(AgentEvent.kind == "assess:rules")).one()
+    assert rules.detail == "1 hard gap(s)"
 
 
-def test_negated_weak_sign_goes_to_the_grader_uncapped(session: Session):
+def test_committed_misconception_caps_at_050(session: Session):
     _, concept = _concept(session)
     llm = _llm(["converge"], grade_score=0.9, mechanism_present=True,
-               weak_signs=["always converge"])
-    assess_concept(session, concept, "self_explanation",
-                   "SGD doesn't always converge with a fixed step", llm=llm)
-    a = session.exec(select(Assessment)).one()
-    assert a.score == 0.9 and a.gaps == []
-    grade_user = llm.calls[1]["messages"][0]["content"]
-    assert "POSSIBLE MISCONCEPTIONS:\n- always converge" in grade_user
-
-
-def test_full_weak_sign_still_caps(session: Session):
-    _, concept = _concept(session)
-    llm = _llm(["converge"], grade_score=0.9, mechanism_present=True,
-               weak_signs=["always converge"])
+               weak_signs=["always converges"], committed=["always converges"])
     assess_concept(session, concept, "self_explanation",
                    "SGD always converges with a fixed step", llm=llm)
     a = session.exec(select(Assessment)).one()
     assert a.score == 0.5
-    assert a.gaps == ["contains likely misconception: always converge"]
+    assert a.gaps == ["contains likely misconception: always converges"]
+
+
+def test_misconception_named_to_reject_it_is_not_capped(session: Session):
+    # "A common misconception is that GD always converges" rejects it; the grader says so.
+    _, concept = _concept(session)
+    llm = _llm(["diverge"], grade_score=0.9, mechanism_present=True,
+               weak_signs=["always converges"])
+    assess_concept(session, concept, "self_explanation",
+                   "A common misconception is that GD always converges; it can diverge.",
+                   llm=llm)
+    a = session.exec(select(Assessment)).one()
+    assert a.score == 0.9 and a.gaps == []

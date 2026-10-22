@@ -39,12 +39,13 @@ from adaptive_academy.prompts import (
     ASSESS_ARTIFACT, GRADE, GRADE_CORRECTION, PF_CONSOLIDATE, TEACH, Prompt,
 )
 
+_NONE_NAMED = {"missing_required": [], "misconceptions_committed": []}  # GRADE v6 fields
 GOOD_GRADE = json.dumps({"score": 0.7, "mechanism_present": True, "verdict": "solid",
-                         "gaps": ["masking left vague"]})
+                         "gaps": ["masking left vague"], **_NONE_NAMED})
 BAD_GRADE = json.dumps({"score": 7, "mechanism_present": True, "verdict": "solid",
-                        "gaps": ["masking left vague"]})  # G1: a 0..10 score
+                        "gaps": ["masking left vague"], **_NONE_NAMED})  # G1: a 0..10 score
 BAD_GRADE_MECH = json.dumps({"score": 0.9, "mechanism_present": "false", "verdict": "fluent",
-                             "gaps": []})  # G5: bool("false") is True — would skip the cap
+                             "gaps": [], **_NONE_NAMED})  # G5: bool("false") would skip the cap
 GOOD_TEACH = json.dumps({"score": 0.75, "feedback": "clear", "strengths": ["example"],
                          "gaps": ["why sqrt(d)"]})
 BAD_TEACH = json.dumps({"score": 0.75, "strengths": ["example"], "gaps": []})  # F1
@@ -380,7 +381,7 @@ def test_rejection_trace_names_the_rules(session):
 def test_warning_is_recorded_but_does_not_block(session):
     w = _world(session)
     off_band = json.dumps({"score": 0.82, "mechanism_present": True, "verdict": "solid",
-                           "gaps": []})
+                           "gaps": [], **_NONE_NAMED})
     llm = _script([off_band])
     _run_assess(session, w, llm)
     assert len(llm.calls) == 1
@@ -456,5 +457,6 @@ def test_route_reports_refusal_not_invalid_output(session):
 
 def test_huge_integer_score_is_a_g1_fail_not_a_crash():
     _data, report = check_output(
-        GRADE_RUBRIC, '{"score": 1' + "0" * 400 + ', "verdict": "v", "gaps": ["x"]}')
+        GRADE_RUBRIC, '{"score": 1' + "0" * 400 + ', "verdict": "v", "gaps": ["x"], '
+        '"missing_required": [], "misconceptions_committed": []}')
     assert report.failed_ids == ("G1",)

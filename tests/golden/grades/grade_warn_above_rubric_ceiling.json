@@ -1,0 +1,10 @@
+{
+  "score": 0.9,
+  "mechanism_present": true,
+  "verdict": "Complete.",
+  "gaps": [],
+  "missing_required": [
+    "softmax"
+  ],
+  "misconceptions_committed": []
+}

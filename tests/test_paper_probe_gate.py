@@ -60,7 +60,7 @@ def _seed(s):
 def test_graded_probe_reaches_milestone_gate_artifact_axis(session):
     m, c, pp = _seed(session)
     grade_json = json.dumps({"score": 0.8, "verdict": "solid", "mechanism_present": True,
-                             "gaps": []})
+                             "gaps": [], "missing_required": [], "misconceptions_committed": []})
     outcome_json = json.dumps({"result": "sharp", "summary": "s"})
     llm = ScriptedLLMClient([LLMResponse(text=grade_json), LLMResponse(text=outcome_json)])
     grade_paper_probe(session, pp, llm=llm)

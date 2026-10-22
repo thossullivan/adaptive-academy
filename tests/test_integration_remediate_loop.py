@@ -36,7 +36,9 @@ def test_weak_assessment_then_remediate_injects_targeted_item(session):
 
     rubric = json.dumps({"criteria": ["c"], "must_include": ["subtract the max"],
                          "strong_signs": [], "weak_signs": [], "source_refs": []})
-    grade = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["hand-wavy"]})
+    grade = json.dumps({"score": 0.3, "verdict": "weak", "gaps": ["hand-wavy"],
+                        "missing_required": ["subtract the max"],
+                        "misconceptions_committed": []})
     app.dependency_overrides[get_llm] = lambda: ScriptedLLMClient(
         [LLMResponse(text=rubric), LLMResponse(text=grade)])
     a = client.post(f"/api/concepts/{concept.id}/assess",
@@ -48,8 +50,8 @@ def test_weak_assessment_then_remediate_injects_targeted_item(session):
          "revisit": None}))])
     r = client.post(f"/api/concepts/{concept.id}/remediate", json={})
     # Two gaps drive remediation: the LLM's "hand-wavy" gap (covered by the scripted
-    # draft item) plus a deterministic "omitted required element: subtract the max" gap
-    # (the rubric's must_include the learner omitted -> auto-targeted item). Both are
+    # draft item) plus an enforced "omitted required element: subtract the max" gap
+    # (the must_include the grader named missing -> auto-targeted item). Both are
     # legitimate remediation items, so the endpoint injects 2.
     assert r.status_code == 200 and len(r.json()["items"]) == 2
 
