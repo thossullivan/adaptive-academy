@@ -195,11 +195,15 @@ def api_backend() -> Backend:
     return OPENROUTER if current_backend_name() == BACKEND_OPENROUTER else ANTHROPIC
 
 
-def request_extra_body(backend: Backend) -> dict[str, Any]:
-    """Keyword arguments for `messages.create` carrying the backend's extra body fields."""
-    if not backend.extra_body:
+def request_extra_body(backend: Backend,
+                       fields: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Keyword arguments for `messages.create` carrying the backend's extra body fields, plus
+    this request's own `fields` (e.g. model_catalog.web_search_limits). The backend's fields
+    win a clash, so a per-request field can't drop the privacy preference."""
+    body = {**(fields or {}), **(backend.extra_body or {})}
+    if not body:
         return {}
-    return {"extra_body": _plain(backend.extra_body)}
+    return {"extra_body": _plain(body)}
 
 
 def _plain(value: Any) -> Any:

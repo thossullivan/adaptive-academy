@@ -130,3 +130,35 @@ def test_assessment_written_without_a_model_has_no_prompt_tag(session: Session):
     session.commit()
     session.refresh(a)
     assert a.prompt_tag is None
+
+
+def test_formula_must_include_in_other_notation_is_not_capped(session: Session):
+    # The live "Gradient of the cost" case: a cached rubric whose must_include items are Unicode
+    # formulas, and a correct ASCII answer with other variable names and the MSE convention.
+    # Formula items are left to the grader (named in its prompt), not hard gaps that cap 0.70.
+    _, concept = _concept(session)
+    formulas = ["Xᵀ(Xθ − y)", "(1/m)Xᵀ(Xθ − y)", "residual r = Xθ − y", "∇J(θ)", "½‖Xθ − y‖²"]
+    llm = _llm(formulas, grade_score=0.9, mechanism_present=True)
+    assess_concept(session, concept, "self_explanation",
+                   "For least squares the gradient is (2/n) X^T (Xw - y)", llm=llm)
+    a = session.exec(select(Assessment)).one()
+    assert a.score == 0.9
+    assert not any(g.startswith("omitted required element") for g in a.gaps)
+    grade_user = llm.calls[1]["messages"][0]["content"]
+    assert "EXPECTED FORMULAS" in grade_user
+    assert all(f in grade_user for f in formulas)
+    soft = session.exec(select(AgentEvent).where(AgentEvent.kind == "assess:rules-soft")).one()
+    assert soft.detail.startswith("5 formula item(s) left to the grader")
+    assert session.exec(select(AgentEvent).where(AgentEvent.kind == "assess:rules")).first() \
+        is None
+
+
+def test_word_must_include_still_caps_when_missing(session: Session):
+    _, concept = _concept(session)
+    llm = _llm(["chain rule", "Xᵀ(Xθ − y)"], grade_score=0.9, mechanism_present=True)
+    assess_concept(session, concept, "self_explanation",
+                   "For least squares the gradient is (2/n) X^T (Xw - y)", llm=llm)
+    a = session.exec(select(Assessment)).one()
+    assert a.score == 0.7
+    assert "omitted required element: chain rule" in a.gaps
+    assert not any("Xᵀ" in g for g in a.gaps)

@@ -193,6 +193,30 @@ def test_build_demo_is_deterministic(session):
         assert snapshot(s2) == snapshot(session)
 
 
+def test_demo_rubric_terms_and_anchor_key_points_are_plain_words():
+    # The anchor checks leave formula-like terms to the grader (assess.is_formula_like), so a
+    # demo rubric term, anchor key point, or seeded "omitted required element" gap that is a
+    # formula would show data the app can never produce.
+    from adaptive_academy import demo
+    from adaptive_academy.engine.assess import is_formula_like
+
+    terms = [t for ts in demo.RUBRIC_TERMS.values() for t in ts]
+    terms += [p for *_, points in demo.ANCHORS for p in points]
+    omitted = [g.split(": ", 1)[1] for p in demo.PROBES for g in p.gaps
+               if g.startswith("omitted required element: ")]
+    assert not [t for t in terms + omitted if is_formula_like(t)]
+
+
+def test_demo_attention_probes_have_the_rule_gaps_the_matcher_gives():
+    from adaptive_academy import demo
+    from adaptive_academy.engine.assess import apply_rules_checks
+
+    for p in demo.PROBES:
+        if p.concept == "attn" and p.kind in ("self_explanation", "calibration"):
+            seeded = [g for g in p.gaps if g.startswith("omitted required element")]
+            assert apply_rules_checks(p.response, demo.RUBRIC_TERMS["attn"], []) == seeded
+
+
 def test_startup_graph_backfill_leaves_demo_edges_alone(session):
     build_demo(session, now=NOW)
     before = sorted((e.id, e.src_concept_id, e.dst_concept_id, e.valid_until)

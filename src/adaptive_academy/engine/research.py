@@ -1,9 +1,11 @@
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 from sqlmodel import Session, select
 
+from adaptive_academy.engine import concept_names
 from adaptive_academy.engine.fanout import fan_out_with_retry
 from adaptive_academy.engine.runlock import exclusive_run
 from adaptive_academy.engine.memory import (
@@ -17,7 +19,7 @@ from adaptive_academy.llm.researcher_types import RawSource, ResearcherClient, S
 from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.types import LLMClient
-from adaptive_academy.prompts import RESEARCH_FOUNDATION
+from adaptive_academy.prompts import CONCEPT_NAME_CORRECTION, RESEARCH_FOUNDATION
 from adaptive_academy.models import AgentEvent, SourceDoc, Topic, TopicFoundation, TopicIntent
 
 # (angle_key, query_template) — {topic} is filled in. Order is the fan-out order.
@@ -128,6 +130,11 @@ def _parse_foundation_json(text: str) -> Foundation:
     )
 
 
+def _name_report(f: Foundation):
+    return concept_names.check_names(
+        concept_names.foundation_names(f.key_concepts, f.prerequisite_map))
+
+
 def synthesize_foundation(
     topic: str,
     intent: str,
@@ -135,20 +142,54 @@ def synthesize_foundation(
     llm: LLMClient,
     *,
     covered_block: str = "",
+    emit: Callable[[str, str], None] | None = None,
 ) -> Foundation:
-    """Single structured LLM call → Foundation (overview + concepts + prereq map)."""
+    """LLM call → Foundation (overview + concepts + prereq map), with checked concept names.
+
+    The names are checked (engine/concept_names.py). On a FAIL the model's answer and a
+    CONCEPT_NAME_CORRECTION turn naming the failed rule ids are appended (append-only) and
+    the call runs once more; names that still fail (or a retry that does not parse) are
+    repaired deterministically and a WARN `concepts:repaired` event is recorded. A name
+    problem never fails research: the learner gets short names either way.
+    """
+    record = emit or (lambda _kind, _detail="": None)
     user_msg = _build_foundation_user_msg(
         topic,
         intent,
         sources,
         covered_block=covered_block,
     )
-    resp = llm.complete(
-        system=RESEARCH_FOUNDATION,
-        messages=[{"role": "user", "content": user_msg}],
-        tools=[],
-    )
-    return _parse_foundation_json(resp.text)
+    messages: list[dict] = [{"role": "user", "content": user_msg}]
+    resp = llm.complete(system=RESEARCH_FOUNDATION, messages=messages, tools=[])
+    foundation = _parse_foundation_json(resp.text)
+    report = _name_report(foundation)
+    record("concepts:check", concept_names.summarize_check(report, 1))
+    if report.passed:
+        return foundation
+
+    record("concepts:regenerated", "after FAIL " + ",".join(dict.fromkeys(report.failed_ids)))
+    record("prompt", CONCEPT_NAME_CORRECTION.tag)
+    messages = [
+        *messages,
+        {"role": "assistant", "content": resp.text if resp.text.strip() else "(empty reply)"},
+        {"role": "user", "content": concept_names.correction_message(report)},
+    ]
+    retry = llm.complete(system=RESEARCH_FOUNDATION, messages=messages, tools=[])
+    try:
+        second = _parse_foundation_json(retry.text)
+    except (json.JSONDecodeError, ValueError, AttributeError, TypeError):
+        second = None  # keep the first answer; its names are repaired below
+    if second is not None:
+        foundation = second
+        report = _name_report(foundation)
+        record("concepts:check", concept_names.summarize_check(report, 2))
+        if report.passed:
+            return foundation
+
+    fix = concept_names.repair_names(foundation.key_concepts, foundation.prerequisite_map)
+    record("concepts:repaired", fix.summary())
+    return Foundation(overview=foundation.overview, key_concepts=fix.key_concepts,
+                      prerequisite_map=fix.prerequisite_map)
 
 
 @dataclass
@@ -260,6 +301,7 @@ def _research_topic_locked(
         kept,
         llm,
         covered_block=covered_block,
+        emit=emit,
     )
     emit("research:synth", f"{len(foundation_data.key_concepts)} key concepts")
 

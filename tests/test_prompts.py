@@ -19,6 +19,39 @@ def test_registry_prompts_have_tags():
     assert "SKEPTICAL grader" in GRADE
 
 
+def test_rubric_prompt_asks_for_plain_word_must_include():
+    import re
+
+    from adaptive_academy.engine.assess import is_formula_like
+    from adaptive_academy.prompts import RUBRIC
+
+    # v2: must_include is matched against the learner's words, so it asks for key ideas in
+    # plain words, never formulas (a formula item can't be a hard check; assess.py).
+    assert RUBRIC.tag == "assess.rubric@v2"
+    assert "QK^T" not in RUBRIC
+    must_include_spec = RUBRIC.split('"must_include"', 1)[1].split('"strong_signs"', 1)[0]
+    examples = re.findall(r'"([^"]+)"', must_include_spec)
+    assert len(examples) >= 3
+    assert not any(is_formula_like(e) for e in examples), examples
+
+
+def test_anchor_prompt_asks_for_plain_word_key_points():
+    import re
+
+    from adaptive_academy.engine.assess import is_formula_like
+    from adaptive_academy.prompts import ANCHOR
+
+    # v3: key_points are matched against the learner's words like a rubric's must_include
+    # (source_quiz), so they are key ideas in plain words; formulas go in reference_answer.
+    assert ANCHOR.tag == "research.anchor@v3"
+    assert "literal" not in ANCHOR.lower()
+    assert "reference_answer" in ANCHOR and "equivalent notation" in ANCHOR
+    key_points_spec = ANCHOR.split("key_points:", 1)[1].split("key_points are", 1)[0]
+    examples = re.findall(r'"([^"]+)"', key_points_spec)
+    assert len(examples) >= 3
+    assert not any(is_formula_like(e) for e in examples), examples
+
+
 def test_every_registry_prompt_is_named_and_versioned():
     found = [v for v in vars(prompts).values() if isinstance(v, Prompt)]
     assert len(found) >= 14

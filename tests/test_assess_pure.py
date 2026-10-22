@@ -20,12 +20,13 @@ def test_compute_delta():
 
 def test_apply_rules_checks_flags_omissions_and_misconceptions():
     gaps = apply_rules_checks(
-        response="attention uses softmax over scores",
-        must_include=["softmax", "QK^T", "scale by sqrt(d)"],
+        response="attention uses softmax over scores; it just picks the max",
+        must_include=["softmax", "QK^T", "scale by sqrt(d)", "weighted sum of values"],
         weak_signs=["it just picks the max"])
-    assert any("QK^T" in g and "omitted" in g for g in gaps)
-    assert any("scale by sqrt(d)" in g for g in gaps)
-    assert not any("softmax" in g for g in gaps)  # present -> no gap
+    assert gaps == ["omitted required element: weighted sum of values",
+                    "contains likely misconception: it just picks the max"]
+    # softmax is present; QK^T and "scale by sqrt(d)" are formula-like, so a literal miss is
+    # left to the grader (tests/test_assess_rules_checks.py), not a hard gap.
 
 
 def test_penalize_score_applies_band_ceilings():

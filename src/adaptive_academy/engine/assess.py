@@ -1,5 +1,8 @@
 import json
+import re
+import unicodedata
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 from sqlmodel import Session, col, select
 
@@ -82,17 +85,184 @@ def compute_delta(score: float, baseline_score: float | None) -> float | None:
     return round(score - baseline_score, 4)
 
 
-def apply_rules_checks(response: str, must_include: list[str], weak_signs: list[str]) -> list[str]:
-    """Deterministic anchor checks (§2.3): the LLM grader cannot paper over these."""
-    text = response.lower()
-    gaps: list[str] = []
+# ── Anchor-term matching ─────────────────────────────────────────────────────
+# Rubric must_include / weak_signs (and a source anchor's key_points) are matched against the
+# learner's text. Both sides are first normalised to an ASCII form, so X^T matches Xᵀ and
+# "Chain-Rule!" matches "chain rule". A formula-like item is never a hard gap: a correct answer
+# may use other variable names (w for θ) or another convention (MSE without ½), which no
+# literal match can tell from a wrong one, so the grader judges it instead.
+
+# Unicode math notation -> ASCII. Spaced where the ASCII is a word ("grad J" for ∇J).
+_MATH_CHARS = {
+    "−": "-", "∓": "-+", "±": "+-", "‖": "||", "∥": "||", "∣": "|", "×": "*", "·": "*",
+    "⋅": "*", "∗": "*", "÷": "/", "∕": "/", "⁄": "/", "√": " sqrt ", "∇": " grad ",
+    "∂": " d ", "∑": " sum ", "∏": " prod ", "∫": " int ", "≤": "<=", "⩽": "<=", "≥": ">=",
+    "⩾": ">=", "≠": "!=", "≈": "~", "∼": "~", "≃": "~", "∝": "~", "≡": "=", "≔": ":=",
+    "→": "->", "⟶": "->", "←": "<-", "⇒": "=>", "∞": " inf ", "∈": " in ", "⊤": "^T",
+    "ᵀ": "^T", "′": "'", "″": "''", "⟨": "<", "⟩": ">",
+}
+# Prose typography -> ASCII. Not notation: an en dash in "Gauss–Newton" is not a minus sign.
+_TEXT_CHARS = {
+    **dict.fromkeys("‐‑‒–—―", "-"), **dict.fromkeys("‘’‚‛", "'"), **dict.fromkeys("“”„‟", '"'),
+    **dict.fromkeys("     ", " "), "…": "...", "​": "",
+}
+_GREEK_VARIANTS = {"ϑ": "theta", "ϕ": "phi", "ϵ": "epsilon", "ϖ": "pi", "ϱ": "rho",
+                   "ϰ": "kappa", "µ": "mu"}
+# Lower-case tokens that are notation, not words a learner would say (Greek letter names
+# come from normalising θ etc.; the rest are function names in formulas).
+_MATH_WORDS = frozenset({
+    "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+    "lambda", "mu", "nu", "xi", "omicron", "pi", "rho", "sigma", "tau", "upsilon", "phi",
+    "chi", "psi", "omega", "sqrt", "exp", "log", "sin", "cos", "tan", "tanh", "max", "min",
+    "argmax", "argmin", "sum", "prod", "det", "grad", "nabla", "var", "cov", "inf", "sup",
+    "lim", "mod", "diag", "int",
+})
+_STOPWORDS = frozenset({"the", "and", "for", "via", "with", "are", "its", "from", "that",
+                        "this", "into", "onto", "than"})
+
+
+@lru_cache(maxsize=4096)
+def _char_ascii(c: str) -> tuple[str, bool]:
+    """One character's ASCII form, and whether it is math notation."""
+    if c.isascii():
+        return c, False
+    if c in _TEXT_CHARS:
+        return _TEXT_CHARS[c], False
+    if c in _MATH_CHARS:
+        return _MATH_CHARS[c], True
+    if c in _GREEK_VARIANTS:
+        return f" {_GREEK_VARIANTS[c]} ", True
+    name = unicodedata.name(c, "")
+    words = name.split()
+    if name.startswith("GREEK") and "LETTER" in words:
+        rest = [w for w in words[words.index("LETTER") + 1:] if w != "FINAL"]
+        if rest:
+            return f" {rest[0].lower()} ", True
+    folded = unicodedata.normalize("NFKC", c)
+    if folded != c:
+        base = _ascii(folded)
+        if "SUPERSCRIPT" in name or name.startswith("MODIFIER LETTER"):
+            if base and (base.isalnum() or base in "+-=()"):
+                return f"^{base}", True
+        elif "SUBSCRIPT" in name:
+            return f"_{base}", True
+        else:  # ½ -> 1/2, fullwidth digits, ligatures
+            return base, unicodedata.category(c) in ("Sm", "No")
+    if unicodedata.category(c).startswith("L"):  # é -> e, so "naïve" matches "naive"
+        stripped = "".join(ch for ch in unicodedata.normalize("NFKD", c)
+                           if not unicodedata.combining(ch))
+        if stripped.isascii() and stripped:
+            return stripped, False
+    return c, unicodedata.category(c) == "Sm"
+
+
+def _ascii(s: str) -> str:
+    return "".join(_char_ascii(c)[0] for c in s)
+
+
+def normalize_math(s: str) -> str:
+    """Lower-cased ASCII form of text with Unicode math in it: Xᵀ -> x^t, θ -> theta,
+    ½ -> 1/2, ‖ -> ||, − -> -, x² -> x^2, x₁ -> x_1. Whitespace is left for the caller."""
+    return _ascii(s).lower()
+
+
+def _formula_key(s: str) -> str:
+    return "".join(normalize_math(s).split())
+
+
+def _word_tokens(s: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", normalize_math(s))
+
+
+def is_formula_like(item: str) -> bool:
+    """Whether a rubric item is notation (checked by the grader) rather than words (checked
+    here). Formula-like when, after normalisation, it has ANY notation in it:
+      - a Unicode math character (Greek letter, superscript/subscript, ∇ ‖ − ½ ...),
+      - an ASCII operator or bracket: ^ _ = + * \\ | < > ~ { } [ ], or a / that is not
+        between two words ("and/or" is prose, "1/m" is not),
+      - a function call shape, a letter or digit directly before "(" ("f(x)", "sqrt(d)"),
+      - a minus between single symbols ("x - y", "x-y") or a spaced minus; a hyphenated
+        word ("p-value", "k-means", "top-1") is not one,
+    or when it has no natural-language word at all (no token of 3+ letters other than a
+    Greek letter name or a function name like sqrt/log/max), e.g. "x theta", "KL"."""
+    if any(_char_ascii(c)[1] for c in item):
+        return True
+    norm = normalize_math(item)
+    if re.search(r"[\^_=+*\\|<>~{}\[\]]", norm):
+        return True
+    if re.search(r"/", re.sub(r"[a-z]{3,}/(?=[a-z]{3,})", " ", norm)):
+        return True
+    if re.search(r"[a-z0-9]\(", norm):
+        return True
+    if re.search(r"\b[a-z0-9]\s*-\s*[a-z0-9]\b", norm) or re.search(r"\s-\s", norm):
+        return True
+    return not any(len(t) >= 3 and t not in _MATH_WORDS for t in re.findall(r"[a-z]+", norm))
+
+
+def _has_words(item: str, text_tokens: list[str], text_key: str) -> bool:
+    """A word item is present when its phrase appears in the text, or when every one of its
+    content words does (in any order): "squared error" matches "the error, squared". Each
+    word is a substring match, as the phrase always was, so "residual" matches "residuals"."""
+    tokens = _word_tokens(item)
+    if not tokens:
+        return True
+    if " ".join(tokens) in text_key:
+        return True
+    content = [t for t in tokens if len(t) >= 3 and t not in _STOPWORDS] or tokens
+    return all(t in text_key for t in content)
+
+
+def _has_phrase(item: str, text_key: str) -> bool:
+    """A weak sign is present only as whole words, so "memory" is not in "memoryless"."""
+    tokens = _word_tokens(item)
+    return bool(tokens) and f" {' '.join(tokens)} " in f" {text_key} "
+
+
+@dataclass
+class RulesCheck:
+    """The deterministic anchor checks on one response."""
+
+    gaps: list[str] = field(default_factory=list)  # hard: they set the score ceilings
+    # Formula-like must_include items the text doesn't contain literally, and formula-like
+    # weak signs it does: notation-dependent either way, so left to the grader, not capped.
+    formulas_unmatched: list[str] = field(default_factory=list)
+    formula_signs_present: list[str] = field(default_factory=list)
+
+    @property
+    def left_to_grader(self) -> list[str]:
+        return self.formulas_unmatched + self.formula_signs_present
+
+
+def check_anchor_terms(response: str, must_include: list[str],
+                       weak_signs: list[str]) -> RulesCheck:
+    """Deterministic anchor checks (§2.3): the LLM grader cannot paper over these. Word items
+    are hard checks; formula-like items (is_formula_like) are soft notes for the grader."""
+    text_tokens = _word_tokens(response or "")
+    text_key = " ".join(text_tokens)
+    text_formula = _formula_key(response or "")
+    result = RulesCheck()
     for term in must_include:
-        if term and term.lower() not in text:
-            gaps.append(f"omitted required element: {term}")
+        if not term or not term.strip():
+            continue
+        if is_formula_like(term):
+            if _formula_key(term) not in text_formula:
+                result.formulas_unmatched.append(term)
+        elif not _has_words(term, text_tokens, text_key):
+            result.gaps.append(f"omitted required element: {term}")
     for sign in weak_signs:
-        if sign and sign.lower() in text:
-            gaps.append(f"contains likely misconception: {sign}")
-    return gaps
+        if not sign or not sign.strip():
+            continue
+        if is_formula_like(sign):
+            if _formula_key(sign) in text_formula:
+                result.formula_signs_present.append(sign)
+        elif _has_phrase(sign, text_key):
+            result.gaps.append(f"contains likely misconception: {sign}")
+    return result
+
+
+def apply_rules_checks(response: str, must_include: list[str], weak_signs: list[str]) -> list[str]:
+    """The hard gaps of check_anchor_terms: the ones penalize_score turns into ceilings."""
+    return check_anchor_terms(response, must_include, weak_signs).gaps
 
 
 def penalize_score(llm_score: float, rules_gaps: list[str]) -> float:
@@ -207,10 +377,22 @@ class AssessmentResult:
 
 
 def build_grade_prompt(concept_name: str, kind: str, criteria: list[str],
-                       reference: str, response: str) -> tuple[str, str]:
+                       reference: str, response: str, *,
+                       formulas: list[str] | None = None,
+                       formula_signs: list[str] | None = None) -> tuple[str, str]:
+    """`formulas` / `formula_signs`: the formula-like must_include items and weak signs the
+    rules checks left to the grader (check_anchor_terms), judged here by meaning."""
     lines = [f"CONCEPT: {concept_name}", f"PROBE KIND: {kind}", "", "RUBRIC / ANCHOR:"]
     for c in criteria:
         lines.append(f"- {c}")
+    if formulas:
+        lines.append("EXPECTED FORMULAS (judge by meaning: equivalent notation, other variable "
+                     "names, or another convention such as a constant factor all count):")
+        lines += [f"- {f}" for f in formulas]
+    if formula_signs:
+        lines.append("POSSIBLE MISCONCEPTIONS IN NOTATION (a gap only if the answer actually "
+                     "commits one, not when the text appears inside a correct expression):")
+        lines += [f"- {s}" for s in formula_signs]
     if reference:
         lines.append(f"REFERENCE ANSWER: {reference}")
     lines += ["", "<<<RESPONSE>>>", escape_markers(response or "(empty)"), "<<<END_RESPONSE>>>"]
@@ -323,9 +505,17 @@ def grade_concept(
             concept=concept.name, question=concept.name)
     emit("assess:probe", kind)
 
-    rules_gaps = apply_rules_checks(response, must_include, weak_signs)
+    rules = check_anchor_terms(response, must_include, weak_signs)
+    rules_gaps = rules.gaps
+    if rules.left_to_grader:
+        emit("assess:rules-soft",
+             f"{len(rules.left_to_grader)} formula item(s) left to the grader: "
+             + "; ".join(rules.left_to_grader))
     emit("prompt", GRADE.tag)
-    system, user = build_grade_prompt(concept.name, kind, criteria, reference, response)
+    system, user = build_grade_prompt(
+        concept.name, kind, criteria, reference, response,
+        formulas=[t for t in rules.formulas_unmatched if t not in criteria],
+        formula_signs=rules.formula_signs_present)
     answer = checked_completion(
         session, llm, system=system, user=user, rubric=GRADE_RUBRIC, emit=emit,
         ctx=CheckContext(rules_gaps=tuple(rules_gaps)))

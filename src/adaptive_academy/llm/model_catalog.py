@@ -13,8 +13,9 @@ three features are only known to hold for Claude. So:
   sent without `strict`, as for an experimental model, with the same one corrective retry.
 - everything else: allowed, but marked experimental. Its structured-output tool is sent
   without `strict` (the schema still shapes the answer, and a prose answer still gets the one
-  corrective retry), research uses OpenRouter's own `openrouter:web_search` server tool, and
-  thinking blocks from its responses are not replayed.
+  corrective retry), research uses OpenRouter's own `openrouter:web_search` server tool
+  (capped by also stopping OpenRouter's server-tool loop, see below), and thinking blocks from
+  its responses are not replayed.
 
 Add a family here (with what a live check showed) rather than branching on model names in a
 client. `experimental` is the one source for the "Experimental" label in the UI.
@@ -72,19 +73,28 @@ OTHER = ModelCapabilities(
 )
 
 # Request shapes. The Anthropic tool is the one the API-key path has always used. OpenRouter's
-# server tool: `{"type": "openrouter:web_search", "parameters": {...}}`, where `max_uses` is the
-# documented hard cap: "To hard-cap how many searches the model may perform in a single
-# request, set `max_uses`" (`max_results` caps results per search, not searches). OpenRouter
-# behaviour to expect (same docs, guides/features/server-tools/web-search, read 2026-10-22):
-# - past the cap the model may still issue searches, which "return a message telling the
-#   model the limit was hit", and `usage.server_tool_use.web_search_requests` "counts the
-#   total number of search queries the model made", so it can exceed max_uses (the live
-#   check saw 2 with max_uses=1 on deepseek/deepseek-v4.1-flash-1017);
-# - with the default engine (`auto`: native search when the provider has it, else Exa),
-#   native search forwards max_uses only to Anthropic; other native providers ignore it.
-# A stricter cap would be OpenRouter's top-level `max_tool_calls` (server-tool steps per
-# request, default 30). It is documented for its own API, not confirmed on the Messages
-# endpoint, so it is not sent. Cost stays capped by the reported usage.cost either way.
+# server tool: `{"type": "openrouter:web_search", "parameters": {...}}`, where `max_uses` is
+# documented as "Maximum number of web searches the model may perform in a single request.
+# Once reached, further search calls return an error result instead of executing" for the
+# Exa, Firecrawl, Parallel and Perplexity engines, but "With native provider search,
+# forwarded only to Anthropic ...; other native search providers have no equivalent parameter
+# and ignore it" (`max_results` caps results per search, not searches). The model may keep
+# asking past the cap, and `usage.server_tool_use.web_search_requests` "counts the total
+# number of search queries the model made", so it can exceed max_uses (a live run saw 6-8
+# against a cap of 5, and 2 against 1, on deepseek/deepseek-v4.1-flash-1017).
+#
+# So for these models the cap is also set on OpenRouter's server-tool loop, which runs
+# whatever the engine: the top-level `stop_server_tools_when` (in the Messages API request
+# schema) with a `step_count_is` condition. "Each tool call the model makes (a web search, an
+# image generation, etc.) consumes one step"; when a condition fires "the pending tool calls
+# are executed and one final turn is made with tool calls disabled", so the answer (the
+# source JSON) still comes back. It "overrides `max_tool_calls`", the loop's default budget
+# (30), which the guides call a top-level field but the Messages schema does not list, so it
+# is not sent. Sources: openrouter.ai/docs/api/api-reference/anthropic-messages/
+# create-a-message (StopServerToolsWhen, WebSearchConfig), guides/features/server-tools
+# ("Tool Call Limits") and guides/features/server-tools/web-search, read 2026-10-22.
+# Not yet confirmed live: that a native (non-Anthropic) search counts as a loop step, and
+# that parallel searches in one model turn stay within the cap ("pending" calls still run).
 ANTHROPIC_WEB_SEARCH_TYPE = "web_search_20250305"
 OPENROUTER_WEB_SEARCH_TYPE = "openrouter:web_search"
 
@@ -131,6 +141,15 @@ def web_search_tool(model: str, max_uses: int) -> dict[str, Any]:
     if capabilities(model).anthropic_web_search:
         return {"type": ANTHROPIC_WEB_SEARCH_TYPE, "name": "web_search", "max_uses": max_uses}
     return {"type": OPENROUTER_WEB_SEARCH_TYPE, "parameters": {"max_uses": max_uses}}
+
+
+def web_search_limits(model: str, max_uses: int) -> dict[str, Any]:
+    """Top-level request fields that go with `web_search_tool`: none for Anthropic's tool
+    (its max_uses is the cap), and for OpenRouter's a stop on its server-tool loop after
+    `max_uses` steps, since the tool's own max_uses doesn't bind every engine."""
+    if capabilities(model).anthropic_web_search:
+        return {}
+    return {"stop_server_tools_when": [{"type": "step_count_is", "step_count": max_uses}]}
 
 
 def replayable(model: str, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:

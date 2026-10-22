@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
-from adaptive_academy.engine import graph
+from adaptive_academy.engine import concept_names, graph
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
@@ -33,10 +33,55 @@ from adaptive_academy.models import (
 )
 
 
-def load_bearing_concepts(prerequisite_map: dict) -> set[str]:
+REVISIT_PREFIX = "Revisit & self-explain: "
+# At most this many app-injected revisit items per phase. The prompt keeps a phase to at most
+# 6 items; spacing is meant to thread a few load-bearing prerequisites through the track, and
+# a phase of 25 revisits (the live failure) is massed practice, the opposite of spacing.
+MAX_REVISITS_PER_PHASE = 2
+
+
+def _norm(name: str) -> str:
+    return name.strip().casefold()
+
+
+def _key_lookup(key_concepts: list[str]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for name in key_concepts:
+        if isinstance(name, str) and name.strip():
+            lookup.setdefault(_norm(name), name)
+    return lookup
+
+
+def dependents_of(prerequisite_map: dict, key_concepts: list[str]) -> dict[str, set[str]]:
+    """Key concept -> the concepts that list it as a prerequisite.
+
+    Names resolve to key concepts exactly or case/space-insensitively. A prerequisite that
+    is not a key concept is left out: it never becomes a Concept row, so a revisit of it
+    has nothing to self-explain against or to grade. A self-loop is not a dependency.
+    """
+    lookup = _key_lookup(key_concepts)
+    out: dict[str, set[str]] = {}
+    for source, prereqs in (prerequisite_map or {}).items():
+        if not isinstance(source, str) or not isinstance(prereqs, list):
+            continue
+        dependent = lookup.get(_norm(source), source)
+        for name in prereqs:
+            prereq = lookup.get(_norm(name)) if isinstance(name, str) else None
+            if prereq is not None and prereq != dependent:
+                out.setdefault(prereq, set()).add(dependent)
+    return out
+
+
+def load_bearing_concepts(prerequisite_map: dict,
+                          key_concepts: list[str] | None = None) -> set[str]:
     """A concept is load-bearing iff something depends on it (it appears as a
     prerequisite in any value list). This is the signal the spaced-revisit pass keys on.
+
+    With `key_concepts`, only generated concepts count (spec §2.3: "a generated Concept is
+    load-bearing iff it appears as a prerequisite"), under their key-concept spelling.
     """
+    if key_concepts is not None:
+        return set(dependents_of(prerequisite_map, key_concepts))
     lb: set[str] = set()
     for prereqs in prerequisite_map.values():
         for name in prereqs or []:
@@ -45,46 +90,105 @@ def load_bearing_concepts(prerequisite_map: dict) -> set[str]:
     return lb
 
 
+def canonicalize_concept_refs(phases: list[PhaseView], key_concepts: list[str],
+                              renamed: dict[str, str] | None = None) -> None:
+    """Rewrite item concept_refs to the key concepts' exact names, in place.
+
+    The model may spell a key concept in another case, or (for a foundation whose names
+    were repaired) use a pre-repair name. Coverage, artifact review and remediation all
+    match concept_refs to Concept names exactly, so an unmatched spelling read as "never
+    referenced" and drew two revisit items. Unknown refs are kept; duplicates dropped.
+    """
+    lookup = _key_lookup(key_concepts)
+    for old, new in (renamed or {}).items():
+        lookup.setdefault(_norm(old), lookup.get(_norm(new), new))
+    for phase in phases:
+        for item in phase.items:
+            refs: list[str] = []
+            for ref in item.concept_refs:
+                if not isinstance(ref, str):
+                    continue
+                name = lookup.get(_norm(ref), ref)
+                if name not in refs:
+                    refs.append(name)
+            item.concept_refs = refs
+
+
 def _phases_referencing(phases: list[PhaseView], concept: str) -> list[int]:
     return [i for i, p in enumerate(phases)
             if any(concept in it.concept_refs for it in p.items)]
 
 
 def _revisit_item(concept: str) -> ItemView:
-    return ItemView(text=f"Revisit & self-explain: {concept}", type="write",
+    return ItemView(text=f"{REVISIT_PREFIX}{concept}", type="write",
                     concept_refs=[concept])
 
 
-def insert_spaced_revisits(phases: list[PhaseView], load_bearing: set[str]) -> list[PhaseView]:
-    """Guarantee every load-bearing concept spans >=2 phases (code-enforced spacing).
+def _is_revisit(item: ItemView) -> bool:
+    return item.text.startswith(REVISIT_PREFIX)
 
-    Whenever at least two phases exist, every load-bearing concept ends up referenced
-    in >=2 distinct phases (the evidence rule: spaced, not massed). Idempotent.
+
+def _revisit_targets(phases: list[PhaseView], refs: list[int],
+                     dependents: set[str]) -> list[int]:
+    """Phases to try, in order, for a concept's missing touches."""
+    if refs:
+        start = refs[0] + 1  # spaced: the phases after its first touch, then before it
+    else:
+        uses = [i for d in dependents for i in _phases_referencing(phases, d)]
+        # a prerequisite the model never placed: just before its first dependent uses it
+        start = max(min(uses) - 1, 0) if uses else 0
+    return [*range(start, len(phases)), *range(start - 1, -1, -1)]
+
+
+def insert_spaced_revisits(
+    phases: list[PhaseView],
+    load_bearing: set[str],
+    dependents: dict[str, set[str]] | None = None,
+    *,
+    cap: int = MAX_REVISITS_PER_PHASE,
+) -> list[PhaseView]:
+    """Space every load-bearing concept across >=2 phases (code-enforced), bounded.
+
+    Spec §2.2: whenever at least two phases exist, a load-bearing concept should be
+    referenced in >=2 distinct phases (the evidence rule: spaced, not massed). Idempotent.
 
     - referenced in >=2 phases -> already spaced, no-op
-    - referenced in exactly 1 phase p -> inject a 'revisit' write-item into a DIFFERENT
-      phase (the next one if it exists, else the previous), so it spans two
-    - referenced in 0 phases -> inject into the first and last phases (two distinct)
-    - single phase total -> cannot space; ensure at least one touch in that phase
+    - referenced in exactly 1 phase p -> a 'revisit' write-item in the nearest later phase
+      with room (else the nearest earlier one)
+    - referenced in 0 phases -> two touches starting just before the first phase that uses
+      one of its dependents (the first phase if none does), in consecutive phases with room
+    - single phase total -> cannot space; at least one touch in that phase
+
+    Bounded: no phase gets more than `cap` injected revisits (existing ones count), and a
+    phase that already references a concept never gets a revisit of it. Concepts with the
+    most dependents are placed first; what the cap leaves out is reported by `unspaced`.
     """
-    for concept in sorted(load_bearing):
+    if not phases:
+        return phases
+    dependents = dependents or {}
+    used = [sum(1 for it in p.items if _is_revisit(it)) for p in phases]
+    want = 1 if len(phases) == 1 else 2
+    for concept in sorted(load_bearing, key=lambda c: (-len(dependents.get(c, ())), c)):
         refs = _phases_referencing(phases, concept)
-        if len(refs) >= 2:
+        need = want - len(refs)
+        if need <= 0:
             continue
-        if not phases:
-            break
-        if len(phases) == 1:
-            if not refs:  # cannot space with one phase; at least touch it once
-                phases[0].items.append(_revisit_item(concept))
-            continue
-        if len(refs) == 1:
-            p = refs[0]
-            other = p + 1 if p + 1 < len(phases) else p - 1  # a different existing phase
-            phases[other].items.append(_revisit_item(concept))
-        else:  # 0 references, >=2 phases -> two distinct touches
-            phases[0].items.append(_revisit_item(concept))
-            phases[-1].items.append(_revisit_item(concept))
+        for target in _revisit_targets(phases, refs, dependents.get(concept, set())):
+            if need == 0:
+                break
+            if target in refs or used[target] >= cap:
+                continue
+            phases[target].items.append(_revisit_item(concept))
+            used[target] += 1
+            refs.append(target)
+            need -= 1
     return phases
+
+
+def unspaced(phases: list[PhaseView], load_bearing: set[str]) -> list[str]:
+    """Load-bearing concepts that still span fewer phases than spacing asks for."""
+    want = 1 if len(phases) == 1 else 2
+    return sorted(c for c in load_bearing if len(_phases_referencing(phases, c)) < want)
 
 
 
@@ -231,6 +335,18 @@ def _generate_curriculum_locked(
         events.append(ev)
 
     emit("curriculum:plan", f"{len(foundation.key_concepts)} concepts, {len(sources)} sources")
+    # Concept names become Concept rows, Tutor headings and probe text here. Research checks
+    # them, but a foundation stored before that check (or edited) may still state its
+    # answer: repair it in place first, so the prompt, the Concept rows and the anchors
+    # (which resolve against foundation.key_concepts) all agree on the short names.
+    renamed: dict[str, str] = {}
+    fix = concept_names.repair_names(foundation.key_concepts, foundation.prerequisite_map)
+    if not fix.report.passed:
+        foundation.key_concepts = fix.key_concepts
+        foundation.prerequisite_map = fix.prerequisite_map
+        session.add(foundation)
+        renamed = fix.renamed
+        emit("concepts:repaired", fix.summary())
     emit("prompt", CURRICULUM.tag)
     system, user = build_curriculum_prompt(topic.title, intent, foundation, sources)
     session.commit()  # release the lock before the LLM call (F5)
@@ -239,13 +355,21 @@ def _generate_curriculum_locked(
         schema=CURRICULUM_SCHEMA, tool_name="emit_track")
     draft = parse_curriculum_obj(data, title=topic.title)
 
-    lb = load_bearing_concepts(foundation.prerequisite_map)
+    canonicalize_concept_refs(draft.phases, foundation.key_concepts, renamed)
+    dependents = dependents_of(foundation.prerequisite_map, foundation.key_concepts)
+    lb = set(dependents)
     before = sum(len(p.items) for p in draft.phases)
-    insert_spaced_revisits(draft.phases, lb)
+    insert_spaced_revisits(draft.phases, lb, dependents)
     revisits = sum(len(p.items) for p in draft.phases) - before
     emit("curriculum:generated", f"{len(draft.phases)} phases")
     if revisits:
         emit("curriculum:spaced", f"{revisits} revisit item(s) injected")
+    left = unspaced(draft.phases, lb)
+    if left and draft.phases:
+        emit("curriculum:unspaced",
+             f"{len(left)} load-bearing concept(s) in fewer than 2 phases "
+             f"(cap {MAX_REVISITS_PER_PHASE} revisits/phase): {', '.join(left[:5])}"
+             + (" …" if len(left) > 5 else ""))
 
     track = Track(topic_id=topic.id, title=topic.title, overview=draft.overview)
     session.add(track)

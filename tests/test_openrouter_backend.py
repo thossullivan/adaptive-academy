@@ -25,11 +25,13 @@ SCHEMA = {"type": "object", "properties": {"score": {"type": "number"}}, "requir
 
 
 def _message(content, *, model="anthropic/claude-sonnet-5.5", stop_reason="end_turn",
-             cost=0.0123):
+             cost=0.0123, searches=None):
     usage_body = {"input_tokens": 100, "output_tokens": 20, "cache_creation_input_tokens": 0,
                   "cache_read_input_tokens": 0}
     if cost is not None:
         usage_body["cost"] = cost
+    if searches is not None:
+        usage_body["server_tool_use"] = {"web_search_requests": searches}
     return {"id": "msg_or_1", "type": "message", "role": "assistant", "model": model,
             "content": content, "stop_reason": stop_reason, "stop_sequence": None,
             "usage": usage_body}
@@ -150,6 +152,8 @@ def test_requests_carry_the_slug_and_the_privacy_preference(session, openrouter)
     # Claude through OpenRouter keeps Anthropic's own web search tool.
     assert research["tools"] == [{"type": "web_search_20250305", "name": "web_search",
                                   "max_uses": 5}]
+    # Anthropic's max_uses is the cap for Claude; OpenRouter's loop stop is not sent.
+    assert "stop_server_tools_when" not in research
 
 
 def test_non_claude_research_uses_openrouter_web_search(session, openrouter, monkeypatch):
@@ -158,8 +162,85 @@ def test_non_claude_research_uses_openrouter_web_search(session, openrouter, mon
     sources = AnthropicResearcherClient(http_client=wire.http_client()).search(
         SearchBrief(angle="a", query="q"))
     assert [s.url for s in sources] == ["https://example.org/a"]
-    assert wire.sent()["tools"] == [{"type": "openrouter:web_search",
-                                     "parameters": {"max_uses": 5}}]
+    body = wire.sent()
+    assert body["tools"] == [{"type": "openrouter:web_search",
+                              "parameters": {"max_uses": 5}}]
+    # max_uses alone doesn't bind native search (or stop the model asking), so the
+    # server-tool loop itself stops at the cap, beside the privacy preference.
+    assert body["stop_server_tools_when"] == [{"type": "step_count_is", "step_count": 5}]
+    assert body["provider"] == {"data_collection": "deny"}
+
+
+def test_non_claude_research_cap_follows_max_searches(session, openrouter, monkeypatch):
+    monkeypatch.setattr(settings, "reasoning_model", "deepseek/deepseek-v4")
+    wire = Wire(_message(SOURCES, model="deepseek/deepseek-v4"))
+    AnthropicResearcherClient(max_searches=1, http_client=wire.http_client()).search(
+        SearchBrief(angle="a", query="q"))
+    body = wire.sent()
+    assert body["tools"][0]["parameters"] == {"max_uses": 1}
+    assert body["stop_server_tools_when"] == [{"type": "step_count_is", "step_count": 1}]
+
+
+# --- the search budget across pause_turn continuations ------------------------------------
+
+# Each continuation is a new request, and max_uses (and the loop stop) count per request, so
+# a continuation carries only what is left of the angle's cap.
+PAUSED = [{"type": "text", "text": "Searching."},
+          {"type": "server_tool_use", "id": "srvtoolu_9", "name": "web_search",
+           "input": {"query": "q"}}]
+PAUSED_WITH_SOURCES = [*SOURCES, PAUSED[1]]
+DEEPSEEK = "deepseek/deepseek-v4"
+
+
+def _search_caps(body) -> tuple:
+    """(the tool's max_uses, the loop stop's step_count or None) from a request body."""
+    [tool] = body["tools"]
+    max_uses = tool.get("max_uses", tool.get("parameters", {}).get("max_uses"))
+    stop = body.get("stop_server_tools_when")
+    return max_uses, (stop[0]["step_count"] if stop else None)
+
+
+@pytest.mark.parametrize(("model", "loop_stop"), [
+    ("anthropic/claude-sonnet-5.5", False), (DEEPSEEK, True)])
+def test_a_continuation_carries_only_the_remaining_search_budget(
+        session, openrouter, monkeypatch, model, loop_stop):
+    monkeypatch.setattr(settings, "reasoning_model", model)
+    wire = Wire(_message(PAUSED, model=model, stop_reason="pause_turn", searches=3),
+                _message(SOURCES, model=model, searches=2))
+    sources = AnthropicResearcherClient(http_client=wire.http_client()).search(
+        SearchBrief(angle="a", query="q"))
+    assert [s.url for s in sources] == ["https://example.org/a"]
+    assert len(wire.requests) == 2
+    assert _search_caps(wire.sent(0)) == (5, 5 if loop_stop else None)
+    assert _search_caps(wire.sent(1)) == (2, 2 if loop_stop else None)
+    # Still the same tool (a paused turn may end on a search that hasn't run yet).
+    assert wire.sent(1)["tools"][0]["type"] == wire.sent(0)["tools"][0]["type"]
+
+
+@pytest.mark.parametrize("model", ["anthropic/claude-sonnet-5.5", DEEPSEEK])
+def test_a_spent_search_budget_ends_the_turn_with_the_text_so_far(session, openrouter,
+                                                                  monkeypatch, model):
+    monkeypatch.setattr(settings, "reasoning_model", model)
+    wire = Wire(_message(PAUSED_WITH_SOURCES, model=model, stop_reason="pause_turn",
+                         searches=5))
+    sources = AnthropicResearcherClient(http_client=wire.http_client()).search(
+        SearchBrief(angle="a", query="q"))
+    # No continuation: it could only search again (the pending search would run first).
+    assert len(wire.requests) == 1
+    assert [s.url for s in sources] == ["https://example.org/a"]
+    [row] = session.exec(select(LLMUsage)).all()
+    assert row.web_search_requests == 5
+
+
+def test_the_budget_adds_up_over_several_continuations(session, openrouter, monkeypatch):
+    monkeypatch.setattr(settings, "reasoning_model", DEEPSEEK)
+    wire = Wire(_message(PAUSED, model=DEEPSEEK, stop_reason="pause_turn", searches=1),
+                _message(PAUSED, model=DEEPSEEK, stop_reason="pause_turn", searches=2),
+                _message(PAUSED, model=DEEPSEEK, stop_reason="pause_turn", searches=2))
+    AnthropicResearcherClient(http_client=wire.http_client()).search(
+        SearchBrief(angle="a", query="q"))
+    assert [_search_caps(wire.sent(i)) for i in range(len(wire.requests))] == [
+        (5, 5), (4, 4), (2, 2)]
 
 
 def test_non_claude_structured_output_drops_strict_but_keeps_the_retry(session, openrouter,

@@ -12,7 +12,7 @@ from adaptive_academy.llm.anthropic_client import (
     sdk_client_kwargs,
 )
 from adaptive_academy.llm.backends import api_backend, request_extra_body
-from adaptive_academy.llm.model_catalog import replayable, web_search_tool
+from adaptive_academy.llm.model_catalog import replayable, web_search_limits, web_search_tool
 from adaptive_academy.llm.registry import get_model
 from adaptive_academy.llm.researcher_types import RawSource, SearchBrief
 from adaptive_academy.llm.today import today_line
@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 # A long server-side search turn can stop with stop_reason "pause_turn"; it is continued by
 # re-sending the paused content. Bounded like any retry loop: at most this many extra calls.
 MAX_PAUSE_CONTINUATIONS = 3
+
+
+def _searches(resp) -> int:
+    """usage.server_tool_use.web_search_requests of a response, 0 when not reported."""
+    value = getattr(getattr(getattr(resp, "usage", None), "server_tool_use", None),
+                    "web_search_requests", None)
+    return value if isinstance(value, int) and value > 0 else 0
 
 
 def parse_sources_json(text: str) -> list[RawSource]:
@@ -85,11 +92,16 @@ class AnthropicResearcherClient:
         self._today = today_line()
 
     def search(self, brief: SearchBrief) -> list[RawSource]:
-        tools = [web_search_tool(self._model, self._max_searches)]
         user = {"role": "user", "content": brief.query}
         paused: list[dict] = []  # the still-open assistant turn, across pause_turn stops
         texts: list[str] = []
+        searched = 0  # web_search_requests reported so far for this angle
         for _ in range(1 + MAX_PAUSE_CONTINUATIONS):
+            # max_uses (and OpenRouter's loop stop) count per request, and a continuation is
+            # a new request, so it carries only what is left of the angle's cap.
+            budget = self._max_searches - searched
+            tools = [web_search_tool(self._model, budget)]
+            limits = web_search_limits(self._model, budget)
             messages = [user, {"role": "assistant", "content": paused}] if paused else [user]
             check_budget(self._model, reports_cost=self._backend.reports_cost,
                          backend=self._backend.name)
@@ -97,12 +109,14 @@ class AnthropicResearcherClient:
                 model=self._model,
                 max_tokens=self._max_tokens,
                 system=cached_system(RESEARCH_SEARCH, self._today),
-                tools=tools,  # same tools: a paused turn may end on a not-yet-run search
+                # Same tool on a continuation (only max_uses lowered): a paused turn may end
+                # on a not-yet-run search, and a continuation without its tool is rejected.
+                tools=tools,
                 messages=messages,
                 # Automatic caching as well: a pause_turn continuation re-sends the search
                 # results (large), and reads them from cache instead of paying full price.
                 cache_control=EPHEMERAL,
-                **request_extra_body(self._backend),
+                **request_extra_body(self._backend, limits),
             )
             # usage.server_tool_use.web_search_requests is billed per search on top of
             # tokens; every continuation is its own billed call, so its own row.
@@ -112,6 +126,15 @@ class AnthropicResearcherClient:
             texts.append(
                 "".join(b.text for b in resp.content if getattr(b, "type", None) == "text"))
             if getattr(resp, "stop_reason", None) != "pause_turn":
+                break
+            searched += _searches(resp)
+            if searched >= self._max_searches:
+                # The cap is spent. A continuation would run the paused turn's pending
+                # search at once and needs the search tool kept (dropping it is a 400), so
+                # the turn ends here, like the max-continuations path below.
+                logger.warning("research search for angle %r used its %d searches and is "
+                               "still paused; using the text so far", brief.angle,
+                               self._max_searches)
                 break
             # The server-side search loop paused a long turn: send the paused content back
             # unchanged so the model continues the same turn.
