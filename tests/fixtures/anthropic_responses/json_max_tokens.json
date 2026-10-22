@@ -1,0 +1,29 @@
+{
+  "_source": "documented",
+  "_note": "complete_json cut off by the max_tokens cap while still thinking: stop_reason max_tokens, no tool call.",
+  "id": "msg_01JsonMaxTokens00000000007",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "EpwBCkgIBxABGAIqQHb0/Lc1+Md2Ne3Of4Pg5Qh6Ri7Sj8Tk9Ul0Vm1Wn2Xo3Yp4Zq5Ar6Bs7Ct8Du9Ev0Fw1Gx2Hy3Iz4Ja5Kb6Lc7Md8Ne9Of0Pg1Qh2Ri3Sj4Tk5Ul6Vm7Wn8Xo9Yp0Zq1Ar2Bs3Ct4Du5=="
+    }
+  ],
+  "stop_reason": "max_tokens",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 1534,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 20000,
+    "service_tier": "standard"
+  }
+}

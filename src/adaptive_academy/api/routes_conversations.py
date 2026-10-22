@@ -1,7 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
-from adaptive_academy.api.deps import get_llm, get_retriever, get_session, use_agent_sdk
+from adaptive_academy.api.deps import (
+    get_guard_llm,
+    get_llm,
+    get_retriever,
+    get_session,
+    use_agent_sdk,
+)
 from adaptive_academy.api.routes_memory import memory_hit_out
 from adaptive_academy.api.schemas import (
     ConversationOut,
@@ -99,6 +105,7 @@ def send_message(
     session: Session = Depends(get_session),
     llm: LLMClient = Depends(get_llm),
     retriever: Retriever = Depends(get_retriever),
+    guard_llm: LLMClient = Depends(get_guard_llm),
 ):
     convo = session.get(Conversation, conversation_id)
     if not convo:
@@ -111,6 +118,7 @@ def send_message(
             convo,
             body.content,
             retriever=retriever,
+            guard_llm=guard_llm,
         )
     else:
         result = run_tutor_turn(
@@ -119,6 +127,7 @@ def send_message(
             body.content,
             llm,
             retriever=retriever,
+            guard_llm=guard_llm,
         )
     session.refresh(convo)
     levels = _levels_for(session, convo)

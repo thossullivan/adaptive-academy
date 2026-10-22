@@ -5,11 +5,17 @@ from sqlmodel import Session
 
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import index_message, memory_blocks_for_tutor
+from adaptive_academy.engine.solution_guard import (
+    FALLBACK,
+    GUARD_FALLBACK,
+    REGENERATE,
+    SolutionGuard,
+)
 from adaptive_academy.engine.tools import TIERS, TOOLS, reveal_gate
 from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.llm.types import LLMClient, LLMResponse, ToolCall
 from adaptive_academy.models import AgentEvent, Concept, Conversation, Message
-from adaptive_academy.prompts import build_tutor_system_prompt
+from adaptive_academy.prompts import TUTOR_GUARD_CORRECTION, build_tutor_system_prompt
 
 _MAX_STEPS = 6
 _FALLBACK = "Let's slow down — tell me what you've tried so far, and we'll work from there."
@@ -38,7 +44,10 @@ def run_tutor_turn(
     llm: LLMClient,
     *,
     retriever: Retriever | None = None,
+    guard_llm: LLMClient | None = None,
 ) -> TurnResult:
+    """One learner turn. `guard_llm` is the solution guard's copy-role client
+    (api/deps.get_guard_llm); None runs the guard's deterministic screen only."""
     events: list[AgentEvent] = []
 
     def emit(kind: str, detail: str = "") -> None:
@@ -83,14 +92,26 @@ def run_tutor_turn(
 
     messages = _history(convo)
     reply_text = ""
+    guard = SolutionGuard(concept=concept.name if concept else "", learner_text=user_text,
+                          llm=guard_llm, emit=emit)
 
-    for step in range(_MAX_STEPS):
-        emit("llm_call", f"step={step + 1}")
+    step = 0
+    max_steps = _MAX_STEPS
+    while step < max_steps:
+        step += 1
+        emit("llm_call", f"step={step}")
         # Release the write lock before every model call (F5): pending trace events (and
         # the lazy load in _history) would otherwise hold it for the whole round trip,
         # stalling every other writer, the usage row this call records included.
         session.commit()
-        resp: LLMResponse = llm.complete(system=system, messages=messages, tools=TOOLS)
+        try:
+            resp: LLMResponse = llm.complete(system=system, messages=messages, tools=TOOLS)
+        except Exception as exc:
+            if not guard.regenerating:
+                raise
+            # The withheld draft is gone either way: store the guard's fallback, not a 5xx.
+            reply_text = guard.regeneration_failed(exc)
+            break
 
         if resp.stop_reason == "refusal":
             # A safety decline (Claude 5.5 models): never show or store partial declined
@@ -103,6 +124,24 @@ def run_tutor_turn(
             reply_text = resp.text
             if not reply_text.strip():
                 emit("empty_reply", f"stop_reason={resp.stop_reason}")
+            elif not convo.attempt_logged:
+                # The solution guard: a reply finalised before any attempt is logged (this
+                # turn's log_attempt included) must not hand over the answer. Release the
+                # write lock first (F5): the check may make a model call.
+                session.commit()
+                decision = guard.review(reply_text)
+                if decision == REGENERATE:
+                    # Append-only: the withheld draft goes back as the assistant turn, echoed
+                    # exactly (thinking blocks included), and the correction as a new user
+                    # turn. The draft itself is never stored, indexed, or returned.
+                    messages.append({"role": "assistant",
+                                     "content": _assistant_tool_blocks(resp)})
+                    messages.append({"role": "user", "content": str(TUTOR_GUARD_CORRECTION)})
+                    reply_text = ""
+                    max_steps += 1  # the regeneration never eats the tool-step budget
+                    continue
+                if decision == FALLBACK:
+                    reply_text = GUARD_FALLBACK
             break
 
         # Echo the assistant tool-use turn into the running transcript.
@@ -118,7 +157,8 @@ def run_tutor_turn(
                 revealed_text = call.input.get("text", "")
         messages.append({"role": "user", "content": tool_results})
 
-        # An allowed reveal is terminal: the tool is the authoritative source of the answer.
+        # An allowed reveal is terminal: the tool is the authoritative source of the answer
+        # (and is never guarded: the attempt-gate already allowed it).
         if revealed_text is not None:
             reply_text = revealed_text
             break
@@ -147,6 +187,7 @@ def run_tutor_turn(
 
 
 def _assistant_tool_blocks(resp: LLMResponse) -> list[dict]:
+    # For a tool-use turn, and for a draft the solution guard withheld.
     # Echo the assistant turn exactly as the API returned it when the client exposes it:
     # within a tool-use turn, thinking blocks must go back complete and unmodified (signature
     # and empty text included) or the API rejects the request. Rebuild only for clients

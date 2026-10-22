@@ -3,8 +3,9 @@ from dataclasses import dataclass
 
 from sqlmodel import Session, select
 
-from adaptive_academy.engine.assess import assess_concept
+from adaptive_academy.engine.assess import CheckedGrade, grade_concept, record_grade
 from adaptive_academy.engine.gates import milestone_load_bearing
+from adaptive_academy.engine.grade_gate import checked_completion
 from adaptive_academy.engine.levels import compute_levels
 from adaptive_academy.engine.memory import (
     ALREADY_COVERED_MARKER,
@@ -20,6 +21,7 @@ from adaptive_academy.engine.memory import (
     retrieve,
     topic_id_for_concept,
 )
+from adaptive_academy.engine.output_checks import OUTCOME_RUBRIC
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.llm.types import LLMClient
@@ -288,13 +290,28 @@ def grade_roleplay(
     llm: LLMClient,
     retriever: Retriever | None = None,
 ) -> list[Assessment]:
-    """Blind grade: reuse assess_concept per load-bearing concept, then write an outcome."""
+    """Blind grade: reuse the assess grader per load-bearing concept, then write an outcome.
+
+    Fails closed: every concept grade and the debrief go through their output checks BEFORE
+    any stored evidence is touched, so a grade rejected by the checks (GradeCheckError) leaves
+    the prior grade, the estimates and the session status exactly as they were."""
     milestone = session.get(Milestone, rp.milestone_id)
     concepts = milestone_load_bearing(session, milestone)
     transcript = _transcript_text(session, rp)
 
-    # Idempotent re-grade (a prior grade may have partially written then failed): clear any
-    # existing roleplay evidence for this session so retries never double-count.
+    checked: list[CheckedGrade] = []
+    for c in concepts:
+        checked.append(grade_concept(session, c, "roleplay", transcript, llm=llm))
+        session.commit()  # trace events only; releases the write lock before the next call (F5)
+
+    _emit(session, rp, "prompt", ROLEPLAY_GRADE.tag)
+    user = "<<<TRANSCRIPT>>>\n" + escape_markers(transcript) + "\n<<<END_TRANSCRIPT>>>"
+    outcome, _report = checked_completion(
+        session, llm, system=ROLEPLAY_GRADE, user=user, rubric=OUTCOME_RUBRIC,
+        emit=lambda kind, detail="": _emit(session, rp, kind, detail))
+
+    # Idempotent re-grade (a prior grade may exist): clear any existing roleplay evidence for
+    # this session so retries never double-count. Only now that every grade passed its checks.
     for old in session.exec(
             select(Assessment).where(Assessment.roleplay_session_id == rp.id)).all():
         remove_source(session, f"assessment:{old.id}#q")
@@ -302,24 +319,13 @@ def grade_roleplay(
         session.delete(old)
 
     graded: list[Assessment] = []
-    for c in concepts:
-        result = assess_concept(
-            session,
-            c,
-            "roleplay",
-            transcript,
-            llm=llm,
-            retriever=retriever,
-        )
+    for g in checked:
+        result = record_grade(session, g, retriever=retriever)
         result.assessment.roleplay_session_id = rp.id
         session.add(result.assessment)
         graded.append(result.assessment)
 
-    _emit(session, rp, "prompt", ROLEPLAY_GRADE.tag)
-    user = "<<<TRANSCRIPT>>>\n" + escape_markers(transcript) + "\n<<<END_TRANSCRIPT>>>"
-    resp = llm.complete(system=ROLEPLAY_GRADE,
-                        messages=[{"role": "user", "content": user}], tools=[])
-    rp.outcome = json.loads(extract_json(resp.text))
+    rp.outcome = outcome
     rp.status = "graded"
     _emit(session, rp, "roleplay:graded", f"{len(graded)} concept(s)")
     session.add(rp)

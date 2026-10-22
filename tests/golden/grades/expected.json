@@ -1,0 +1,251 @@
+{
+  "artifact_bad_score_and_mechanism.json": {
+    "rubric": "artifact",
+    "fail": [
+      "G1",
+      "G5"
+    ],
+    "warn": []
+  },
+  "artifact_good.json": {
+    "rubric": "artifact",
+    "fail": [],
+    "warn": []
+  },
+  "consolidate_bad_canonical_empty.json": {
+    "rubric": "consolidate",
+    "fail": [
+      "P1"
+    ],
+    "warn": []
+  },
+  "consolidate_bad_feedback_and_score.json": {
+    "rubric": "consolidate",
+    "fail": [
+      "G1",
+      "F1"
+    ],
+    "warn": []
+  },
+  "consolidate_good.json": {
+    "rubric": "consolidate",
+    "fail": [],
+    "warn": []
+  },
+  "consolidate_warn_off_band.json": {
+    "rubric": "consolidate",
+    "fail": [],
+    "warn": [
+      "P2"
+    ]
+  },
+  "grade_bad_array.json": {
+    "rubric": "grade",
+    "fail": [
+      "J1"
+    ],
+    "warn": []
+  },
+  "grade_bad_confidence_out_of_range.json": {
+    "rubric": "grade",
+    "fail": [
+      "G4"
+    ],
+    "warn": []
+  },
+  "grade_bad_gaps_string.json": {
+    "rubric": "grade",
+    "fail": [
+      "G3"
+    ],
+    "warn": []
+  },
+  "grade_bad_mechanism_string.json": {
+    "rubric": "grade",
+    "fail": [
+      "G5"
+    ],
+    "warn": []
+  },
+  "grade_bad_prose.txt": {
+    "rubric": "grade",
+    "fail": [
+      "J1"
+    ],
+    "warn": []
+  },
+  "grade_bad_score_bool.json": {
+    "rubric": "grade",
+    "fail": [
+      "G1"
+    ],
+    "warn": []
+  },
+  "grade_bad_score_missing.json": {
+    "rubric": "grade",
+    "fail": [
+      "G1"
+    ],
+    "warn": []
+  },
+  "grade_bad_score_nan.txt": {
+    "rubric": "grade",
+    "fail": [
+      "G1"
+    ],
+    "warn": []
+  },
+  "grade_bad_score_negative.json": {
+    "rubric": "grade",
+    "fail": [
+      "G1"
+    ],
+    "warn": []
+  },
+  "grade_bad_score_out_of_range.json": {
+    "rubric": "grade",
+    "fail": [
+      "G1"
+    ],
+    "warn": []
+  },
+  "grade_bad_score_string.json": {
+    "rubric": "grade",
+    "fail": [
+      "G1"
+    ],
+    "warn": []
+  },
+  "grade_bad_several.json": {
+    "rubric": "grade",
+    "fail": [
+      "G1",
+      "G2",
+      "G3"
+    ],
+    "warn": []
+  },
+  "grade_bad_truncated.txt": {
+    "rubric": "grade",
+    "fail": [
+      "J1"
+    ],
+    "warn": []
+  },
+  "grade_bad_verdict_empty.json": {
+    "rubric": "grade",
+    "fail": [
+      "G2"
+    ],
+    "warn": []
+  },
+  "grade_good_fenced_with_preamble.txt": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": []
+  },
+  "grade_good_partial.json": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": []
+  },
+  "grade_good_solid.json": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": []
+  },
+  "grade_good_with_confidence.json": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": []
+  },
+  "grade_warn_above_rules_ceiling.json": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": [
+      "G9"
+    ],
+    "rules_gaps": [
+      "omitted required element: softmax"
+    ]
+  },
+  "grade_warn_cap_breach.json": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": [
+      "G7"
+    ]
+  },
+  "grade_warn_mechanism_missing.json": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": [
+      "G6"
+    ]
+  },
+  "grade_warn_off_band_no_gaps.json": {
+    "rubric": "grade",
+    "fail": [],
+    "warn": [
+      "G8",
+      "G10"
+    ]
+  },
+  "outcome_bad_prose.txt": {
+    "rubric": "outcome",
+    "fail": [
+      "J1"
+    ],
+    "warn": []
+  },
+  "outcome_bad_result_missing.json": {
+    "rubric": "outcome",
+    "fail": [
+      "O1"
+    ],
+    "warn": []
+  },
+  "outcome_bad_summary_empty.json": {
+    "rubric": "outcome",
+    "fail": [
+      "O2"
+    ],
+    "warn": []
+  },
+  "outcome_good.json": {
+    "rubric": "outcome",
+    "fail": [],
+    "warn": []
+  },
+  "teach_bad_feedback_missing.json": {
+    "rubric": "teach",
+    "fail": [
+      "F1"
+    ],
+    "warn": []
+  },
+  "teach_bad_score_out_of_range.json": {
+    "rubric": "teach",
+    "fail": [
+      "G1"
+    ],
+    "warn": []
+  },
+  "teach_bad_strengths_string.json": {
+    "rubric": "teach",
+    "fail": [
+      "T1"
+    ],
+    "warn": []
+  },
+  "teach_good.json": {
+    "rubric": "teach",
+    "fail": [],
+    "warn": []
+  },
+  "teach_good_no_lists.json": {
+    "rubric": "teach",
+    "fail": [],
+    "warn": []
+  }
+}

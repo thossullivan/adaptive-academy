@@ -1,0 +1,58 @@
+{
+  "_source": "documented",
+  "_note": "The continuation of the paused search turn: the pending search's result, a cited text block, then the source list as JSON in text; end_turn.",
+  "id": "msg_01ResearchContinuation0010",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "web_search_tool_result",
+      "tool_use_id": "srvtoolu_01Search2Ee6Ff7Gg8Hh9",
+      "content": [
+        {
+          "type": "web_search_result",
+          "url": "https://www.deeplearningbook.org/contents/numerical.html",
+          "title": "Numerical Computation — Deep Learning Book",
+          "encrypted_content": "EpQDCioIARgBIiQ0MzA1ZTVkMi1hMDQ4LTRlZmMtOWE5Yy1hZTk0YWJmOGQwNTUaDC2+p/Re4U9yZb1MkTIyCde=",
+          "page_age": "2016"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "A step size above 2/L makes gradient descent diverge on an L-smooth quadratic.",
+      "citations": [
+        {
+          "type": "web_search_result_location",
+          "url": "https://www.cs.cornell.edu/courses/cs4780/2023fa/lectures/gd.html",
+          "title": "Gradient Descent — CS4780 Lecture Notes",
+          "encrypted_index": "Eo8BCioIAhgBIiQ4ZGQ5YjE2Yi1kM2Y0LTRhNzQtYmYzZi03MzQ2ZDM1ZTRiNTMaDOH+q/Sf5V0zAc2NlTI=",
+          "cited_text": "the iterates diverge whenever the step size exceeds 2/L"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "text": "```json\n[\n {\n  \"title\": \"Gradient Descent — CS4780 Lecture Notes\",\n  \"url\": \"https://www.cs.cornell.edu/courses/cs4780/2023fa/lectures/gd.html\",\n  \"tier\": 1,\n  \"summary\": \"Derives the 2/L step-size bound for smooth convex losses.\",\n  \"why\": \"University lecture notes with the derivation.\",\n  \"relevance\": 0.92\n },\n {\n  \"title\": \"An overview of gradient descent optimization algorithms\",\n  \"url\": \"https://arxiv.org/abs/1609.04747\",\n  \"tier\": 2,\n  \"summary\": \"Survey of GD variants and learning-rate behaviour.\",\n  \"why\": \"Widely cited survey.\",\n  \"relevance\": 0.71\n }\n]\n```"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 318,
+    "cache_creation_input_tokens": 2904,
+    "cache_read_input_tokens": 1980,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 2904,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 655,
+    "service_tier": "standard",
+    "server_tool_use": {
+      "web_search_requests": 1,
+      "web_fetch_requests": 0
+    }
+  }
+}

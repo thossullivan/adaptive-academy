@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from adaptive_academy.db import engine, ensure_fts, ensure_vec
 from adaptive_academy.engine.fetch import fetch_artifact_text
+from adaptive_academy.engine.solution_guard import GUARD_MAX_TOKENS
 from adaptive_academy.llm.anchor_types import AnchorClient
 from adaptive_academy.llm.anthropic_anchor import AnthropicAnchorClient
 from adaptive_academy.llm.anthropic_client import AnthropicLLMClient
@@ -42,6 +43,15 @@ def get_llm() -> LLMClient:
         from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
         return AgentSDKLLMClient(role="reasoning")
     return AnthropicLLMClient(role="reasoning")
+
+
+def get_guard_llm() -> LLMClient:
+    """The tutor's solution guard (engine/solution_guard.py): a cheap structured check on
+    the copy role (Haiku by default), on whichever backend the tutor itself uses."""
+    if use_agent_sdk():
+        from adaptive_academy.llm.agent_sdk_client import AgentSDKLLMClient
+        return AgentSDKLLMClient(role="copy")
+    return AnthropicLLMClient(role="copy", max_tokens=GUARD_MAX_TOKENS)
 
 
 def get_researcher() -> ResearcherClient:

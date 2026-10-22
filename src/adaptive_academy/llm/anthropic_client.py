@@ -1,5 +1,6 @@
 from typing import Any
 
+import httpx
 import pydantic
 from anthropic import Anthropic
 
@@ -58,7 +59,13 @@ class AnthropicLLMClient:
     responses are read by block type so `thinking` blocks are skipped.
     """
 
-    def __init__(self, role: str = "reasoning", max_tokens: int = 20_000):
+    def __init__(
+        self,
+        role: str = "reasoning",
+        max_tokens: int = 20_000,
+        *,
+        http_client: httpx.Client | None = None,
+    ):
         # max_tokens covers thinking + text on models that think by default (Sonnet/Haiku 5.5),
         # and thinking tokens bill as output only when generated — the ceiling itself is free
         # insurance against a structured answer (e.g. a full curriculum track) being cut off
@@ -66,7 +73,12 @@ class AnthropicLLMClient:
         # Known limit: the SDK's own retries (after a read timeout or dropped connection)
         # happen inside messages.create and their usage is never reported back, so a
         # retried call is recorded (and counted against the daily limit) only once.
-        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3)
+        # `http_client` is a test seam: tests/test_response_replay.py passes an httpx.Client
+        # on a MockTransport to replay API responses through the real SDK, and
+        # scripts/record_response_fixtures.py one with a capture hook. The app passes
+        # nothing and gets the SDK's default client.
+        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=3,
+                                 http_client=http_client)
         self._role = role
         self._model = get_model(role)
         self._max_tokens = max_tokens

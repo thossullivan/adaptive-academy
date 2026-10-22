@@ -1,0 +1,11 @@
+{
+  "_source": "documented",
+  "_note": "Out of credits: the API sends this as a 400 invalid_request_error, not a 402.",
+  "_status": 400,
+  "type": "error",
+  "error": {
+    "type": "invalid_request_error",
+    "message": "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."
+  },
+  "request_id": "req_011CSHoEeqs5C35K2UUqR7Fy"
+}

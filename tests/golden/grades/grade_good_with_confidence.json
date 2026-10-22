@@ -1,0 +1,9 @@
+{
+  "score": 0.3,
+  "mechanism_present": false,
+  "verdict": "Vocabulary without mechanism.",
+  "gaps": [
+    "mechanism asserted"
+  ],
+  "confidence_actual": 0.25
+}

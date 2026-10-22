@@ -1,0 +1,27 @@
+{
+  "_source": "documented",
+  "_note": "A classifier decline before any output: HTTP 200, empty content, stop_reason refusal with stop_details (type, category, explanation).",
+  "id": "msg_01JsonRefusal0000000000006",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [],
+  "stop_reason": "refusal",
+  "stop_sequence": null,
+  "stop_details": {
+    "type": "refusal",
+    "category": "cyber",
+    "explanation": "This request was declined by a safety classifier."
+  },
+  "usage": {
+    "input_tokens": 1534,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 0,
+    "service_tier": "standard"
+  }
+}

@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, col, select
 
+from adaptive_academy.engine.grade_gate import checked_completion
+from adaptive_academy.engine.output_checks import GRADE_RUBRIC, CheckContext
 from adaptive_academy.jsonout import extract_json
 from adaptive_academy.llm.retriever_types import Retriever
 from adaptive_academy.llm.types import LLMClient
@@ -143,8 +145,9 @@ def parse_rubric_json(text: str) -> RubricDraft:
     )
 
 
-def parse_grade_json(text: str) -> GradeDraft:
-    d = json.loads(extract_json(text))
+def grade_from_dict(d: dict) -> GradeDraft:
+    """A GradeDraft from a grader answer. Lenient on its own; graders run it only on answers
+    that passed output_checks.GRADE_RUBRIC, which is what makes the values trustworthy."""
     return GradeDraft(
         score=_as_float(d.get("score"), 0.0) or 0.0,
         verdict=str(d.get("verdict", "")),
@@ -152,6 +155,10 @@ def parse_grade_json(text: str) -> GradeDraft:
         confidence_actual=_as_float(d.get("confidence_actual"), None),
         mechanism_present=bool(d.get("mechanism_present", True)),
     )
+
+
+def parse_grade_json(text: str) -> GradeDraft:
+    return grade_from_dict(json.loads(extract_json(text)))
 
 
 def build_rubric_prompt(concept_name: str, foundation: TopicFoundation | None,
@@ -237,7 +244,35 @@ def _resolve_anchor(session: Session, concept: Concept,
     return anchor
 
 
-def assess_concept(
+def _emitter(session: Session, topic_id: int | None, events: list[AgentEvent]):
+    def emit(k: str, detail: str = "") -> None:
+        ev = AgentEvent(topic_id=topic_id, kind=k, detail=detail)
+        session.add(ev)
+        events.append(ev)
+    return emit
+
+
+@dataclass
+class CheckedGrade:
+    """A concept grade whose answer passed its output checks. Nothing is written yet:
+    record_grade turns it into an Assessment row (and, for GRADING_KINDS, the estimate)."""
+
+    concept: Concept
+    kind: str
+    response: str
+    probe: str
+    grade: GradeDraft
+    rules_gaps: list[str]
+    topic_id: int | None
+    rubric_id: int | None = None
+    anchor_id: int | None = None
+    item_id: int | None = None
+    confidence_predicted: float | None = None
+    baseline_id: int | None = None
+    events: list[AgentEvent] = field(default_factory=list)
+
+
+def grade_concept(
     session: Session,
     concept: Concept,
     kind: str,
@@ -248,11 +283,11 @@ def assess_concept(
     baseline_id: int | None = None,
     item_id: int | None = None,
     anchor_id: int | None = None,
-    retriever: Retriever | None = None,
-) -> AssessmentResult:
-    """Run an anchored probe, persist an Assessment, and (for GRADING_KINDS) update the
-    KnowledgeEstimate."""
-    from adaptive_academy.engine.memory import index_assessment, topic_id_for_concept
+) -> CheckedGrade:
+    """Run the anchored probe's grader call through its output checks. Writes trace events
+    (and, on first use, the concept's rubric) but no Assessment row and no estimate; a grade
+    that fails its checks twice raises GradeCheckError (`invalid_output`)."""
+    from adaptive_academy.engine.memory import topic_id_for_concept
 
     if kind not in ASSESSABLE_KINDS:
         raise AssessKindError(
@@ -260,11 +295,7 @@ def assess_concept(
 
     events: list[AgentEvent] = []
     topic_id = topic_id_for_concept(session, concept.id)
-
-    def emit(k: str, detail: str = "") -> None:
-        ev = AgentEvent(topic_id=topic_id, kind=k, detail=detail)
-        session.add(ev)
-        events.append(ev)
+    emit = _emitter(session, topic_id, events)
 
     # Resolve the anchor (rubric vs. acceptance criteria) and the probe text.
     rubric_id: int | None = None
@@ -290,12 +321,34 @@ def assess_concept(
             concept=concept.name, question=concept.name)
     emit("assess:probe", kind)
 
+    rules_gaps = apply_rules_checks(response, must_include, weak_signs)
     emit("prompt", GRADE.tag)
     system, user = build_grade_prompt(concept.name, kind, criteria, reference, response)
-    grade = parse_grade_json(
-        llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[]).text)
+    answer, _report = checked_completion(
+        session, llm, system=system, user=user, rubric=GRADE_RUBRIC, emit=emit,
+        ctx=CheckContext(rules_gaps=tuple(rules_gaps)))
+    return CheckedGrade(
+        concept=concept, kind=kind, response=response, probe=probe,
+        grade=grade_from_dict(answer), rules_gaps=rules_gaps, topic_id=topic_id,
+        rubric_id=rubric_id, anchor_id=anchor_ref_id, item_id=item_id,
+        confidence_predicted=confidence_predicted, baseline_id=baseline_id, events=events)
 
-    rules_gaps = apply_rules_checks(response, must_include, weak_signs)
+
+def record_grade(
+    session: Session,
+    checked: CheckedGrade,
+    *,
+    retriever: Retriever | None = None,
+) -> AssessmentResult:
+    """Write a checked grade: the Assessment row and, for GRADING_KINDS, the estimate.
+    Flushes but does not commit, so a caller can write several grades atomically."""
+    from adaptive_academy.engine.memory import index_assessment
+
+    concept, kind, grade, rules_gaps = (
+        checked.concept, checked.kind, checked.grade, checked.rules_gaps)
+    events = checked.events
+    emit = _emitter(session, checked.topic_id, events)
+
     if rules_gaps:
         emit("assess:rules", f"{len(rules_gaps)} hard gap(s)")
     # Code-enforced illusion-of-competence cap: fluent prose with no demonstrated mechanism
@@ -308,20 +361,21 @@ def assess_concept(
     gaps = list(grade.gaps) + rules_gaps
     emit("assess:graded", f"score={final_score}")
 
+    baseline_id = checked.baseline_id
     baseline = session.get(Assessment, baseline_id) if baseline_id else None
     delta = compute_delta(final_score, baseline.score if baseline else None)
     confidence_actual = final_score if kind == "calibration" else grade.confidence_actual
 
     assessment = Assessment(
-        concept_id=concept.id, item_id=item_id, kind=kind, prompt=probe, response=response,
-        verdict=grade.verdict, score=final_score, gaps=gaps,
-        confidence_predicted=confidence_predicted, confidence_actual=confidence_actual,
-        rubric_id=rubric_id, anchor_id=anchor_ref_id,
+        concept_id=concept.id, item_id=checked.item_id, kind=kind, prompt=checked.probe,
+        response=checked.response, verdict=grade.verdict, score=final_score, gaps=gaps,
+        confidence_predicted=checked.confidence_predicted, confidence_actual=confidence_actual,
+        rubric_id=checked.rubric_id, anchor_id=checked.anchor_id,
         baseline_assessment_id=baseline_id, delta=delta,
         prompt_tag=GRADE.tag)  # the grading prompt, as traced above (not RUBRIC)
     session.add(assessment)
     session.flush()
-    index_assessment(session, assessment, topic_id=topic_id, retriever=retriever)
+    index_assessment(session, assessment, topic_id=checked.topic_id, retriever=retriever)
 
     estimate: KnowledgeEstimate | None = None
     if kind in GRADING_KINDS:
@@ -335,8 +389,33 @@ def assess_concept(
         emit("assess:estimate", f"level={level}")
 
     emit("assess:done", f"concept {concept.id}")
-    session.commit()
-    session.refresh(assessment)
-    if estimate is not None:
-        session.refresh(estimate)
+    session.flush()
     return AssessmentResult(assessment=assessment, estimate=estimate, events=events)
+
+
+def assess_concept(
+    session: Session,
+    concept: Concept,
+    kind: str,
+    response: str,
+    *,
+    llm: LLMClient,
+    confidence_predicted: float | None = None,
+    baseline_id: int | None = None,
+    item_id: int | None = None,
+    anchor_id: int | None = None,
+    retriever: Retriever | None = None,
+) -> AssessmentResult:
+    """Run an anchored probe, persist an Assessment, and (for GRADING_KINDS) update the
+    KnowledgeEstimate. Fails closed: a grade that fails its output checks twice raises
+    GradeCheckError before anything is written."""
+    checked = grade_concept(
+        session, concept, kind, response, llm=llm,
+        confidence_predicted=confidence_predicted, baseline_id=baseline_id,
+        item_id=item_id, anchor_id=anchor_id)
+    result = record_grade(session, checked, retriever=retriever)
+    session.commit()
+    session.refresh(result.assessment)
+    if result.estimate is not None:
+        session.refresh(result.estimate)
+    return result

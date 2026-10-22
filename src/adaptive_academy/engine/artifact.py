@@ -17,8 +17,10 @@ from dataclasses import dataclass, field
 
 from sqlmodel import Session, select
 
-from adaptive_academy.engine.assess import _NO_MECHANISM_CEIL, parse_grade_json
+from adaptive_academy.engine.assess import _NO_MECHANISM_CEIL, grade_from_dict
 from adaptive_academy.engine.fetch import fetch_artifact_text
+from adaptive_academy.engine.grade_gate import checked_completion
+from adaptive_academy.engine.output_checks import ARTIFACT_RUBRIC
 from adaptive_academy.engine.trace import trace_prompt
 from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import AgentEvent, Assessment, Concept, Deliverable, Item, Phase, Track
@@ -78,20 +80,27 @@ def review_artifact(
     a per-concept artifact_review (the 'shipped' signal). The mechanism cap applies.
 
     If an artifact_url is given, its text is best-effort fetched (SSRF-guarded) and graded
-    alongside the pasted content; a fetch failure degrades silently to paste-only."""
-    if artifact_url:
-        deliverable.artifact_url = artifact_url
+    alongside the pasted content; a fetch failure degrades silently to paste-only.
 
+    Fails closed: a review that fails its output checks twice raises GradeCheckError before
+    the deliverable or any artifact_review row is touched."""
     fetched = fetch(artifact_url) if artifact_url else None
     graded_content = _merge_artifact_text(fetched, content)
 
     phase = session.get(Phase, deliverable.phase_id)
     topic_id = session.get(Track, phase.track_id).topic_id if phase else None
 
+    def emit(kind: str, detail: str = "") -> None:
+        session.add(AgentEvent(topic_id=topic_id, kind=kind, detail=detail))
+
     system, user = build_artifact_prompt(deliverable, graded_content)
     trace_prompt(session, ASSESS_ARTIFACT, topic_id=topic_id)
-    grade = parse_grade_json(
-        llm.complete(system=system, messages=[{"role": "user", "content": user}], tools=[]).text)
+    answer, _report = checked_completion(
+        session, llm, system=system, user=user, rubric=ARTIFACT_RUBRIC, emit=emit)
+    grade = grade_from_dict(answer)
+
+    if artifact_url:
+        deliverable.artifact_url = artifact_url
 
     score = grade.score
     if not grade.mechanism_present:

@@ -1,0 +1,33 @@
+{
+  "_source": "documented",
+  "_note": "complete_json miss: tool_choice auto lets the model answer in prose instead of the tool; end_turn with text only, which triggers the corrective retry.",
+  "id": "msg_01JsonTextOnly000000000005",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "ErcBCkgIBxABGAIqQJ9+Qe2Rf3/Sg4Th5Ui6Vj7Wk8Xl9Ym0Zn1Ao2Bp3Cq4Dr5Es6Ft7Gu8Hv9Iw0Jx1Ky2Lz3Ma4Nb5Oc6Pd7Qe8Rf9Sg0Th1Ui2Vj3Wk4Xl5Ym6Zn7Ao8Bp9Cq0Dr1Es2Ft3Gu4Hv5Iw6Jx7Ky8Lz9M="
+    },
+    {
+      "type": "text",
+      "text": "The learner's answer is partially correct: score 0.75, missing the 2/L bound."
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 1534,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 61,
+    "service_tier": "standard"
+  }
+}

@@ -4,7 +4,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from sqlmodel.pool import StaticPool
 
 from adaptive_academy.api.app import create_app
-from adaptive_academy.api.deps import get_llm, get_retriever, get_session
+from adaptive_academy.api.deps import get_guard_llm, get_llm, get_retriever, get_session
 from adaptive_academy.engine.memory import index_text
 from adaptive_academy.llm.scripted_client import ScriptedLLMClient
 from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
@@ -41,11 +41,16 @@ def client():
                                          input={"text": "SECRET"})]),
         LLMResponse(text="Hint: what does softmax normalize?"),
     ])
+    # The solution guard's copy-role client: the pre-attempt reply above passes.
+    guard = ScriptedLLMClient([
+        LLMResponse(text='{"gives_away_solution": false, "reason": "a hint"}'),
+    ])
 
     app = create_app()
     retriever = ScriptedRetriever()
     app.dependency_overrides[get_session] = _session_override
     app.dependency_overrides[get_llm] = lambda: scripted
+    app.dependency_overrides[get_guard_llm] = lambda: guard
     app.dependency_overrides[get_retriever] = lambda: retriever
     c = TestClient(app)
     c.engine = engine
@@ -74,6 +79,9 @@ def test_send_message_blocks_reveal_before_attempt(client):
     assert "SECRET" not in resp["reply"]
     assert resp["attempt_logged"] is False
     assert any("reveal_solution:blocked" in e["kind"] for e in resp["events"])
+    # The reply text itself went through the solution guard (no attempt logged yet).
+    assert ("guard:solution_checked", "source=model gives_away=false") in [
+        (e["kind"], e["detail"]) for e in resp["events"]]
     assert resp["memory"] == []
 
 

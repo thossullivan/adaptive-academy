@@ -31,6 +31,7 @@ from sqlmodel import select
 from adaptive_academy.engine.curriculum import CURRICULUM_SCHEMA
 from adaptive_academy.engine.program_research import PROGRAM_SCHEMA
 from adaptive_academy.engine.revision import REVISION_SCHEMA
+from adaptive_academy.engine.solution_guard import GUARD_SCHEMA
 from adaptive_academy.llm import usage
 from adaptive_academy.llm.researcher_types import SearchBrief
 from adaptive_academy.llm.strict_schema import to_strict_schema
@@ -43,6 +44,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "adaptive_academy"
 # below fails if a caller is added without being audited here.
 REAL_SCHEMAS = {
     "CURRICULUM_SCHEMA": CURRICULUM_SCHEMA,
+    "GUARD_SCHEMA": GUARD_SCHEMA,
     "PROGRAM_SCHEMA": PROGRAM_SCHEMA,
     "REVISION_SCHEMA": REVISION_SCHEMA,
     "SCOUT_SCHEMA": SCOUT_SCHEMA,

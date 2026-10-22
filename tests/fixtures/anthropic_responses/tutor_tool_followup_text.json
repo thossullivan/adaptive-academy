@@ -1,0 +1,33 @@
+{
+  "_source": "documented",
+  "_note": "The follow-up turn after the tool results: empty thinking then the reply text, read almost entirely from the cache.",
+  "id": "msg_01TutorFollowupText0000003",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "EuoBCkgIBxABGAIqQFr4/Ms5+Nt6Ou7Pv8Qw9Rx0Sy1Tz2Ua3Vb4Wc5Xd6Ye7Zf8Ag9Bh0Ci1Dj2Ek3Fl4Gm5Hn6Io7Jp8Kq9Lr0Ms1Nt2Ou3Pv4Qw5Rx6Sy7Tz8Ua9Vb0Wc1Xd2Ye3Zf4Ag5Bh6Ci7Dj8E="
+    },
+    {
+      "type": "text",
+      "text": "Here's the full solution, since you've made your attempt: the step size must stay below 2/L."
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 42,
+    "cache_creation_input_tokens": 310,
+    "cache_read_input_tokens": 3622,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 310,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 120,
+    "service_tier": "standard"
+  }
+}

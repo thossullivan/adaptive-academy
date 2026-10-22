@@ -1,6 +1,7 @@
 import json
 import logging
 
+import httpx
 from anthropic import Anthropic
 
 from adaptive_academy.jsonout import extract_json
@@ -49,7 +50,14 @@ def parse_sources_json(text: str) -> list[RawSource]:
 class AnthropicResearcherClient:
     """Real fan-out subagent: one Anthropic Messages call with the web_search tool."""
 
-    def __init__(self, role: str = "reasoning", max_tokens: int = 16_000, max_searches: int = 5):
+    def __init__(
+        self,
+        role: str = "reasoning",
+        max_tokens: int = 16_000,
+        max_searches: int = 5,
+        *,
+        http_client: httpx.Client | None = None,
+    ):
         # 16k, not 2048 (or 8192): a web_search turn spends output tokens on the search then
         # the source JSON, and on models that think by default (Sonnet/Haiku 5.5) max_tokens
         # also covers the thinking. At 2048 it hit max_tokens and truncated mid-JSON, so every
@@ -58,7 +66,9 @@ class AnthropicResearcherClient:
         # Known limit: the SDK's own retries (after a read timeout or dropped connection)
         # happen inside messages.create and their usage is never reported back, so a
         # retried search is recorded (and counted against the daily limit) only once.
-        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=2)
+        # `http_client`: test seam only, as on AnthropicLLMClient.
+        self._client = Anthropic(api_key=require_anthropic_api_key(), max_retries=2,
+                                 http_client=http_client)
         self._role = role
         self._model = get_model(role)
         self._max_tokens = max_tokens

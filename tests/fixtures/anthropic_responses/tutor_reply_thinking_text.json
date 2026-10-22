@@ -1,0 +1,33 @@
+{
+  "_source": "documented",
+  "_note": "Tutor reply on Sonnet 5.5: an adaptive-thinking block with display omitted (empty text, signature only), then the reply text; usage splits cache writes 5m/1h.",
+  "id": "msg_01TutorReplyThinkingText0001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "EqQBCkgIBxABGAIqQKz3+v9Jk1mN0pQ2rS4tU6vW8xY0zA1bC2dE3fG4hH5iI6jJ7kK8lL9mM0nN1oO2pP3qQ4rR5sS6tT7uU8vV9wW0xX1yY2zZ3/4aA5bB6cC7dD8eE9fF0gG1hH2iI3jJ4kK5lL6mM7nN8oO9pP=="
+    },
+    {
+      "type": "text",
+      "text": "Good start. Before I say more — what happens to the gradient when the learning rate is too large?"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 412,
+    "cache_creation_input_tokens": 2000,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 1500,
+      "ephemeral_1h_input_tokens": 500
+    },
+    "output_tokens": 236,
+    "service_tier": "standard"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "_source": "documented",
+  "_note": "complete_json success: empty thinking, then one strict tool_use call carrying the schema-valid answer; stop_reason tool_use.",
+  "id": "msg_01JsonStrictToolUse0000004",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-5-5",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "",
+      "signature": "EqQBCkgIBxABGAIqQKz3+v9Jk1mN0pQ2rS4tU6vW8xY0zA1bC2dE3fG4hH5iI6jJ7kK8lL9mM0nN1oO2pP3qQ4rR5sS6tT7uU8vV9wW0xX1yY2zZ3/4aA5bB6cC7dD8eE9fF0gG1hH2iI3jJ4kK5lL6mM7nN8oO9pP=="
+    },
+    {
+      "type": "tool_use",
+      "id": "toolu_01EmitGrade9m8N7b6V5c4X3z",
+      "name": "emit_grade",
+      "input": {
+        "score": 0.75,
+        "verdict": "partial",
+        "gaps": [
+          "Did not mention the 2/L bound"
+        ]
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 1534,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+      "ephemeral_5m_input_tokens": 0,
+      "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 214,
+    "service_tier": "standard"
+  }
+}

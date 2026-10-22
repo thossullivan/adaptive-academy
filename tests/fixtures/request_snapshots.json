@@ -266,6 +266,156 @@
       ]
     }
   ],
+  "tutor_solution_guard": [
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "0de7fca9752a5456d67ab85d2de8f2b4c4a3840cb10e6d624dc39f0c66daff08",
+      "other_params": {},
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "operation": "complete_json",
+      "role": "copy",
+      "model": "claude-haiku-5-5",
+      "max_tokens": 4000,
+      "system": [
+        {
+          "sha256": "87f7c0ffd8c2d4bfd7690c7080e106a93671075313f8c258446730a965891af9",
+          "chars": 1888
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "emit_solution_check",
+          "type": "custom",
+          "sha256": "d742f76eb9d8b7052576bcde4cf22b3a658ebd9590aa8698f4f7fa536a4c25d8"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "511ec8b16490a6b11a48e95d0ef7ae13a333a1687ff13a0c91c004644acb0638",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    },
+    {
+      "operation": "complete",
+      "role": "reasoning",
+      "model": "claude-sonnet-5-5",
+      "max_tokens": 20000,
+      "system": [
+        {
+          "sha256": "2233400f03d9a04dc0ad0bb331b88408b93d08c689eb2908ec7b9381651c3a9a",
+          "chars": 2349
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "log_attempt",
+          "type": "custom",
+          "sha256": "081fbd3588a37850c92892f13486ce223c0d35687cebe398510a2a84f311bc8c"
+        },
+        {
+          "name": "reveal_solution",
+          "type": "custom",
+          "sha256": "3ef96eb978376faa9c9d21d15f59ca7f6e9b88c883508bedaae02340617fa105"
+        }
+      ],
+      "tool_choice": null,
+      "message_roles": [
+        "user",
+        "assistant",
+        "user"
+      ],
+      "messages_sha256": "b7d3d746fa8fa943e609b219de9a08d6dd6ad708dccf405ef65222b22a63f36c",
+      "other_params": {},
+      "cache_control": [
+        "top-level",
+        "system[0]"
+      ]
+    },
+    {
+      "operation": "complete_json",
+      "role": "copy",
+      "model": "claude-haiku-5-5",
+      "max_tokens": 4000,
+      "system": [
+        {
+          "sha256": "87f7c0ffd8c2d4bfd7690c7080e106a93671075313f8c258446730a965891af9",
+          "chars": 1888
+        },
+        {
+          "sha256": "dbeec4f57baf54267dcc53da74b0b9ddd2d17cd59e3b777bb44f7c854d422048",
+          "chars": 38
+        }
+      ],
+      "tools": [
+        {
+          "name": "emit_solution_check",
+          "type": "custom",
+          "sha256": "d742f76eb9d8b7052576bcde4cf22b3a658ebd9590aa8698f4f7fa536a4c25d8"
+        }
+      ],
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": true
+      },
+      "message_roles": [
+        "user"
+      ],
+      "messages_sha256": "eca21d4a13d28978dfd8920941128487741591a26faf634c3a4159db284e3b56",
+      "other_params": {},
+      "cache_control": [
+        "system[0]"
+      ]
+    }
+  ],
   "tutor_turn": [
     {
       "operation": "complete",
