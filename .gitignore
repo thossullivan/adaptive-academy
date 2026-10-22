@@ -23,6 +23,7 @@ frontend/build/
 *.db
 *.db-wal
 *.db-shm
+*.db.bak*
 
 # `aa backup` / `aa export` output (your learning record; never commit it)
 backups/
@@ -34,3 +35,6 @@ backups/
 
 # Default empty vault mount for docker compose
 /data/
+
+# macOS
+.DS_Store

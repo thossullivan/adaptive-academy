@@ -11,15 +11,11 @@ Items marked **good first issue** are self-contained and a good way into the cod
 - **Browse past Tutor conversations.** Today every visit to the Tutor starts a new session, and
   past ones can't be opened. The design must keep the attempt gate per session: reopening an old
   conversation must not unlock `reveal_solution` without a new attempt.
-- **Stop saving empty Tutor sessions.** Opening the Tutor page creates a conversation row even
-  if nothing is sent. Create it on the first message instead. *Good first issue.*
 - **New concepts start at the right difficulty.** The curriculum seeds every concept's estimate
   as "high", and the Tutor, roleplay, and paper probe read it to set assistance and challenge
   until the first graded assessment. Start ungraded concepts at a neutral level instead.
 - **Reach roleplay and paper probe from a topic.** They are only reachable from a program
   milestone today, so a single topic (and the demo) can't use them.
-- **Sidebar fits a laptop screen.** At 1440x900 the rail scrolls and hides the Reflect links.
-  *Good first issue.*
 - **Published container image.** The release workflow builds `ghcr.io/thossullivan/adaptive-academy`
   on a version tag (see [docs/RELEASING.md](docs/RELEASING.md)); the first tagged release makes
   `docker run` the quickest way in.
