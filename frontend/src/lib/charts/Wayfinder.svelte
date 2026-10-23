@@ -71,7 +71,7 @@
     </div>
 
     {#if !phases.length && !reached}
-      <p class="pb-8 text-center text-sm text-faint">No waypoints charted yet — generate a phased track to plot the voyage.</p>
+      <p class="pb-8 text-center text-sm text-faint">No waypoints charted yet. Generate a phased track to plot the voyage.</p>
     {/if}
 
     <!-- Waypoints, ascending (Phase 1 → Phase N) -->
@@ -161,7 +161,7 @@
         <div class="eyebrow !text-accent">{reached ? "you've arrived" : 'your north star'}</div>
         <p class="mt-1 font-display text-lg leading-snug text-fg">{goal || 'Chart a goal to steer by'}</p>
         {#if reached}
-          <p class="mt-1 text-sm text-success">Every waypoint charted — the voyage to mastery is complete. 🜨</p>
+          <p class="mt-1 text-sm text-success">Every waypoint charted. The voyage is complete.</p>
         {:else}
           <p class="mt-1 text-xs text-faint">the destination you're steering toward</p>
         {/if}

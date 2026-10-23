@@ -71,7 +71,7 @@ test('README video', async ({ page }) => {
   await page.mouse.move(pointer.x, pointer.y);
   await pause(page, 2500);
   await clickSlowly(page, page.getByRole('button', { name: /^Why is Causal Self-Attention / }));
-  await expect(page.getByText(/^Shaky — /).first()).toBeVisible();
+  await expect(page.getByText(/^Shaky: /).first()).toBeVisible();
   await pause(page, 3500);
 
   // 2. Today: what to do next.
@@ -89,8 +89,13 @@ test('README video', async ({ page }) => {
       await pause(page, 1800);
     }
     await clickSlowly(page, composer());
-    // About two seconds of typing per message, however long it is.
-    await composer().pressSequentially(text, { delay: Math.min(35, 2000 / text.length) });
+    // About two seconds of typing per message, however long it is. Enter would send, so a
+    // line break is Shift+Enter, as a learner types it.
+    const delay = Math.min(35, 2000 / text.length);
+    for (const [i, line] of text.split('\n').entries()) {
+      if (i > 0) await composer().press('Shift+Enter');
+      await composer().pressSequentially(line, { delay });
+    }
     await pause(page, 400);
     await clickSlowly(page, page.getByRole('button', { name: attempt ? 'Submit attempt' : 'Send' }));
     await pause(page, 2800);

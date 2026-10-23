@@ -24,7 +24,7 @@ video.
 | ![The dashboard of the demo topic: progress, concepts, cards due, and each concept's signals and verdict, beside a calibration plot](docs/images/dashboard.png) | ![Today's session: review, build, probe the weakest concept, teach it back](docs/images/today.png) |
 | **Dashboard**: one topic at a glance. | **Today**: what to do next, based on where you are. |
 | ![A tutor conversation where the tutor asks questions until the learner makes an attempt](docs/images/tutor.png) | ![The concept graph, with stars coloured by how well each concept is known](docs/images/constellation.png) |
-| **Tutor**: questions until you've made an attempt, then the full answer. (This one is a saved demo conversation. Browsing your past sessions is planned.) | **Constellation**: your concepts as a graph. |
+| **Tutor**: hints and questions until you press Submit attempt, then the worked solution. (This one is a saved demo conversation. Browsing your past sessions is planned.) | **Constellation**: your concepts as a graph. |
 | ![The knowledge map, showing why one concept is shaky and another is solid](docs/images/competence.png) | ![The Usage page: spend by day, feature, and model, with a daily limit](docs/images/usage.png) |
 | **Why this verdict**: what each concept's rating is based on, and what would raise it. | **Usage**: what each feature costs. The demo makes no AI calls, so these numbers are based on a real test run. |
 
@@ -45,6 +45,19 @@ There's also a [phone layout](docs/images/phone-today.png).
   notes, attempts, graded explanations, and worked solutions.
 - Remembers what you've read and what it already explained, so it doesn't repeat itself.
 - Shows what each agent did and what each call cost.
+
+## How good is the grading?
+
+Grades decide what the app thinks you know, so they are tested. A set of 55 hand-written answers
+about gradient descent, backpropagation, Bayes' theorem, maximum likelihood, and L2
+regularization covers correct answers in other wording, answers missing a key idea, common
+misconceptions, confident wrong answers, and answers that try to talk the grader into a high
+score.
+
+With the default model and settings, no weak answer was graded as mastered (0 of 34), and 1 good
+answer of 52 was marked as missing something it had. You can make the grader more or less strict
+with `AA_GRADING_STRICTNESS`. The numbers for each level, and how to run the test yourself, are
+in [evals/grading](evals/grading/README.md).
 
 ## Get started
 

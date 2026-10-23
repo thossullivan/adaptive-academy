@@ -308,7 +308,7 @@
       <Card pad class="mb-4 rise" data-testid="demo-notice">
         <div class="flex flex-wrap items-center gap-x-4 gap-y-3">
           <p class="min-w-0 flex-1 basis-64 text-sm leading-relaxed text-fg-dim">
-            <span class="font-medium text-fg">This is a demo topic</span> — example data from a few weeks of use, so you
+            <span class="font-medium text-fg">This is a demo topic:</span> example data from a few weeks of use, so you
             can see what each page does. Browsing it needs no API key; running the agents does.
           </p>
           <div class="contents" bind:this={demoActions}>

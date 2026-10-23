@@ -82,7 +82,7 @@
 
 <svelte:head><title>Wayfinder · Adaptive Academy</title></svelte:head>
 
-<Page eyebrow="Wayfinder" title="Chart your voyage" lead="Your goal is the North Star. Each phase is a waypoint you steer toward — here's where you stand and what to aim for next." width="normal">
+<Page eyebrow="Wayfinder" title="Chart your voyage" lead="Your goal is the North Star. Each phase is a waypoint you steer toward. Here's where you stand and what to aim for next." width="normal">
   {#snippet actions()}
     <Button variant="outline" href="/topics/{topicId}/map">Constellation</Button>
     <Button href="/topics/{topicId}/today">Today's session →</Button>
