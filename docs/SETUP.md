@@ -105,8 +105,8 @@ AA_GRADING_STRICTNESS=strict
 
 - `lenient` gives credit for a key idea you show briefly or informally.
 - `standard` (the default) is the grading the rest of these docs describe.
-- `strict` gives credit only for a key idea you state or show clearly, and expects you to
-  explain how it works, not just name it.
+- `strict` gives credit only for a key idea you state or show clearly. Naming the idea is not
+  enough: you have to explain how it works.
 
 The level changes how the grader judges your answer, not the limits the code puts on the
 score: at most 0.70 with a key idea missing and at most 0.50 for a misconception, at every

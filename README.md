@@ -2,11 +2,11 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-A learning app you run on your own machine. Pick something to learn and it researches the topic,
-builds a study plan, tutors you, and keeps track of what you actually know.
+A learning app you run on your own machine. Give it something to learn and it finds sources and
+builds a study plan. Then it tutors you and keeps track of what you actually know.
 
-The tutor won't give you the answer until you've tried. That rule lives in the code, not just the
-prompt.
+The tutor won't give you the answer until you've tried. The code blocks the answer until then, so
+asking a different way doesn't help.
 
 It runs on your own Anthropic API key, or an OpenRouter key. Your learning records stay on your
 computer, but each AI request is still sent to the model's provider.
@@ -99,8 +99,8 @@ starting a new topic (research, curriculum, a few tutor turns, a grade) cost abo
 Claude Sonnet 5.5 and about 20 cents on DeepSeek V4.1 Flash through OpenRouter. Most of that is
 the web research. A tutor turn costs about a cent. A busy day can reach a few dollars.
 
-The **Usage** page shows what you've spent, by day, feature, and model. To set a daily limit,
-add `AA_DAILY_BUDGET_USD=5` to `.env`. Details and limits of that cap are in
+The **Usage** page shows what you've spent each day, and on which features and models. To set
+a daily limit, add `AA_DAILY_BUDGET_USD=5` to `.env`. Details and limits of that cap are in
 [docs/COSTS.md](docs/COSTS.md).
 
 Your records are stored on your machine. There's no account and no telemetry. The content of
@@ -116,7 +116,8 @@ Everything is one SQLite file. Open **Your data** in the sidebar to download a b
 
 ## How it's built
 
-Python, FastAPI, SQLite, and the Anthropic SDK on the back end; SvelteKit on the front end.
+The back end is Python and FastAPI, with SQLite for storage and the Anthropic SDK for model calls.
+The front end is SvelteKit.
 
 Each feature started as a written design and a step-by-step plan before any code. Those
 documents are in the repo, and they explain the reasoning better than the code does:
@@ -127,7 +128,7 @@ documents are in the repo, and they explain the reasoning better than the code d
 
 ## Contributing
 
-It's early (pre-1.0), so expect rough edges. Issues, ideas, and pull requests are welcome. See
+It's early (pre-1.0), so expect rough edges. Issues and pull requests are welcome. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for how to run the tests, and [ROADMAP.md](ROADMAP.md) for
 what's planned. Please read the [Code of Conduct](CODE_OF_CONDUCT.md) and the
 [security policy](SECURITY.md) too.

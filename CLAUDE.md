@@ -1,4 +1,4 @@
-# Adaptive Academy — Working Notes
+# Adaptive Academy: Working Notes
 
 Guidance for anyone (human or agent) working in this repo. For the product overview and the
 architecture diagram, read [`docs/OVERVIEW.md`](docs/OVERVIEW.md); for setup and run instructions,
@@ -9,7 +9,7 @@ architecture diagram, read [`docs/OVERVIEW.md`](docs/OVERVIEW.md); for setup and
 **Local-first, agent-orchestrated, generation-first learning.** A personal, private learning
 environment where specialized agents coordinate through shared state, the competence model is kept
 honest by triangulating independent signals, and the tutor withholds answers until you've generated
-an attempt — enforced in code, not just asked for in a prompt.
+an attempt. The code enforces that rule; the prompt alone can't be trusted to.
 
 ## Stack
 
@@ -22,7 +22,7 @@ an attempt — enforced in code, not just asked for in a prompt.
 
 ```
 src/adaptive_academy/
-  models.py      SQLModel tables — the single source of truth
+  models.py      SQLModel tables: the single source of truth
   prompts.py     version-tagged prompt registry (every tag traced into AgentEvent)
   db.py          engine/session, WAL + PRAGMA foreign_keys=ON
   api/           FastAPI routers (REST under /api)
@@ -37,16 +37,16 @@ tests/           pytest suite (runs with no live API calls)
 
 ## Design Principles
 
-### 1. State-driven, not call-driven
-- **SQLite is the single source of truth.** Agents coordinate through shared, typed SQLModel state —
-  never direct agent-to-agent calls.
+### 1. State-driven
+- **SQLite is the single source of truth.** Agents coordinate through shared, typed SQLModel state.
+  They never call each other directly.
 - **The `Assessment` table is the spine.** Every competence signal (self-explanation, decay/recall,
   calibration, teach-back, artifacts) derives from real, logged actions. Don't invent competence
   from anything that isn't a logged `Assessment` row.
-- **`AgentEvent` is the observability trace,** not a debug log — "What the agents did" is a
-  first-class UI surface. New agent actions should emit events.
+- **`AgentEvent` is the observability trace.** It backs "What the agents did", a first-class UI
+  surface, so treat it as product data. New agent actions should emit events.
 - **Migrations for every schema change.** Use plain `op.add_column` on populated,
-  FK-referenced tables — `batch_alter_table` recreates the table and breaks foreign keys on real
+  FK-referenced tables. `batch_alter_table` recreates the table and breaks foreign keys on real
   data. Tests run with `PRAGMA foreign_keys=ON` for prod parity.
 
 ### 2. Agent specialization
@@ -54,14 +54,14 @@ tests/           pytest suite (runs with no live API calls)
   has one clear responsibility and its own prompt(s) in `prompts.py`.
 - New capabilities are added as new `engine/` modules without changing existing ones.
 
-### 3. Enforcement in code, not vibes
+### 3. Enforcement in code
 - Behaviors that matter for pedagogy or safety live in code paths, so they hold even when a prompt
   is coaxed: the gated `reveal_solution` tool (withhold solutions until an attempt is logged),
   SSRF-guarded artifact fetch, forced structured output. Don't move these into prompt text.
 
 ### 4. Pluggable, deterministically testable LLM layer
 - The `llm/` client registry swaps the real Anthropic SDK for a **scripted** client. The whole
-  agent crew is testable with **no live API calls** — keep it that way. New LLM-backed code goes
+  agent crew is testable with **no live API calls**. Keep it that way. New LLM-backed code goes
   through the registry, never a direct SDK import in `engine/`.
 
 ### 5. Progressive enhancement
@@ -83,10 +83,10 @@ subagent-driven development with adversarial code review. Those documents *are* 
 
 - **Type-safe outputs:** all LLM interactions return validated structured output.
 - **Local & private:** all learning records stay on the local machine; no telemetry. (Be honest that
-  each AI call still ships its content to Anthropic's API — "local-first" refers to *records*, not
-  offline inference.)
-- **BYOK:** the app runs on the user's `ANTHROPIC_API_KEY`. Secrets live in `.env` (gitignored) —
-  never commit keys or real user data.
+  each AI call still ships its content to the model's provider. "Local-first" refers to *records*;
+  inference is not offline.)
+- **BYOK:** the app runs on the user's `ANTHROPIC_API_KEY`. Secrets live in `.env` (gitignored).
+  Never commit keys or real user data.
 - **Graceful degradation:** an agent failure should reduce functionality, not corrupt learning
   state.
 

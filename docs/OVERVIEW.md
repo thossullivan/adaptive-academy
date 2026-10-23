@@ -19,13 +19,12 @@ The basic loop, with every agent's work visible:
 2. **Curriculum**: a Director turns those into a track, in phases, toward your goal.
 3. **Tutor**: asks you questions instead of lecturing, and won't show a full solution until
    you've submitted an attempt with the **Submit attempt** button and the app has checked it
-   has some substance. This is enforced in code (a gated `reveal_solution` tool), not just
-   asked for in the prompt.
+   has some substance. The code enforces this with a gated `reveal_solution` tool.
 4. **Assess**: grades your work and updates what the app thinks you know.
 
 On top of that loop:
 
-- **Several checks, not one grade.** A concept is "solid" only when separate signals agree:
+- **Several checks agree.** A concept is "solid" only when separate signals agree:
   explaining it in your own words, recalling it later, how well your confidence matched your
   grade, teaching it back, and things you build. Click any concept to see why it got its
   verdict.
@@ -95,7 +94,7 @@ On top of that loop:
 - **Testable without an API key.** The model client can be swapped for a scripted one, so the
   whole test suite runs without calling a real model.
 - **Rules live in code.** Holding back solutions and the safety checks on fetched links are
-  code paths, not prompt instructions, so they hold however a prompt is worded.
+  code paths. They hold however a prompt is worded.
 
 ## Stack
 
