@@ -20,7 +20,7 @@ type ConversationOut = {
   attempt_logged: boolean;
   assistance_level: string;
   challenge_level: string;
-  messages: { role: string; content: string; is_attempt: boolean }[];
+  messages: { role: string; content: string; is_attempt: boolean; reveals_solution?: boolean }[];
 };
 
 export type Demo = { id: number; causal: { id: number; name: string } };
@@ -94,6 +94,7 @@ export async function replayTutor(
         reply: replies[i].content,
         attempt_logged: attemptAfter(i),
         attempt_outcome: learner[i].is_attempt ? 'accepted' : null,
+        reveals_solution: !!replies[i].reveals_solution,
         assistance_level: convo.assistance_level,
         challenge_level: convo.challenge_level,
         events: [],

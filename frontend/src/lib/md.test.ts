@@ -33,3 +33,23 @@ describe('blockMd', () => {
     expect(blockMd('line one\nline two')).toBe('line one<br>line two');
   });
 });
+
+describe('blockMd fenced code', () => {
+  it('renders a fenced block as escaped, unformatted code on its own lines', () => {
+    const text = 'Mask first:\n```python\nscores = scores.masked_fill(mask == 0, float("-inf"))\nw = softmax(scores * 2)\n```\nThen softmax.';
+    expect(blockMd(text)).toBe(
+      'Mask first:<code class="md-pre">scores = scores.masked_fill(mask == 0, float("-inf"))\nw = softmax(scores * 2)</code>Then softmax.'
+    );
+  });
+
+  it('never lets HTML in a fenced block through', () => {
+    expect(blockMd('```\n<img src=x onerror=alert(1)>\n```')).toBe(
+      '<code class="md-pre">&lt;img src=x onerror=alert(1)&gt;</code>'
+    );
+  });
+
+  it('leaves an unclosed fence as text and keeps inline code working beside blocks', () => {
+    expect(blockMd('```\nnot closed')).toBe('```<br>not closed');
+    expect(blockMd('use `-inf`\n```\nx\n```')).toBe('use <code>-inf</code><code class="md-pre">x</code>');
+  });
+});

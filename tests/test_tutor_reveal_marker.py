@@ -91,18 +91,56 @@ def _sdk_turn(session, monkeypatch, *, attempt_logged):
     monkeypatch.setattr(tutor_sdk, "ResultMessage", _FakeResult)
     monkeypatch.setattr(tutor_sdk, "query", fake_query)
     monkeypatch.setattr(tutor_sdk, "record_sdk_result", lambda *a, **kw: None)
-    tutor_sdk.run_tutor_turn_sdk(session, convo, REAL,
-                                 guard_llm=ScriptedLLMClient([_verdict(attempted=False)]))
-    return convo
+    result = tutor_sdk.run_tutor_turn_sdk(session, convo, REAL,
+                                          guard_llm=ScriptedLLMClient([_verdict(attempted=False)]))
+    return convo, result
 
 
 def test_sdk_an_allowed_reveal_is_marked(session, monkeypatch):
-    convo = _sdk_turn(session, monkeypatch, attempt_logged=True)
+    convo, result = _sdk_turn(session, monkeypatch, attempt_logged=True)
     [reply] = _tutor_messages(session, convo)
     assert reply.content == SECRET and reply.reveals_solution is True
+    assert result.reveals_solution is True  # the send's reply says so too
 
 
 def test_sdk_a_blocked_reveal_is_not_marked(session, monkeypatch):
-    convo = _sdk_turn(session, monkeypatch, attempt_logged=False)
+    convo, result = _sdk_turn(session, monkeypatch, attempt_logged=False)
     [reply] = _tutor_messages(session, convo)
     assert reply.reveals_solution is None
+    assert result.reveals_solution is False
+
+
+def _client(session, *, llm, guard):
+    from fastapi.testclient import TestClient
+
+    from adaptive_academy.api.app import create_app
+    from adaptive_academy.api.deps import get_guard_llm, get_llm, get_retriever, get_session
+    from adaptive_academy.llm.scripted_retriever import ScriptedRetriever
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_llm] = lambda: llm
+    app.dependency_overrides[get_guard_llm] = lambda: guard
+    app.dependency_overrides[get_retriever] = lambda: ScriptedRetriever()
+    return TestClient(app)
+
+
+def test_the_api_says_which_reply_is_the_worked_solution(session):
+    """POST .../messages and GET /api/conversations/{id} both carry reveals_solution, so the
+    Tutor page can label the reply the attempt unlocked, live and after a reload."""
+    convo = _seed(session, attempt_logged=True)
+    llm = ScriptedLLMClient([
+        LLMResponse(text=HINT),
+        LLMResponse(tool_calls=[ToolCall(id="t1", name="reveal_solution", input={"text": SECRET})]),
+    ])
+    client = _client(session, llm=llm, guard=ScriptedLLMClient([]))
+
+    hint = client.post(f"/api/conversations/{convo.id}/messages", json={"content": "a hint?"}).json()
+    solution = client.post(f"/api/conversations/{convo.id}/messages",
+                           json={"content": "show me"}).json()
+    assert (hint["reply"], hint["reveals_solution"]) == (HINT, False)
+    assert (solution["reply"], solution["reveals_solution"]) == (SECRET, True)
+
+    messages = client.get(f"/api/conversations/{convo.id}").json()["messages"]
+    assert [(m["role"], m["reveals_solution"]) for m in messages] == [
+        ("user", False), ("tutor", False), ("user", False), ("tutor", True)]

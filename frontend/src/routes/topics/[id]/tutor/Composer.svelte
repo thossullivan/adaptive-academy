@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Button } from '$lib/ui';
+  import { cn } from '$lib/utils';
   import { attemptShortcutLabel, composerAction } from './attempt';
 
   // The tutor's message box: Send asks or talks; Submit attempt sends the message as the
@@ -8,6 +9,7 @@
     value = $bindable(''),
     disabled = false,
     isMac = false,
+    attemptLogged = false,
     onsend,
     onattempt
   }: {
@@ -15,11 +17,23 @@
     /** A send is in flight, or there is no concept to talk about. */
     disabled?: boolean;
     isMac?: boolean;
+    /** This session has an attempt logged: Submit attempt is no longer the step that matters. */
+    attemptLogged?: boolean;
     onsend: () => void;
     onattempt: () => void;
   } = $props();
 
+  let box: HTMLTextAreaElement | null = null;
   const empty = $derived(!value.trim());
+  // With a draft and no attempt logged yet, Submit attempt is the step that opens the gate:
+  // an accent outline marks it out beside Send. Once the attempt is logged it calms down.
+  const attemptReady = $derived(!disabled && !empty && !attemptLogged);
+
+  /** Put the cursor in the message box, at the end of the draft. */
+  export function focus() {
+    box?.focus();
+    box?.setSelectionRange(box.value.length, box.value.length);
+  }
 
   function onkeydown(e: KeyboardEvent) {
     const action = composerAction(e);
@@ -38,6 +52,7 @@
   }}
 >
   <textarea
+    bind:this={box}
     bind:value
     rows="1"
     aria-label="Message the tutor"
@@ -51,10 +66,15 @@
     <Button
       variant="outline"
       size="lg"
-      class="px-4"
+      class={cn(
+        'px-4',
+        attemptReady &&
+          'border-accent bg-accent-wash text-accent hover:border-accent-bright hover:bg-[color-mix(in_oklab,var(--accent)_22%,transparent)] hover:text-accent-bright'
+      )}
       disabled={disabled || empty}
       aria-keyshortcuts="Control+Enter Meta+Enter"
       aria-describedby="tutor-composer-hint"
+      data-ready={attemptReady}
       onclick={onattempt}>Submit attempt</Button
     >
     <Button type="submit" size="lg" class="px-5" disabled={disabled || empty} aria-keyshortcuts="Enter">Send</Button>

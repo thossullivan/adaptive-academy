@@ -186,7 +186,37 @@ test('axe: a submitted attempt that was not logged, with its note', async ({ pag
     await page.getByRole('textbox', { name: 'Message the tutor' }).fill('is it 42?');
     await page.getByRole('button', { name: 'Submit attempt' }).click();
     await expect(page.getByTestId('attempt-note')).toBeVisible();
-    await expect(page.getByText('your attempt', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('attempt-chip')).toHaveText('Attempt · not logged');
+  });
+});
+
+test('axe: a logged attempt and the worked solution it unlocked, with code', async ({ page }) => {
+  await mockTutor(page, {
+    reply: 'Mask with `-inf` first:\n```python\nscores = scores.masked_fill(mask == 0, float("-inf"))\n```\nThen take the softmax.',
+    attempt_logged: true,
+    attempt_outcome: 'accepted',
+    reveals_solution: true
+  });
+  await auditState(page, (id) => `/topics/${id}/tutor`, async () => {
+    const input = page.getByRole('textbox', { name: 'Message the tutor' });
+    await input.fill('Set the masked logits to `-inf` before the softmax.');
+    await expect(page.getByRole('button', { name: 'Submit attempt' })).toHaveAttribute('data-ready', 'true');
+    await page.getByRole('button', { name: 'Submit attempt' }).click();
+    await expect(page.getByTestId('worked-solution')).toBeVisible();
+    await expect(page.getByTestId('attempt-chip')).toHaveText('Attempt · logged');
+    // A draft after the attempt is logged: the calmer Submit attempt is audited too.
+    await input.fill('And during generation?');
+  });
+});
+
+test('axe: a kept draft that conflicts with a newer saved note', async ({ page }) => {
+  page.on('dialog', (dialog) => dialog.accept());
+  await auditState(page, (id) => `/topics/${id}/tutor`, async () => {
+    // A draft of unknown age (kept as plain text) always asks which to keep.
+    const conceptId = Number(await page.getByRole('combobox', { name: 'Concept' }).inputValue());
+    await page.evaluate((id) => sessionStorage.setItem(`aa.note-draft.${id}`, 'An older draft from this tab.'), conceptId);
+    await page.getByRole('button', { name: 'Notes', exact: true }).click();
+    await expect(page.getByTestId('note-conflict')).toBeVisible();
   });
 });
 

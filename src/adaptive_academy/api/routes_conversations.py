@@ -99,7 +99,8 @@ def get_conversation(conversation_id: int, session: Session = Depends(get_sessio
         assistance_level=levels.assistance,
         challenge_level=levels.challenge,
         messages=[MessageOut(role=m.role, content=m.content, is_attempt=bool(m.is_attempt),
-                             attempt_accepted=verdicts.get(m.id))
+                             attempt_accepted=verdicts.get(m.id),
+                             reveals_solution=bool(m.reveals_solution))
                   for m in convo.messages],
     )
 
@@ -143,6 +144,7 @@ def send_message(
         reply=result.reply,
         attempt_logged=convo.attempt_logged,
         attempt_outcome=result.attempt_outcome,
+        reveals_solution=result.reveals_solution,
         assistance_level=levels.assistance,
         challenge_level=levels.challenge,
         events=[EventOut(kind=e.kind, detail=e.detail) for e in result.events],

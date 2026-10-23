@@ -92,8 +92,8 @@ INTENT = {
 
 OVERVIEW = (
     "A language model is a next-token predictor trained by gradient descent, so the path runs "
-    "from automatic differentiation, through how text becomes vectors, to attention — the one "
-    "genuinely new mechanism — and then to assembling and training the full Transformer. Each "
+    "from automatic differentiation, through how text becomes vectors, to attention (the one "
+    "genuinely new mechanism), and then to assembling and training the full Transformer. Each "
     "stage is built by hand before reading a reference implementation."
 )
 
@@ -191,13 +191,13 @@ SOURCES = [
 # (title, est_hours, flags, items, deliverable)
 # item: (type, text, concept keys, status, source index or None)
 PHASES = [
-    ("Phase 1 — Autograd from first principles", "12–15 hours", [], [
+    ("Phase 1: Autograd from first principles", "12–15 hours", [], [
         ("read", "Re-derive the chain rule for a two-layer MLP on paper before touching code.",
          ["chain"], "done", None),
         ("build", "Implement a scalar `Value` class with `+`, `*`, `tanh` and `backward()`; "
                   "check every gradient against finite differences.",
          ["backprop"], "done", None),
-        ("read", "Compare your design with a framework's autograd notes — only after your own "
+        ("read", "Compare your design with a framework's autograd notes, but only after your own "
                  "version passes its gradient checks.",
          ["backprop"], "done", 3),
         ("write", "Explain in your own words why gradients accumulate (`+=`) instead of being "
@@ -207,7 +207,7 @@ PHASES = [
         ["Derives the backward rule for every op it implements",
          "Shows at least one gradient check failing, then passing",
          "Trains a small MLP on a toy dataset"])),
-    ("Phase 2 — Tokens and embeddings", "10–12 hours", [], [
+    ("Phase 2: Tokens and embeddings", "10–12 hours", [], [
         ("read", "Read the subword-units paper and write out the BPE merge loop as pseudocode.",
          ["bpe"], "done", 1),
         ("build", "Train a byte-level BPE tokenizer on a small public-domain corpus; compare its "
@@ -222,7 +222,7 @@ PHASES = [
         ["Encode/decode round-trips any byte string",
          "Merges are learned, not hard-coded",
          "README reports compression on a held-out text"])),
-    ("Phase 3 — Attention: derive, implement, ablate", "15–18 hours", [], [
+    ("Phase 3: Attention: derive, implement, ablate", "15–18 hours", [], [
         ("read", "Derive why attention logits are scaled by 1/√d_k (§3.2 of the Transformer "
                  "paper).",
          ["attn"], "done", 0),
@@ -242,7 +242,7 @@ PHASES = [
         ["Same compute budget for every run",
          "Plots validation loss, not just training loss",
          "States what the result does and does not show"])),
-    ("Phase 4 — Train a tiny GPT", "20–25 hours", [], [
+    ("Phase 4: Train a tiny GPT", "20–25 hours", [], [
         ("build", "Assemble the Transformer block (pre-LayerNorm, residual stream, MLP) and stack "
                   "four of them.",
          ["block", "resid"], "todo", 4),
@@ -368,7 +368,7 @@ PROBES: list[_Probe] = [
            "An embedding is a learned vector per token; looking it up is like multiplying a "
            "one-hot vector by the embedding matrix.",
            "Good equivalence; gradient flow into the table only partly explained.",
-           ["only the looked-up rows receive gradient — not stated"]),
+           ["only the looked-up rows receive gradient: not stated"]),
     _Probe(_ago(11, 2), "teach", "bpe", 0.80,
            "Explained BPE to a beginner with a worked example on 'low lower lowest'.",
            "Clear for a newcomer; the worked example carried the explanation."),
@@ -381,7 +381,7 @@ PROBES: list[_Probe] = [
     _Probe(_ago(9, 1), "source_quiz", "lm", 0.60,
            "It's trained to predict the next token on lots of web text.",
            "Objective right; didn't explain why that covers many tasks.",
-           ["tasks as text continuation — missing"], anchor=2),
+           ["tasks as text continuation: missing"], anchor=2),
     _Probe(_ago(8, 2), "recall", "backprop", 0.80,
            "Reverse topological order; each node adds local-gradient × upstream into its "
            "inputs' .grad, which is why reused values accumulate.",
@@ -479,7 +479,7 @@ CHAIN_MESSAGES = [
     ("attempt", "c(a + h) - c(a) = (a + h)b - ab = hb, and dividing by h gives b. So the "
                 "local derivative is just the other input.", 5),
     ("tutor", "Exactly, and you derived it rather than recalled it. In backward() that node "
-              "multiplies the upstream gradient by b for a, and by a for b — the chain rule is "
+              "multiplies the upstream gradient by b for a, and by a for b; the chain rule is "
               "that product, applied node by node.", 6),
 ]
 TUTOR_MESSAGES = [
@@ -490,17 +490,17 @@ TUTOR_MESSAGES = [
               "future entries, and check that property.", 1),
     ("user", "Each row should sum to 1. If I zero entries after the softmax, the first row "
              "keeps only one weight, so it sums to less than 1. So I'd have to renormalize?", 6),
-    ("tutor", "Exactly — you've found the problem. Renormalizing afterwards is equivalent to "
+    ("tutor", "Exactly, you've found the problem. Renormalizing afterwards is equivalent to "
               "something you can do in one step. What value could you put in the logits so "
               "that the softmax itself gives those positions zero weight?", 7),
-    ("attempt", "Set the masked logits to -inf. exp(-inf) = 0, so the softmax gives them "
-                "zero weight and the remaining weights still sum to 1. In code: "
-                "scores.masked_fill(mask == 0, float('-inf')) before the softmax.", 12),
+    ("attempt", "Set the masked logits to `-inf` before the softmax. Since `exp(-inf)` is 0, they get "
+                "zero weight and the rest still sum to 1. In code: "
+                "`scores.masked_fill(mask == 0, float('-inf'))`", 12),
     ("tutor", "That's the mechanism. Since you've submitted a real attempt, here's the full "
               "picture: masking with −∞ before the softmax is the same as renormalizing over "
               "the allowed positions, but it's one fused, numerically clean step. One thing to "
-              "test in your implementation: the first row has a single unmasked entry, so its "
-              "weight must be exactly 1.", 13),
+              "test in your implementation: the first row has a single unmasked entry, so "
+              "`weights[0, 0]` must be exactly 1.", 13),
 ]
 
 # My notes on one concept (the concept notebook), written after its tutor session.
@@ -681,7 +681,7 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
         concept = concepts[probe.concept]
         baseline = rows[probe.baseline] if probe.baseline is not None else None
         prompt = {
-            "self_explanation": f"Explain {concept.name} — the mechanism, not the definition.",
+            "self_explanation": f"Explain {concept.name}: the mechanism, not the definition.",
             "calibration": f"Predict your score, then explain {concept.name}.",
             "recall": DECAY_RECALL.format(concept=concept.name),
             "teach": f"Teach: {concept.name}",

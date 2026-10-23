@@ -217,7 +217,8 @@ def run_tutor_turn_sdk(
     )
     session.commit()
     return TurnResult(reply=reply, events=events, memory=memory_hits,
-                      attempt_outcome=outcome.status if outcome else None)
+                      attempt_outcome=outcome.status if outcome else None,
+                      reveals_solution=is_solution)
 
 
 def _guarded_reply(session: Session, convo: Conversation, guard: SolutionGuard, draft: str,

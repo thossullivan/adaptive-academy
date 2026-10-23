@@ -72,6 +72,8 @@ class MessageOut(BaseModel):
     # logged, None when there is no verdict (not an attempt, the check was unavailable, or an
     # attempt in a conversation that was already unlocked).
     attempt_accepted: Optional[bool] = None
+    # A tutor reply that is a worked solution, shown because an attempt was logged.
+    reveals_solution: bool = False
 
 
 class MemoryHitOut(BaseModel):
@@ -156,6 +158,8 @@ class SendMessageOut(BaseModel):
     attempt_logged: bool
     # What happened to a submitted attempt (engine/attempt.py); None for an ordinary message.
     attempt_outcome: Optional[AttemptOutcomeOut] = None
+    # The reply is a worked solution the attempt unlocked (Message.reveals_solution).
+    reveals_solution: bool = False
     assistance_level: str
     challenge_level: str
     events: list[EventOut]

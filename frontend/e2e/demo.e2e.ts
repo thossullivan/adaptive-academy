@@ -89,8 +89,8 @@ test('a keyless user explores the demo topic in one click and removes it', async
 
     await page.goto(`/topics/${demo.id}/track`);
     await settle(page);
-    await expect(page.getByText('Phase 1 — Autograd from first principles')).toBeVisible();
-    await expect(page.getByText('Phase 4 — Train a tiny GPT')).toBeVisible();
+    await expect(page.getByText('Phase 1: Autograd from first principles')).toBeVisible();
+    await expect(page.getByText('Phase 4: Train a tiny GPT')).toBeVisible();
     // Side notes name their kind in words ("Math refresher"), never as raw `math_refresh`.
     const kinds = page.getByTestId('sidebar-kind');
     expect(await kinds.count()).toBeGreaterThan(0);

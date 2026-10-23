@@ -48,6 +48,35 @@ export function messageNote(m: MessageOut): string | null {
   return attemptNote(m.attempt_outcome ?? (m.is_attempt && m.attempt_accepted === false ? 'rejected' : null));
 }
 
+export type AttemptChipTone = 'success' | 'warn' | 'neutral';
+
+/**
+ * The chip on a message sent with Submit attempt: what the check made of it, from the send's
+ * outcome when the page has it, else the stored verdict. Null for any other message.
+ * `pending` is true while the send is still on its way (no outcome yet).
+ */
+export function attemptChip(m: MessageOut, pending = false): { label: string; status: string; tone: AttemptChipTone } | null {
+  if (m.role !== 'user' || !m.is_attempt) return null;
+  const outcome = m.attempt_outcome ?? (m.attempt_accepted === true ? 'accepted' : m.attempt_accepted === false ? 'rejected' : null);
+  if (outcome === 'accepted') return { label: 'Attempt · logged', status: 'logged', tone: 'success' };
+  if (outcome === 'already_logged') return { label: 'Attempt · already logged', status: 'already logged', tone: 'success' };
+  if (outcome === 'rejected') return { label: 'Attempt · not logged', status: 'not logged', tone: 'warn' };
+  if (pending) return { label: 'Attempt · checking', status: 'being checked', tone: 'neutral' };
+  return { label: 'Attempt · not checked', status: 'not checked', tone: 'neutral' };
+}
+
+/** The label on the tutor reply that shows the worked solution (MessageOut.reveals_solution). */
+export const WORKED_SOLUTION_LABEL = 'Worked solution, unlocked by your attempt';
+
+/** Starter prompts for the empty Tutor: they fill the composer, they are never sent for you. */
+export function starterPrompts(concept: string): string[] {
+  if (!concept) return [];
+  return [
+    `Help me understand ${concept}. Start by asking what I already know.`,
+    `Give me a small problem on ${concept} to attempt.`
+  ];
+}
+
 /**
  * After a Submit attempt send fails: did the attempt reach the server anyway? The attempt is
  * checked and stored before the tutor runs, so a failed tutor call (an overload, say) can

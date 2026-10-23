@@ -151,12 +151,85 @@ test('Submit attempt sends the message as an attempt and the header turns to att
   await expect(page.getByText('no attempt yet')).toBeVisible();
 
   await input.fill('I divide by sqrt(d_k) because the variance of the dot product grows with d_k.');
+  // With a draft and no attempt logged, Submit attempt is marked out as the step that matters.
+  await expect(submit).toHaveAttribute('data-ready', 'true');
   await submit.click();
   await expect(page.getByText('That holds up. Here is the worked solution.')).toBeVisible();
   await expect(page.getByText('attempt logged')).toBeVisible();
-  await expect(page.getByText('your attempt', { exact: true })).toBeVisible();
+  // The attempt bubble carries a chip with what the check made of it.
+  await expect(page.getByTestId('attempt-message')).toHaveCount(1);
+  await expect(page.getByTestId('attempt-chip')).toHaveText('Attempt · logged');
   await expect(page.getByTestId('attempt-note')).toHaveCount(0);
   expect(sent.map((b) => b.attempt)).toEqual([false, true]);
+  // Once the attempt is logged, Submit attempt calms down.
+  await input.fill('one more question');
+  await expect(submit).toBeEnabled();
+  await expect(submit).toHaveAttribute('data-ready', 'false');
+});
+
+test('the reply that shows the worked solution is labelled, and messages render as markdown', async ({ page }) => {
+  const topic = await seededTopic(page);
+  await mockTutor(page, (b) =>
+    b.attempt
+      ? {
+          reply: 'Right. Mask with `-inf` before the softmax:\n```python\nscores = scores.masked_fill(mask == 0, float("-inf"))\n```\n<img src=x onerror="window.__pwned=1">',
+          attempt_logged: true,
+          attempt_outcome: 'accepted',
+          reveals_solution: true
+        }
+      : { reply: 'What does **each row** of the weights sum to?' }
+  );
+  await page.goto(`/topics/${topic.id}/tutor`);
+  await settle(page);
+  const input = page.getByRole('textbox', { name: 'Message the tutor' });
+  const log = page.getByRole('log', { name: 'Conversation with the tutor' });
+
+  await input.fill('Why mask before the softmax?');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(log.locator('strong', { hasText: 'each row' })).toBeVisible();
+  // An ordinary reply is not marked as the solution.
+  await expect(page.getByTestId('worked-solution')).toHaveCount(0);
+
+  await input.fill('Set the masked logits to `-inf` so exp gives zero.');
+  await page.getByRole('button', { name: 'Submit attempt' }).click();
+  const solution = page.getByTestId('worked-solution');
+  await expect(solution).toHaveCount(1);
+  await expect(solution).toContainText('Worked solution, unlocked by your attempt');
+  // Code renders as code, in both the learner's attempt and the tutor's reply.
+  await expect(page.getByTestId('attempt-message').locator('code', { hasText: '-inf' })).toBeVisible();
+  await expect(solution.locator('code.md-pre')).toHaveText('scores = scores.masked_fill(mask == 0, float("-inf"))');
+  // Model text never becomes HTML.
+  await expect(solution.locator('img')).toHaveCount(0);
+  await expect(solution).toContainText('<img src=x onerror="window.__pwned=1">');
+  expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();
+});
+
+test('the empty Tutor explains the gate and its starter prompts fill the message box without sending', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const sends: string[] = [];
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && req.url().includes('/api/conversations')) sends.push(req.url());
+  });
+  const concept = topic.concepts[1];
+  await page.goto(`/topics/${topic.id}/tutor?concept=${concept.id}`);
+  await settle(page);
+
+  const steps = page.getByRole('list', { name: 'How the tutor works' }).getByRole('listitem');
+  await expect(steps).toHaveCount(3);
+  await expect(steps.nth(0)).toContainText('Ask');
+  await expect(steps.nth(1)).toContainText('Submit attempt');
+  await expect(steps.nth(2)).toContainText('worked solution');
+
+  const starters = page.getByRole('group', { name: /Not sure where to start/ }).getByRole('button');
+  await expect(starters).toHaveCount(2);
+  const first = (await starters.first().textContent())!.trim();
+  expect(first).toContain(concept.name);
+  await starters.first().click();
+  const input = page.getByRole('textbox', { name: 'Message the tutor' });
+  await expect(input).toHaveValue(first);
+  await expect(input).toBeFocused();
+  await page.waitForLoadState('networkidle');
+  expect(sends).toHaveLength(0);
 });
 
 test('an attempt that is not logged gets a kind note and the gate stays shut', async ({ page }) => {
@@ -174,6 +247,7 @@ test('an attempt that is not logged gets a kind note and the gate stays shut', a
   await expect(page.getByTestId('attempt-note')).toHaveText(
     'Not logged as an attempt yet. Add your reasoning or a first step, then submit again.'
   );
+  await expect(page.getByTestId('attempt-chip')).toHaveText('Attempt · not logged');
   await expect(page.getByText('no attempt yet')).toBeVisible();
 });
 

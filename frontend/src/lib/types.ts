@@ -39,6 +39,8 @@ export interface MessageOut {
   attempt_accepted?: boolean | null;
   /** Set on the page from the send's reply; the API does not store it on the message. */
   attempt_outcome?: AttemptOutcome | null;
+  /** A tutor reply that is the worked solution, shown because an attempt was logged. */
+  reveals_solution?: boolean;
 }
 export interface Conversation {
   id: number; concept_id: number; attempt_logged: boolean;
@@ -50,6 +52,8 @@ export interface SendMessageOut {
   reply: string; attempt_logged: boolean;
   /** Only for a message sent with Submit attempt; null otherwise. */
   attempt_outcome: AttemptOutcome | null;
+  /** The reply is the worked solution the attempt unlocked. */
+  reveals_solution?: boolean;
   assistance_level: string; challenge_level: string; events: EventOut[]; memory: MemoryHit[];
 }
 export type SendResult = SendMessageOut;

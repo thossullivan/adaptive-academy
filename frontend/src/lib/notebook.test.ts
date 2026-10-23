@@ -5,6 +5,7 @@ import {
   NoteSaver,
   clearedSyncText,
   syncTargetText,
+  draftRestore,
   draftStore,
   settledSave,
   trackSave,
@@ -12,8 +13,11 @@ import {
   SOURCE_LABEL,
   formatWhen,
   isSaveShortcut,
+  defaultNotebookConcept,
   itemHeading,
+  itemHeadingParts,
   noteStatus,
+  scoreLevel,
   notebookSections,
   sourceHref,
   storedVaultPath
@@ -66,6 +70,36 @@ describe('where an item came from', () => {
     expect(itemHeading(item({ accepted: false }))).toBe('Attempt, not accepted');
     expect(itemHeading(item({ kind: 'explanation', label: 'Teach-back', score: 0.625 }))).toBe('Teach-back, 63 of 100');
     expect(itemHeading(item({ kind: 'solution' }))).toBe('Worked solution');
+  });
+
+  it('splits the score off the heading, and maps it to the level the grader uses', () => {
+    expect(itemHeadingParts(item({ kind: 'explanation', label: 'Decay check', score: 0.79 }))).toEqual({
+      title: 'Decay check',
+      score: '79 of 100'
+    });
+    expect(itemHeadingParts(item({ kind: 'explanation', label: '', score: null }))).toEqual({ title: 'Explanation', score: null });
+    expect(itemHeadingParts(item({ accepted: false }))).toEqual({ title: 'Attempt, not accepted', score: null });
+    // engine/assess.py level_from_score: 0.75 and up high, 0.45 and up medium.
+    expect([0.79, 0.75, 0.74, 0.45, 0.44, 0].map(scoreLevel)).toEqual(['high', 'high', 'medium', 'medium', 'low', 'low']);
+  });
+});
+
+describe('the concept the Notebook opens on', () => {
+  const c = (concept_id: number, has_note: boolean, last_activity_at: string) => ({ concept_id, has_note, last_activity_at });
+
+  it('is the most recently active concept with notes', () => {
+    expect(
+      defaultNotebookConcept([
+        c(1, false, '2026-10-22T09:00:00'),
+        c(2, true, '2026-10-19T09:00:00'),
+        c(3, true, '2026-10-21T09:00:00')
+      ])
+    ).toBe(3);
+  });
+
+  it('falls back to the most recently active concept with work, or none', () => {
+    expect(defaultNotebookConcept([c(1, false, '2026-10-20T09:00:00'), c(2, false, '2026-10-22T09:00:00')])).toBe(2);
+    expect(defaultNotebookConcept([])).toBeNull();
   });
 });
 
@@ -157,21 +191,52 @@ describe('drafts kept in this tab', () => {
   it('keeps a draft per concept until it is cleared', () => {
     const drafts = draftStore(memory());
     expect(drafts.get(3)).toBeNull();
-    drafts.set(3, 'half written');
-    drafts.set(4, 'other');
-    expect(drafts.get(3)).toBe('half written');
+    drafts.set(3, 'half written', '2026-10-22T09:00:00');
+    drafts.set(4, 'other', null);
+    drafts.set(5, 'unknown age');
+    expect(drafts.get(3)).toEqual({ body: 'half written', base: '2026-10-22T09:00:00' });
     drafts.clear(3);
     expect(drafts.get(3)).toBeNull();
-    expect(drafts.get(4)).toBe('other');
+    expect(drafts.get(4)).toEqual({ body: 'other', base: null });
+    expect(drafts.get(5)).toEqual({ body: 'unknown age', base: undefined });
   });
 
   it('clears only the body that was saved, never a newer draft', () => {
     const drafts = draftStore(memory());
     drafts.set(3, 'newer');
     drafts.clear(3, 'older');
-    expect(drafts.get(3)).toBe('newer');
+    expect(drafts.get(3)?.body).toBe('newer');
     drafts.clear(3, 'newer');
     expect(drafts.get(3)).toBeNull();
+  });
+
+  it('reads a plain-text draft kept before drafts recorded their saved note, as of unknown age', () => {
+    const s = memory();
+    s.setItem('aa.note-draft.5', 'an old draft');
+    expect(draftStore(s).get(5)).toEqual({ body: 'an old draft', base: undefined });
+  });
+});
+
+describe('restoring a kept draft', () => {
+  const at = '2026-10-22T09:00:00';
+  const later = '2026-10-22T10:30:00';
+
+  it('restores a draft written on the note saved now, quietly', () => {
+    expect(draftRestore({ body: 'more', base: at }, 'saved', at)).toBe('restore');
+    expect(draftRestore({ body: 'first words', base: null }, '', null)).toBe('restore');
+  });
+
+  it('asks which to keep when the saved note changed after the draft was written', () => {
+    // Another tab (or the vault sync) saved since: the draft must not overwrite it unasked.
+    expect(draftRestore({ body: 'my draft', base: at }, 'newer saved text', later)).toBe('conflict');
+    expect(draftRestore({ body: 'my draft', base: null }, 'saved elsewhere', at)).toBe('conflict');
+    // A draft of unknown age is treated the same way.
+    expect(draftRestore({ body: 'my draft', base: undefined }, 'saved', at)).toBe('conflict');
+  });
+
+  it('has nothing to restore without a draft, or when it says what is saved', () => {
+    expect(draftRestore(null, 'saved', at)).toBe('none');
+    expect(draftRestore({ body: 'saved', base: null }, 'saved', later)).toBe('none');
   });
 
   it('works without storage, or with storage that throws', () => {
