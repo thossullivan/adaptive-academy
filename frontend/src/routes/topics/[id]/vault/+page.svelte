@@ -5,6 +5,7 @@
   import { toasts } from '$lib/toast.svelte';
   import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, VaultSync } from '$lib/types';
   import { timeAgo } from '$lib/events';
+  import { updateSyncTarget } from '$lib/notebook';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Input, Badge, LiveStatus } from '$lib/ui';
   import MemorySearchResults from './MemorySearchResults.svelte';
@@ -17,6 +18,7 @@
   let status = $state<VaultStatus | null>(null);
   // Concept notebooks sync to the checked vault (engine/notebook_sync.py).
   let sync = $state<VaultSync | null>(null);
+  let syncError = $state('');
   let checking = $state(false);
   let exporting = $state(false);
   let exportingAll = $state(false);
@@ -65,12 +67,34 @@
       status = await api.vaultStatus(path.trim());
       sync = status.sync ?? null;
       // A readable folder is also where concept notebooks sync from now on.
-      if (status.is_dir) sync = await api.vaultSync(path.trim()).catch(() => sync);
+      await registerSync(status.is_dir);
     } catch (e) {
       error = String(e);
     } finally {
       checking = false;
     }
+  }
+
+  async function registerSync(isDir: boolean) {
+    syncError = '';
+    try {
+      sync = (await updateSyncTarget(api.vaultSync, path, isDir)) ?? sync;
+    } catch (e) {
+      syncError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // An emptied field stops notebooks syncing to the folder this browser set.
+  async function onPathChange() {
+    if (path.trim()) return;
+    try {
+      localStorage.removeItem(STORE_KEY);
+    } catch {
+      /* storage blocked */
+    }
+    status = null;
+    await registerSync(false);
+    announce = 'Notebooks no longer sync to a vault set in this browser.';
   }
 
   const ready = $derived(!!status?.is_dir);
@@ -178,7 +202,7 @@
       <div class="flex flex-col gap-3">
         <div class="flex items-end gap-2">
           <div class="flex-1">
-            <Input bind:value={path} aria-label="Vault folder path" placeholder="/Users/you/Obsidian/MyVault" />
+            <Input bind:value={path} onchange={onPathChange} aria-label="Vault folder path" placeholder="/Users/you/Obsidian/MyVault" />
           </div>
           <Button variant="outline" size="sm" onclick={check} disabled={checking || !path.trim()}>
             {checking ? 'Checking…' : 'Check'}
@@ -196,6 +220,9 @@
               Not a readable folder. Check the path is correct and exists on this machine.
             </p>
           {/if}
+        {/if}
+        {#if syncError}
+          <p class="text-sm text-danger" role="status" data-testid="vault-sync-error">{syncError}</p>
         {/if}
         {#if status?.is_dir && sync}
           <div class="text-sm text-fg-dim" data-testid="vault-sync">

@@ -198,7 +198,8 @@ test('axe: the tutor with the notes panel open and a draft unsaved', async ({ pa
     const box = page.locator('#tutor-notes').getByRole('textbox', { name: /^My notes on / });
     await expect(box).toBeVisible();
     await box.fill('An unsaved draft for the audit.');
-    await expect(page.getByTestId('note-status')).toHaveText('Unsaved changes');
+    // The second theme finds the draft kept in this tab: the status also says it was restored.
+    await expect(page.getByTestId('note-status')).toContainText('Unsaved changes');
   });
 });
 

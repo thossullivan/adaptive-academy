@@ -122,6 +122,7 @@ def test_topic_notebook_lists_concepts_with_notes_or_work(client, session):
 
 
 def test_saving_a_note_with_a_vault_path_registers_it_and_syncs(client, session, tmp_path):
+    (tmp_path / ".obsidian").mkdir()
     _, concept = _seed(session)
     r = client.put(f"/api/concepts/{concept.id}/note",
                    json={"body": "to the vault", "vault_path": str(tmp_path)})
@@ -142,6 +143,7 @@ def test_a_bad_vault_path_on_save_still_saves_the_note(client, session, tmp_path
 
 
 def test_vault_sync_target_and_status(client, session, tmp_path):
+    (tmp_path / ".obsidian").mkdir()
     st = client.get("/api/vault/status").json()
     assert st["sync"]["path"] == "" and st["sync"]["last_error"] == ""
 
@@ -159,6 +161,7 @@ def test_vault_sync_target_and_status(client, session, tmp_path):
 
 
 def test_sync_errors_show_on_vault_status(client, session, tmp_path):
+    (tmp_path / ".obsidian").mkdir()
     topic, concept = _seed(session)
     note = tmp_path / EXPORT_FOLDER / "build-llms" / "Concepts" / "self-attention.md"
     note.parent.mkdir(parents=True)

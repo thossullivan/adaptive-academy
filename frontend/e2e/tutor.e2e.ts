@@ -261,7 +261,9 @@ for (const accepted of [true, false]) {
     await reread;
 
     await expect(page.getByTestId('toaster')).toContainText(
-      "Your attempt was saved, but the tutor's reply failed (The model is overloaded. Try again shortly.)"
+      accepted
+        ? "Your attempt was saved and logged, but the tutor's reply failed (The model is overloaded. Try again shortly.)"
+        : "Your attempt was saved but not logged: add your reasoning or a first step and submit again. The tutor's reply also failed (The model is overloaded. Try again shortly.)"
     );
     // The bubble stays (it was stored), the draft is not put back, and the header and note
     // say what the server recorded.

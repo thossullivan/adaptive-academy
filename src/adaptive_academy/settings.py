@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     embedding_allow_download: bool = True
     # Default Obsidian vault path (env AA_OBSIDIAN_VAULT_PATH); API calls may override per-request.
     obsidian_vault_path: str = ""
+    # More host names the API answers (env AA_ALLOWED_HOSTS, comma-separated), besides
+    # localhost, 127.0.0.1 and [::1]. A request under any other Host header gets a 400
+    # (api/hosts.py), which keeps a web page from reaching the API through DNS rebinding.
+    allowed_hosts: str = ""
     # Static frontend build to serve at / (env AA_FRONTEND_DIST). The Docker image
     # points this at the baked-in SvelteKit build; absent in host dev, so no-op there.
     frontend_dist: str = "frontend/build"

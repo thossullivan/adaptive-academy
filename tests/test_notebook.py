@@ -9,6 +9,7 @@ tmp_path; no model is called.
 """
 
 import os
+import shutil
 from datetime import datetime, timedelta
 
 import pytest
@@ -19,8 +20,10 @@ from adaptive_academy.engine.notebook import (
     END_MARKER,
     NOTE_MAX_CHARS,
     START_MARKER,
+    START_PREFIX,
     MarkerError,
     NoteTooLong,
+    SectionEdited,
     build_notebook,
     render_notebook_section,
     save_note,
@@ -87,7 +90,7 @@ def _note_path(vault, topic_slug="build-llms", concept_slug="self-attention"):
 def vault_sync(tmp_path):
     """A registered sync vault, reset afterwards (the sync target is process state)."""
     vault = tmp_path / "vault"
-    vault.mkdir()
+    (vault / ".obsidian").mkdir(parents=True)
     NOTEBOOK_SYNC.reset()
     notebook_sync.register_vault_path(str(vault))
     yield vault
@@ -209,15 +212,18 @@ def _nb(session, body="My notes here."):
 
 def test_section_is_wrapped_in_markers_and_names_every_part(session):
     _, concept = _nb(session)
-    section = render_notebook_section(build_notebook(session, concept), "medium")
+    section = render_notebook_section(build_notebook(session, concept), "medium",
+                                      "Latest: **self_explanation**, score 0.62")
 
     lines = section.splitlines()
-    assert lines[0] == START_MARKER and lines[-1] == END_MARKER
+    assert lines[0].startswith(START_PREFIX + " sha=") and lines[-1] == END_MARKER
     for heading in ("## Notebook", "### My notes", "### My attempts", "### My explanations",
                     "### Worked solutions"):
         assert heading in lines
     assert "My notes here." in section
-    assert "Verdict now: medium" in section
+    assert "**Verdict:** medium" in section
+    assert "Latest: **self_explanation**, score 0.62" in section
+    assert "not inside it" in section
     assert "> line one\n> line two" in section
     assert "not accepted" in section
     assert "Self-explanation" in section and "score 0.62" in section
@@ -230,7 +236,7 @@ def test_section_is_wrapped_in_markers_and_names_every_part(session):
 def test_section_neutralizes_marker_text_in_learner_content(session):
     _, concept = _nb(session, body=f"sneaky\n{END_MARKER}\nmore\n{START_MARKER}")
     section = render_notebook_section(build_notebook(session, concept), "low")
-    assert section.count(START_MARKER) == 1 and section.count(END_MARKER) == 1
+    assert section.count(START_PREFIX) == 1 and section.count(END_MARKER) == 1
     # And a note carrying it splices cleanly on the next sync.
     once = splice_notebook_section("Mine.\n", section)
     assert splice_notebook_section(once, section) == once
@@ -252,10 +258,13 @@ def test_splice_replaces_only_between_the_markers():
                    "Below, mine.\n")
 
 
-def test_splice_keeps_one_section_when_complete_pairs_are_duplicated():
-    old = (f"A\n{START_MARKER}\none\n{END_MARKER}\nB\n{START_MARKER}\ntwo\n{END_MARKER}\nC\n")
-    new = splice_notebook_section(old, f"{START_MARKER}\nNEW\n{END_MARKER}")
-    assert new == f"A\n{START_MARKER}\nNEW\n{END_MARKER}\nB\nC\n"
+def test_splice_refuses_a_second_section_rather_than_delete_it():
+    """A second complete section may be a copy the learner pasted (in a code block, say):
+    removing it could delete their text, so the note is left alone and reported."""
+    old = (f"A\n{START_MARKER}\none\n{END_MARKER}\nB\n```\n{START_MARKER}\ntwo\n"
+           f"{END_MARKER}\n```\nC\n")
+    with pytest.raises(MarkerError, match="more than one"):
+        splice_notebook_section(old, f"{START_MARKER}\nNEW\n{END_MARKER}")
 
 
 @pytest.mark.parametrize("text", [
@@ -279,8 +288,12 @@ def test_sync_creates_the_note_with_header_and_section(session, tmp_path):
     assert path == _note_path(tmp_path)
     text = path.read_text()
     assert text.startswith("---\ntitle: Self-Attention\n")
-    assert "**Verdict:**" in text and "Part of [[build-llms]]." in text
-    assert text.count(START_MARKER) == 1 and "My notes here." in text
+    header, _, rest = text.partition(START_PREFIX)
+    assert "concept_id: " in header and "verdict: untested" not in header
+    assert "**Verdict:**" not in header and "Latest:" not in header  # both in the section
+    assert "Part of [[build-llms]]." in header
+    assert "**Verdict:**" in rest and "Latest: **self_explanation**, score 0.62" in rest
+    assert text.count(START_PREFIX) == 1 and "My notes here." in text
 
 
 def test_sync_preserves_what_the_learner_wrote_outside_the_markers(session, tmp_path):
@@ -294,7 +307,7 @@ def test_sync_preserves_what_the_learner_wrote_outside_the_markers(session, tmp_
     sync_concept(session, concept.id, str(tmp_path))
 
     text = path.read_text()
-    before, _, rest = edited.partition(START_MARKER)
+    before, _, rest = edited.partition(START_PREFIX)
     _, _, after = rest.partition(END_MARKER)
     assert text.startswith(before) and text.endswith(after)
     assert "Updated in the app." in text and "My notes here." not in text
@@ -307,7 +320,9 @@ def test_sync_appends_to_an_older_note_without_markers(session, tmp_path):
     path.write_text("---\ntitle: Self-Attention\nverdict: high\n---\n# Self-Attention\n")
     sync_concept(session, concept.id, str(tmp_path))
     text = path.read_text()
-    assert text.startswith("---\ntitle: Self-Attention\nverdict: high\n---\n# Self-Attention\n\n")
+    # Only the frontmatter verdict value changes outside the markers.
+    assert text.startswith("---\ntitle: Self-Attention\nverdict: medium\n---\n"
+                           "# Self-Attention\n\n")
     assert text.rstrip().endswith(END_MARKER)
 
 
@@ -347,7 +362,7 @@ def test_export_keeps_learner_edits_and_adds_the_section(session, tmp_path):
     topic, concept = _nb(session)
     export_vault(session, topic.id, str(tmp_path))
     path = _note_path(tmp_path)
-    assert START_MARKER in path.read_text()
+    assert START_PREFIX in path.read_text()
     path.write_text(path.read_text() + "\nMine, from Obsidian.\n")
 
     session.add(KnowledgeEstimate(concept_id=concept.id, level="low"))
@@ -356,8 +371,8 @@ def test_export_keeps_learner_edits_and_adds_the_section(session, tmp_path):
 
     text = path.read_text()
     assert text.endswith("\nMine, from Obsidian.\n")
-    assert text.count(START_MARKER) == 1
-    assert "Verdict now: low" in text
+    assert text.count(START_PREFIX) == 1
+    assert "**Verdict:** low" in text and "\nverdict: low\n" in text
     assert str(path) in res.written
 
 
@@ -445,7 +460,7 @@ def test_a_vault_error_never_fails_the_action_and_shows_on_status(session, vault
 
 def test_a_vault_that_disappeared_is_reported_not_raised(session, vault_sync):
     _, concept, _ = _seed(session)
-    vault_sync.rmdir()
+    shutil.rmtree(vault_sync)
     save_note(session, concept.id, "x")
     NOTEBOOK_SYNC.drain()
     assert "does not exist" in NOTEBOOK_SYNC.status()["last_error"]
@@ -551,3 +566,233 @@ def test_an_edit_made_during_a_sync_is_kept(session, tmp_path, monkeypatch):
     text = path.read_text()
     assert len(calls) == 2
     assert text.endswith("Typed in Obsidian mid-sync.\n") and "Changed in the app." in text
+
+
+# --- review fixes ----------------------------------------------------------------------------
+
+
+def test_a_rolled_back_savepoint_keeps_the_queued_keys(session, vault_sync):
+    """memory.index_text embeds inside begin_nested(): a failed embed rolls back only that
+    savepoint, and the reveal and the grade written in the same transaction still sync."""
+    from adaptive_academy.models import Chunk
+
+    topic, concept, _ = _seed(session)
+    convo = _convo(session, topic, concept)
+    NOTEBOOK_SYNC.drain()
+    session.add(Message(conversation_id=convo.id, role="tutor", content="revealed answer",
+                        reveals_solution=True))
+    session.add(Assessment(concept_id=concept.id, kind="teach", prompt="p",
+                           response="graded words", score=0.5))
+    session.flush()
+    with pytest.raises(RuntimeError):
+        with session.begin_nested():
+            session.add(Chunk(kind="message", source_ref="x", text="t", content_hash="h"))
+            session.flush()
+            raise RuntimeError("embedder failed")
+    session.commit()
+    NOTEBOOK_SYNC.drain()
+    text = _note_path(vault_sync).read_text()
+    assert "revealed answer" in text and "graded words" in text
+
+
+def test_a_row_moved_to_another_concept_rewrites_both(session, vault_sync):
+    _, concept, other = _seed(session)
+    graded = Assessment(concept_id=concept.id, kind="recall", prompt="p", response="moved text")
+    session.add(graded)
+    session.commit()
+    NOTEBOOK_SYNC.drain()
+    graded.concept_id = other.id
+    session.add(graded)
+    session.commit()
+    assert NOTEBOOK_SYNC.drain() == 2
+    assert "moved text" not in _note_path(vault_sync).read_text()
+    assert "moved text" in _note_path(vault_sync, concept_slug="softmax").read_text()
+
+
+def test_a_legacy_note_gets_its_frontmatter_verdict_kept_current(session, tmp_path):
+    """Notes exported before the notebook: the frontmatter verdict value follows the grade;
+    the old **Verdict:** body line is outside the markers and stays as it was."""
+    topic, concept = _nb(session)
+    path = _note_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    legacy = ("---\ntitle: Self-Attention\ntags: [adaptive-academy, concept]\nverdict: untested\n"
+              "load_bearing: true\n---\n\n# Self-Attention\n\n**Verdict:** untested\n\n"
+              "No assessments yet.\n\nPart of [[build-llms]].\n")
+    path.write_text(legacy)
+    sync_concept(session, concept.id, str(tmp_path))
+    text = path.read_text()
+    assert text.startswith(legacy.replace("verdict: untested", "verdict: medium"))
+    assert "**Verdict:** untested" in text  # the legacy body line is the learner's now
+    assert "**Verdict:** medium" in text.partition(START_PREFIX)[2]
+
+
+def test_set_frontmatter_value_touches_only_that_key():
+    from adaptive_academy.engine.notebook import set_frontmatter_value
+
+    text = "---\r\ntitle: X\r\nverdict: low\r\nverdicts: keep\r\n---\r\nverdict: body\r\n"
+    assert set_frontmatter_value(text, "verdict", "high") == text.replace(
+        "verdict: low", "verdict: high")
+    assert set_frontmatter_value("no frontmatter\nverdict: x\n", "verdict", "y") == (
+        "no frontmatter\nverdict: x\n")
+    assert set_frontmatter_value("---\ntitle: X\n---\nverdict: x\n", "verdict", "y") == (
+        "---\ntitle: X\n---\nverdict: x\n")
+
+
+def test_edits_inside_the_section_are_not_overwritten(session, vault_sync):
+    _, concept = _nb(session)
+    path = sync_concept(session, concept.id, str(vault_sync))
+    edited = path.read_text().replace("My notes here.", "I typed this inside the section.")
+    path.write_text(edited)
+
+    save_note(session, concept.id, "New from the app.")
+    with pytest.raises(SectionEdited):
+        sync_concept(session, concept.id, str(vault_sync))
+    assert path.read_text() == edited
+
+    NOTEBOOK_SYNC.drain()
+    assert "edited in Obsidian" in NOTEBOOK_SYNC.status()["last_error"]
+    # Deleting the section (markers too) lets the next sync write a fresh one.
+    head, _, rest = edited.partition(START_PREFIX)
+    path.write_text(head + rest.partition(END_MARKER)[2])
+    sync_concept(session, concept.id, str(vault_sync))
+    assert "New from the app." in path.read_text()
+
+
+def test_crlf_notes_keep_their_line_endings(session, tmp_path):
+    _, concept = _nb(session)
+    path = _note_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    original = b"---\r\ntitle: Self-Attention\r\nverdict: low\r\n---\r\n# Mine\r\nKeep.\r\n"
+    path.write_bytes(original)
+    sync_concept(session, concept.id, str(tmp_path))
+    raw = path.read_bytes()
+    assert raw.startswith(original.replace(b"verdict: low", b"verdict: medium"))
+    assert b"\n" not in raw.replace(b"\r\n", b"")  # every line ends in CRLF
+    # A second sync finds its own section (the hash ignores line endings) and changes nothing.
+    sync_concept(session, concept.id, str(tmp_path))
+    assert path.read_bytes() == raw
+
+
+# --- names that collide ----------------------------------------------------------------------
+
+
+def _topic_with(session, title, names):
+    topic = Topic(title=title)
+    session.add(topic)
+    session.commit()
+    track = Track(topic_id=topic.id, title="Core")
+    session.add(track)
+    session.commit()
+    concepts = []
+    for name in names:
+        c = Concept(track_id=track.id, name=name)
+        session.add(c)
+        session.commit()
+        concepts.append(c)
+    return topic, concepts
+
+
+def test_slugify_keeps_letters_in_any_script():
+    from adaptive_academy.engine.vault import slugify
+
+    assert slugify("微积分") == "微积分"
+    assert slugify("Café Théorie") == "café-théorie"
+    assert slugify("snake_case & C++") == "snake-case-c"
+    assert slugify("++") == ""
+
+
+def test_names_that_slug_alike_never_share_a_note(session, tmp_path):
+    topic, (cpp, csharp, calc, symbols) = _topic_with(
+        session, "Languages", ["C++", "C#", "微积分", "++"])
+    for c in (cpp, csharp, calc, symbols):
+        save_note(session, c.id, f"note for {c.name}")
+    res = export_vault(session, topic.id, str(tmp_path))
+
+    concepts_dir = tmp_path / EXPORT_FOLDER / "languages" / "Concepts"
+    assert (concepts_dir / "c.md").read_text().count("note for C++") == 1
+    assert "note for C#" in (concepts_dir / f"c-{csharp.id}.md").read_text()
+    assert "note for 微积分" in (concepts_dir / "微积分.md").read_text()
+    assert "note for ++" in (concepts_dir / f"concept-{symbols.id}.md").read_text()
+    assert len(res.written) == 5  # the hub and four distinct notes
+    hub = (tmp_path / EXPORT_FOLDER / "languages" / "languages.md").read_text()
+    assert f"[[c-{csharp.id}|C#]]" in hub and "[[c|C++]]" in hub
+    # A sync of one concept finds the same file.
+    assert sync_concept(session, csharp.id, str(tmp_path)) == concepts_dir / f"c-{csharp.id}.md"
+
+
+def test_a_file_that_is_another_notes_is_never_overwritten(session, tmp_path):
+    topic, (concept,) = _topic_with(session, "Languages", ["Rust"])
+    concepts_dir = tmp_path / EXPORT_FOLDER / "languages" / "Concepts"
+    concepts_dir.mkdir(parents=True)
+    theirs = "---\ntitle: RUST (the game)\n---\nnot this concept\n"
+    (concepts_dir / "rust.md").write_text(theirs)
+
+    path = sync_concept(session, concept.id, str(tmp_path))
+
+    assert (concepts_dir / "rust.md").read_text() == theirs
+    assert path == concepts_dir / f"rust-{concept.id}.md"
+
+
+def test_topics_that_slug_alike_get_their_own_folders(session, tmp_path):
+    first, (a,) = _topic_with(session, "Linear Algebra", ["Vectors"])
+    second, (b,) = _topic_with(session, "linear algebra", ["Vectors"])
+    save_note(session, a.id, "first topic")
+    save_note(session, b.id, "second topic")
+
+    path_a = sync_concept(session, a.id, str(tmp_path))
+    path_b = sync_concept(session, b.id, str(tmp_path))
+
+    assert path_a.parent.parent.name == "linear-algebra"
+    assert path_b.parent.parent.name == f"linear-algebra-{second.id}"
+    assert "first topic" in path_a.read_text() and "second topic" in path_b.read_text()
+    hub_b = path_b.parent.parent / f"linear-algebra-{second.id}.md"
+    assert f"topic_id: {second.id}" in hub_b.read_text()
+    assert f"Part of [[linear-algebra-{second.id}]]." in path_b.read_text()
+
+
+def test_a_folder_whose_hub_is_another_topics_is_not_used(session, tmp_path):
+    topic, (concept,) = _topic_with(session, "Graphs", ["Trees"])
+    folder = tmp_path / EXPORT_FOLDER / "graphs"
+    folder.mkdir(parents=True)
+    (folder / "graphs.md").write_text("---\ntitle: Graphs\ntopic_id: 999\n---\n")
+    path = sync_concept(session, concept.id, str(tmp_path))
+    assert path.parent.parent.name == f"graphs-{topic.id}"
+    assert (folder / "graphs.md").read_text() == "---\ntitle: Graphs\ntopic_id: 999\n---\n"
+
+
+def test_registering_a_vault_needs_an_obsidian_folder(tmp_path):
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    NOTEBOOK_SYNC.reset()
+    try:
+        with pytest.raises(ValueError, match="no .obsidian folder"):
+            notebook_sync.register_vault_path(str(plain))
+        assert notebook_sync.sync_vault_path() == ""
+        (plain / ".obsidian").mkdir()
+        assert notebook_sync.register_vault_path(str(plain)) == str(plain.resolve())
+    finally:
+        NOTEBOOK_SYNC.reset()
+
+
+def test_the_env_vault_is_trusted_without_an_obsidian_folder(session, tmp_path, monkeypatch):
+    from adaptive_academy.settings import settings
+
+    NOTEBOOK_SYNC.reset()
+    monkeypatch.setattr(settings, "obsidian_vault_path", str(tmp_path))
+    try:
+        _, concept, _ = _seed(session)
+        save_note(session, concept.id, "env vault")
+        NOTEBOOK_SYNC.drain()
+        assert "env vault" in _note_path(tmp_path).read_text()
+    finally:
+        NOTEBOOK_SYNC.reset()
+
+
+def test_the_queue_keeps_the_same_row_from_two_databases_apart(vault_sync):
+    from sqlmodel import create_engine
+
+    one, two = create_engine("sqlite://"), create_engine("sqlite://")
+    NOTEBOOK_SYNC.request(one, {("concept", 1)})
+    NOTEBOOK_SYNC.request(two, {("concept", 1)})
+    NOTEBOOK_SYNC.request(one, {("concept", 1)})
+    assert NOTEBOOK_SYNC.pending_count() == 2

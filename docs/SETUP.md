@@ -44,9 +44,15 @@ repo (gitignored), and exports land there.
   Linux, run `mkdir -p data/vault` first, or Docker creates it owned by root.
 - Concept notebooks sync to the vault too: when you save notes, submit an attempt, or get an
   answer graded, that concept's note under `Adaptive Academy/` is updated in the background.
-  Only the part between the `adaptive-academy:notebook` marker lines changes. If a note can't
-  be updated (for example, you deleted one of its marker lines), the Vault page says which one.
-  Without Docker, the path you check on the Vault page is used, or `AA_OBSIDIAN_VAULT_PATH`.
+  Only the part between the `adaptive-academy:notebook` marker lines changes, plus the
+  `verdict:` value in the note's frontmatter. Write your own notes above or below that part.
+  If you edit inside it, or delete one of its marker lines, the app leaves the note alone and
+  the Vault page says which note needs a look. Delete the whole part, marker lines too, and
+  the next sync writes a fresh one.
+- Notes exported before the notebook keep their old `**Verdict:**` line in the body. The app
+  no longer changes it; the current verdict is in the notebook part and in the frontmatter.
+- Without Docker, the folder you check on the Vault page is used, or `AA_OBSIDIAN_VAULT_PATH`.
+  The folder you check must be the vault's top folder, the one with a `.obsidian` folder in it.
 - If the path has spaces, put it in quotes, for example
   `OBSIDIAN_VAULT_PATH="/Users/you/Library/Mobile Documents/..."`. Without quotes, `just`
   can't read the file.
@@ -139,6 +145,15 @@ Things to know:
 instead of an API key. It needs Claude Code installed and logged in on the same machine, so it
 doesn't work in Docker: there the setup card says so and AI features stay off until you
 change it.
+
+## Host names
+
+The app answers only when you open it as `localhost`, `127.0.0.1` or `[::1]`. Any other host
+name gets an error. This stops a web page on another site from reaching the app by pointing
+its own domain at your machine. To open the app under another name, for example a name on
+your own network, list it in `.env` as `AA_ALLOWED_HOSTS=mybox.local` (several names are
+separated by commas) and restart the API. The app has no login, so only add names on a
+network you trust.
 
 ## Time zone
 

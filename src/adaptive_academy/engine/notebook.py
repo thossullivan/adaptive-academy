@@ -18,6 +18,8 @@ it was. Pure DB reads and string work: file I/O lives in engine/notebook_sync.py
 
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -44,8 +46,13 @@ EXPLANATION_KINDS: dict[str, tuple[str, str]] = {
     "recall": ("Decay check", "retention"),
 }
 
-START_MARKER = "<!-- adaptive-academy:notebook:start -->"
+# The start marker as written carries a hash of the section body:
+# "<!-- adaptive-academy:notebook:start sha=0123456789abcdef -->". START_MARKER (no hash)
+# is the plain form, also recognised.
+START_PREFIX = "<!-- adaptive-academy:notebook:start"
+START_MARKER = f"{START_PREFIX} -->"
 END_MARKER = "<!-- adaptive-academy:notebook:end -->"
+_SHA = re.compile(r"\bsha=([0-9a-f]+)\b")
 
 # Bounds on what one vault section holds, so a sync stays small however long the history.
 SECTION_ITEMS_PER_PART = 50
@@ -62,6 +69,10 @@ class NoteTooLong(ValueError):
 
 class MarkerError(ValueError):
     """The note's notebook markers don't pair up, so the managed section can't be found."""
+
+
+class SectionEdited(MarkerError):
+    """The managed section was changed by hand since it was written; it is left alone."""
 
 
 @dataclass
@@ -288,18 +299,32 @@ def _solution_lines(item: NotebookItem) -> list[str]:
     return [f"**{_day(item.created_at)}** · Tutor", "", _quote(item.text), ""]
 
 
-def render_notebook_section(nb: Notebook, verdict: str) -> str:
-    """The managed section, markers included (no trailing newline)."""
+def section_digest(body: str) -> str:
+    """Short hash of a section's body (between the marker lines), line endings normalised."""
+    norm = body.replace("\r\n", "\n").replace("\r", "\n")
+    if norm.endswith("\n"):
+        norm = norm[:-1]
+    return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+
+
+def render_notebook_section(nb: Notebook, verdict: str, summary: str = "") -> str:
+    """The managed section, markers included (no trailing newline). The start marker
+    carries a hash of the body, so a later sync can tell whether it was edited by hand."""
     by_kind = {k: [i for i in nb.items if i.kind == k]
                for k in ("attempt", "explanation", "solution")}
     lines = [
-        START_MARKER,
         "## Notebook",
         "",
-        f"Verdict now: {verdict}",
+        f"**Verdict:** {verdict}",
         "",
-        "Adaptive Academy keeps this section up to date and rewrites it on every sync. Write "
-        "your own notes above or below it. Edit My notes in the app.",
+    ]
+    if summary.strip():
+        lines += [_neutral(summary.strip()), ""]
+    lines += [
+        "Adaptive Academy writes this section and rewrites it on every sync. Write your own "
+        "notes above or below it, not inside it: once this section is edited here, syncing "
+        "stops for this note until the edit is undone or the section is deleted. Edit My "
+        "notes in the app.",
         "",
         "### My notes",
         "",
@@ -311,54 +336,86 @@ def render_notebook_section(nb: Notebook, verdict: str) -> str:
     lines += _part("Worked solutions", by_kind["solution"], _solution_lines)
     while lines and lines[-1] == "":
         lines.pop()
-    lines.append(END_MARKER)
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    return f"{START_PREFIX} sha={section_digest(body)} -->\n{body}\n{END_MARKER}"
+
+
+def _eol(text: str) -> str:
+    """The note's own line ending (the first one found), "\n" when it has none."""
+    for i, ch in enumerate(text):
+        if ch == "\r":
+            return "\r\n" if text[i + 1:i + 2] == "\n" else "\r"
+        if ch == "\n":
+            return "\n"
+    return "\n"
+
+
+def _is_start(line: str) -> bool:
+    s = line.strip()
+    return s == START_MARKER or (s.startswith(START_PREFIX + " ") and s.endswith("-->"))
 
 
 def splice_notebook_section(text: str, section: str) -> str:
-    """Put `section` into the note `text`, changing nothing outside the markers.
+    """Put `section` (rendered with "\n") into the note `text`, changing nothing outside
+    the markers. The section takes the note's own line ending.
 
     - No markers: the section is appended after a blank line.
-    - One start..end pair: the lines from start to end are replaced.
-    - Several complete pairs (a copied section): the first is replaced and the others,
-      which are the app's by definition, are removed.
-    - Anything else (a start without an end, an end first, nested starts): MarkerError, and
-      the caller leaves the note alone rather than guess what is the learner's.
+    - One start..end pair: the lines from start to end are replaced, unless the section
+      was edited by hand since it was written (its body no longer matches the hash in the
+      start marker): SectionEdited, and the caller leaves the note alone.
+    - Anything else (a start without an end, an end first, nested starts, or more than one
+      section, which may be a copy the learner pasted): MarkerError, and the caller leaves
+      the note alone rather than guess what is the learner's.
     Markers are matched as whole lines, ignoring surrounding whitespace.
     """
+    eol = _eol(text)
+    section = section.replace("\n", eol)
     lines = text.splitlines(keepends=True)
-    marks = [(i, line.strip()) for i, line in enumerate(lines)
-             if line.strip() in (START_MARKER, END_MARKER)]
+    marks = []
+    for i, line in enumerate(lines):
+        if _is_start(line):
+            marks.append((i, "start"))
+        elif line.strip() == END_MARKER:
+            marks.append((i, "end"))
     if not marks:
         if not text:
-            return section + "\n"
-        if text.endswith("\n\n"):
+            return section + eol
+        if text.endswith(eol + eol):
             sep = ""
-        elif text.endswith("\n"):
-            sep = "\n"
+        elif text.endswith(("\n", "\r")):
+            sep = eol
         else:
-            sep = "\n\n"
-        return text + sep + section + "\n"
-    pairs: list[tuple[int, int]] = []
-    expect_start = True
-    start = -1
-    for i, mark in marks:
-        if expect_start and mark == START_MARKER:
-            start = i
-            expect_start = False
-        elif not expect_start and mark == END_MARKER:
-            pairs.append((start, i))
-            expect_start = True
-        else:
-            raise MarkerError("the notebook markers don't pair up")
-    if not expect_start:
-        raise MarkerError("the notebook markers don't pair up")
-    out: list[str] = []
-    cursor = 0
-    for n, (s, e) in enumerate(pairs):
-        out.extend(lines[cursor:s])
-        if n == 0:
-            out.append(section + ("\n" if lines[e].endswith("\n") else ""))
-        cursor = e + 1
-    out.extend(lines[cursor:])
-    return "".join(out)
+            sep = eol + eol
+        return text + sep + section + eol
+    kinds = [m for _, m in marks]
+    if kinds != ["start", "end"]:
+        several = kinds == ["start", "end"] * (len(kinds) // 2)
+        raise MarkerError("there is more than one notebook section" if several
+                          else "the notebook markers don't pair up")
+    (s, _), (e, _) = marks
+    match = _SHA.search(lines[s])
+    if match and section_digest("".join(lines[s + 1:e])) != match.group(1):
+        raise SectionEdited("the notebook section was edited in the note")
+    ending = lines[e][len(lines[e].rstrip("\r\n")):]
+    return "".join(lines[:s]) + section + ending + "".join(lines[e + 1:])
+
+
+_FRONTMATTER_KEY = re.compile(r"^(?P<key>[A-Za-z0-9_-]+)\s*:")
+
+
+def set_frontmatter_value(text: str, key: str, value: str) -> str:
+    """Set an existing `key:` line's value in the note's YAML frontmatter, and nothing else:
+    no frontmatter, or no such key, leaves the text as it was."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].rstrip("\r\n") != "---":
+        return text
+    for i in range(1, len(lines)):
+        bare = lines[i].rstrip("\r\n")
+        if bare in ("---", "..."):
+            return text
+        m = _FRONTMATTER_KEY.match(bare)
+        if m and m.group("key") == key:
+            ending = lines[i][len(bare):]
+            lines[i] = f"{key}: {value}{ending}"
+            return "".join(lines)
+    return text

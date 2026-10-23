@@ -9,6 +9,7 @@
   import MemoryDisclosure from '$lib/ui/MemoryDisclosure.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
   import { cn, scrollBehavior } from '$lib/utils';
+  import { settledSave } from '$lib/notebook';
   import Composer from './Composer.svelte';
   import { attemptSavedMessage, messageNote, storedAttempt } from './attempt';
 
@@ -75,6 +76,8 @@
     const forConcept = conceptId;
     notebookError = '';
     try {
+      // A save of this concept's notes still on its way (a quick switch back) lands first.
+      await settledSave(forConcept);
       const nb = await api.getNotebook(forConcept);
       if (seq === notesSeq) notebook = nb;
     } catch (e) {

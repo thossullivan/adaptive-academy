@@ -119,3 +119,133 @@ test('the rail links to the Notebook under Library', async ({ page }) => {
   await expect(page).toHaveURL(new RegExp(`/topics/${topic.id}/notebook$`));
   await expect(page.getByRole('heading', { level: 1, name: 'Notebook' })).toBeVisible();
 });
+
+// --- drafts are never lost ------------------------------------------------------------------
+
+/** The concept's saved note body, straight from the API. */
+async function savedBody(page: Page, conceptId: number): Promise<string> {
+  const res = await page.request.get(`/api/concepts/${conceptId}/notebook`);
+  expect(res.ok()).toBeTruthy();
+  return ((await res.json()) as { note: { body: string } | null }).note?.body ?? '';
+}
+
+async function openNotes(page: Page, topicId: number, conceptId: number, name: string) {
+  await page.goto(`/topics/${topicId}/tutor?concept=${conceptId}`);
+  await settle(page);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const box = page.locator('#tutor-notes').getByRole('textbox', { name: `My notes on ${name}` });
+  await expect(box).toBeVisible();
+  return box;
+}
+
+test('a draft whose save failed is kept in the tab and restored after a reload', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const name = isPhone() ? 'Feed-Forward Sublayer (FFN)' : 'AdamW and Learning-Rate Schedules';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  page.on('dialog', (d) => d.accept()); // the reload asks first: there are unsaved changes
+
+  const box = await openNotes(page, topic.id, concept.id, name);
+  await page.route(`**/api/concepts/${concept.id}/note`, (r) => r.fulfill({ status: 503, json: { detail: 'The server is busy.' } }));
+  await box.fill('Warmup then cosine decay.');
+  await page.keyboard.press('Control+s');
+  const status = page.getByTestId('note-status');
+  await expect(status).toHaveText(/Not saved: The server is busy/);
+
+  await page.reload();
+  await settle(page);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  await expect(page.locator('#tutor-notes').getByRole('textbox', { name: `My notes on ${name}` })).toHaveValue('Warmup then cosine decay.');
+  await expect(status).toContainText('Unsaved changes');
+  await expect(page.getByTestId('note-restored')).toBeVisible();
+
+  await page.unroute(`**/api/concepts/${concept.id}/note`);
+  await page.locator('#tutor-notes').getByRole('button', { name: 'Save notes' }).click();
+  await expect(status).toContainText('Saved');
+  expect(await savedBody(page, concept.id)).toBe('Warmup then cosine decay.');
+});
+
+test('edits typed while a save runs are saved right after it', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const name = isPhone() ? 'Multi-Head Attention' : 'Residual Connections and LayerNorm';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  const box = await openNotes(page, topic.id, concept.id, name);
+  const bodies: string[] = [];
+  await page.route(`**/api/concepts/${concept.id}/note`, async (r) => {
+    bodies.push(JSON.parse(r.request().postData() ?? '{}').body);
+    await new Promise((res) => setTimeout(res, 400));
+    await r.fallback();
+  });
+
+  await box.fill('first');
+  await page.keyboard.press('Control+s');
+  await box.press('End');
+  await page.keyboard.type(' and second');
+  await page.keyboard.press('Control+s');
+  await expect(page.getByTestId('note-status')).toContainText('Saved');
+  await expect.poll(() => savedBody(page, concept.id)).toBe('first and second');
+  expect(bodies).toEqual(['first', 'first and second']);
+});
+
+test('switching away and straight back shows the text just saved, not an older copy', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const name = isPhone() ? 'Language Modeling Objective' : 'Token Embeddings';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  const other = topic.concepts.find((c) => c.name === 'Computational Graphs')!;
+  const box = await openNotes(page, topic.id, concept.id, name);
+  await page.route(`**/api/concepts/${concept.id}/note`, async (r) => {
+    await new Promise((res) => setTimeout(res, 800));
+    await r.fallback();
+  });
+
+  await box.fill('Saved on the way out.');
+  const select = page.getByRole('combobox', { name: 'Concept' });
+  await select.selectOption(String(other.id)); // the draft is saved as the editor goes
+  await expect(page.locator('#tutor-notes').getByRole('textbox', { name: 'My notes on Computational Graphs' })).toBeVisible();
+  await select.selectOption(String(concept.id));
+
+  const back = page.locator('#tutor-notes').getByRole('textbox', { name: `My notes on ${name}` });
+  await expect(back).toHaveValue('Saved on the way out.');
+  await expect(page.getByTestId('note-status')).toContainText('Saved');
+  expect(await savedBody(page, concept.id)).toBe('Saved on the way out.');
+});
+
+test('a draft over the limit cannot be saved, and leaving the page asks first', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const name = 'Byte Pair Encoding';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  const box = await openNotes(page, topic.id, concept.id, name);
+  await box.fill('x'.repeat(50001));
+  await expect(page.getByTestId('note-status')).toContainText('Too long to save: 50,001 of 50,000 characters');
+  await expect(page.locator('#tutor-notes').getByRole('button', { name: 'Save notes' })).toBeDisabled();
+
+  const asked: string[] = [];
+  page.once('dialog', (d) => {
+    asked.push(d.message());
+    d.dismiss();
+  });
+  if (isPhone()) await page.getByRole('button', { name: 'Open navigation' }).click();
+  await page.locator('aside:visible').getByRole('link', { name: 'Today', exact: true }).click();
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toMatch(/over the 50,000 character limit/);
+  await expect(page).toHaveURL(new RegExp(`/topics/${topic.id}/tutor`));
+  expect(await savedBody(page, concept.id)).toBe('');
+});
+
+test('clearing the vault folder stops notebooks syncing to it', async ({ page }) => {
+  const topic = await seededTopic(page);
+  await page.addInitScript(() => localStorage.setItem('aa_vault_path', '/no/such/vault'));
+  const syncs: string[] = [];
+  page.on('request', (req) => {
+    if (req.method() === 'PUT' && new URL(req.url()).pathname === '/api/vault/sync') {
+      syncs.push(JSON.parse(req.postData() ?? '{}').vault_path);
+    }
+  });
+  await page.goto(`/topics/${topic.id}/vault`);
+  await settle(page);
+  const field = page.getByRole('textbox', { name: 'Vault folder path' });
+  await expect(field).toHaveValue('/no/such/vault');
+  await field.fill('');
+  await field.blur();
+  await expect.poll(() => syncs.includes('')).toBe(true);
+  expect(await page.evaluate(() => localStorage.getItem('aa_vault_path'))).toBeNull();
+});

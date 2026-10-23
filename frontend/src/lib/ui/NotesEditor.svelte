@@ -1,16 +1,29 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
+  import { beforeNavigate } from '$app/navigation';
   import { api } from '$lib/api';
   import { toasts } from '$lib/toast.svelte';
-  import { NOTE_MAX_CHARS, formatWhen, isSaveShortcut, noteStatus, storedVaultPath } from '$lib/notebook';
+  import {
+    NOTE_MAX_CHARS,
+    NoteSaver,
+    draftStore,
+    formatWhen,
+    isSaveShortcut,
+    noteStatus,
+    storedVaultPath,
+    trackSave
+  } from '$lib/notebook';
   import type { ConceptNote } from '$lib/types';
   import { cn } from '$lib/utils';
   import Button from './Button.svelte';
   import LiveStatus from './LiveStatus.svelte';
 
   // My notes on one concept: edit, then Save (or Ctrl/Cmd+S). Key the component on the
-  // concept id: it starts from `saved` and keeps its own draft. Unsaved changes are saved
-  // when it goes away (switching concept or page), and the browser warns before a reload.
+  // concept id: it starts from `saved` and keeps its own draft. The draft is also kept in
+  // this tab (sessionStorage) until a save is confirmed, and restored here on the next visit,
+  // so a failed save or a draft over the limit is never lost. Edits made while a save runs
+  // are saved right after it. Leaving with unsaved changes saves them on the way out; a
+  // reload, or leaving the page with a draft over the limit, asks first.
   let {
     conceptId,
     conceptName,
@@ -32,38 +45,59 @@
   } = $props();
 
   const uid = $props.id();
+  const drafts = draftStore();
+  const id = untrack(() => conceptId);
+  const name = untrack(() => conceptName);
+  const saver = new NoteSaver((body: string) => api.saveNote(id, body, storedVaultPath()));
+
   let base = $state(untrack(() => saved));
   let at = $state<string | null>(untrack(() => savedAt));
-  let draft = $state(untrack(() => saved));
+  // A draft this tab kept from an earlier visit (a save that failed, or one never made).
+  const kept = drafts.get(id);
+  const restored = kept !== null && kept !== untrack(() => saved);
+  let draft = $state(restored ? (kept as string) : untrack(() => saved));
   let saving = $state(false);
   let error = $state('');
-  let announce = $state('');
+  let announce = $state(restored ? `Restored your unsaved notes on ${name}.` : '');
 
   const status = $derived(noteStatus({ saved: base, draft, saving, error, savedAt: at }));
   const changed = $derived(draft !== base);
+  const tooLong = $derived(draft.length > NOTE_MAX_CHARS);
   const nearLimit = $derived(draft.length > NOTE_MAX_CHARS * 0.9);
   $effect(() => {
     dirty = changed;
   });
+  // Keep the draft in this tab until what is shown is what was saved.
+  $effect(() => {
+    if (changed) drafts.set(id, draft);
+    else drafts.clear(id);
+  });
+
+  function send(body: string): Promise<ConceptNote> {
+    return trackSave(id, saver.save(body));
+  }
 
   export async function save(): Promise<boolean> {
-    if (saving || !changed || draft.length > NOTE_MAX_CHARS) return !changed;
+    if (!changed || tooLong) return !changed;
+    const body = draft;
     saving = true;
     error = '';
-    const body = draft;
     try {
-      const note = await api.saveNote(conceptId, body, storedVaultPath());
+      const note = await send(body);
+      // Edits typed meanwhile were saved after this one: the newest saved body is kept.
       base = note.body;
       at = note.updated_at;
-      announce = `Notes on ${conceptName} saved.`;
+      announce = `Notes on ${name} saved.`;
       onsaved?.(note);
       return true;
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-      announce = `Notes not saved. ${error}`;
+      if (draft === body) {
+        error = e instanceof Error ? e.message : String(e);
+        announce = `Notes not saved. ${error}`;
+      }
       return false;
     } finally {
-      saving = false;
+      saving = saver.busy;
     }
   }
 
@@ -77,7 +111,7 @@
     error = '';
   }
 
-  // A reload or closing the tab would lose the draft: let the browser ask first.
+  // A reload or closing the tab: let the browser ask first (the draft is also kept in the tab).
   $effect(() => {
     if (!changed) return;
     const warn = (e: BeforeUnloadEvent) => {
@@ -87,14 +121,36 @@
     return () => window.removeEventListener('beforeunload', warn);
   });
 
-  // Leaving the concept or the page keeps the draft: it is saved on the way out.
+  // A draft over the limit can't be saved on the way out: ask before leaving the page.
+  beforeNavigate((nav) => {
+    if (!tooLong || nav.willUnload) return;
+    const leave = window.confirm(
+      `Your notes on ${name} are over the ${NOTE_MAX_CHARS.toLocaleString('en-US')} character limit, so they can't be saved. Leave anyway? The draft stays in this tab.`
+    );
+    if (!leave) nav.cancel();
+  });
+
+  // Leaving the concept or the page: unsaved changes are saved on the way out. If that fails,
+  // or the draft is over the limit, the draft stays in this tab and comes back next time.
   onDestroy(() => {
-    if (!changed || saving || draft.length > NOTE_MAX_CHARS) return;
-    const name = conceptName;
-    api
-      .saveNote(conceptId, draft, storedVaultPath())
-      .then(() => toasts.show(`Saved your notes on ${name}.`))
-      .catch((e) => toasts.show(`Your notes on ${name} were not saved. ${e instanceof Error ? e.message : e}`, 'error', 9000));
+    if (!changed) return;
+    if (tooLong) {
+      toasts.show(`Your notes on ${name} are over the limit and were not saved. The draft is kept in this tab.`, 'error', 9000);
+      return;
+    }
+    const body = draft;
+    send(body)
+      .then(() => {
+        drafts.clear(id, body);
+        toasts.show(`Saved your notes on ${name}.`);
+      })
+      .catch((e) =>
+        toasts.show(
+          `Your notes on ${name} were not saved. ${e instanceof Error ? e.message : e} The draft is kept in this tab.`,
+          'error',
+          9000
+        )
+      );
   });
 
   const tone: Record<string, string> = {
@@ -126,8 +182,9 @@
       {#if nearLimit && status.state !== 'too_long'}
         <span class="text-faint">{` · ${draft.length.toLocaleString('en-US')} of ${NOTE_MAX_CHARS.toLocaleString('en-US')} characters`}</span>
       {/if}
+      {#if restored && changed}<span class="text-faint" data-testid="note-restored">{' · restored from this tab'}</span>{/if}
     </p>
-    <Button size="sm" onclick={save} disabled={saving || !changed || draft.length > NOTE_MAX_CHARS}>
+    <Button size="sm" onclick={save} disabled={!changed || tooLong}>
       {saving ? 'Saving…' : 'Save notes'}
     </Button>
   </div>

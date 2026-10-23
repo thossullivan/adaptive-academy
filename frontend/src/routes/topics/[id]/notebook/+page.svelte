@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import { formatWhen } from '$lib/notebook';
+  import { formatWhen, settledSave } from '$lib/notebook';
   import type { Notebook, NotebookConcept } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, NotebookItems, NotesEditor } from '$lib/ui';
@@ -40,6 +40,7 @@
     const mine = ++seq;
     notebookError = '';
     try {
+      await settledSave(id); // never show text older than a save still on its way
       const nb = await api.getNotebook(id);
       if (mine !== seq) return;
       // Only this topic's concepts: a stale or foreign ?concept= shows nothing.

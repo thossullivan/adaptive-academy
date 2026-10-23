@@ -1,6 +1,6 @@
 // Concept notebook helpers: a concept's notes and work in one place (GET /api/concepts/{id}/notebook).
 
-import type { NotebookItem, NotebookSource } from './types';
+import type { ConceptNote, NotebookItem, NotebookSource } from './types';
 
 /** Mirrors engine/notebook.py NOTE_MAX_CHARS (tests/test_frontend_constants.py keeps them equal). */
 export const NOTE_MAX_CHARS = 50000;
@@ -93,4 +93,123 @@ export function storedVaultPath(storage?: StorageLike | null): string {
   } catch {
     return '';
   }
+}
+
+// --- Keeping drafts safe -----------------------------------------------------------------
+
+type DraftStorage = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+const DRAFT_PREFIX = 'aa.note-draft.';
+
+/** Unsaved notes per concept, kept in this tab (sessionStorage) until a save is confirmed,
+ *  so a failed save, a draft over the limit, or a switch away never loses them. Never throws:
+ *  without storage, drafts simply aren't kept. `storage` defaults to sessionStorage. */
+export function draftStore(storage?: DraftStorage | null) {
+  const from = (): DraftStorage | null => {
+    if (storage !== undefined) return storage;
+    return typeof window === 'undefined' ? null : window.sessionStorage;
+  };
+  return {
+    get(conceptId: number): string | null {
+      try {
+        return from()?.getItem(DRAFT_PREFIX + conceptId) ?? null;
+      } catch {
+        return null;
+      }
+    },
+    set(conceptId: number, body: string): void {
+      try {
+        from()?.setItem(DRAFT_PREFIX + conceptId, body);
+      } catch {
+        /* storage full or blocked: the draft lives only on the page */
+      }
+    },
+    /** Forget the draft; with `ifBody`, only when it is that body (a newer one stays). */
+    clear(conceptId: number, ifBody?: string): void {
+      try {
+        const s = from();
+        if (!s) return;
+        if (ifBody !== undefined && s.getItem(DRAFT_PREFIX + conceptId) !== ifBody) return;
+        s.removeItem(DRAFT_PREFIX + conceptId);
+      } catch {
+        /* nothing to clear */
+      }
+    }
+  };
+}
+
+/** One concept's saves, one at a time: an edit saved while a save is running is sent right
+ *  after it (only the newest such edit), so nothing typed meanwhile is lost or reordered. */
+export class NoteSaver<T = ConceptNote> {
+  private running: Promise<T> | null = null;
+  private queued: string | null = null;
+  private next: Promise<T> | null = null;
+
+  constructor(private send: (body: string) => Promise<T>) {}
+
+  get busy(): boolean {
+    return this.running !== null || this.next !== null;
+  }
+
+  save(body: string): Promise<T> {
+    if (this.running) {
+      this.queued = body;
+      this.next ??= this.running
+        .catch(() => undefined)
+        .then(() => {
+          const queued = this.queued as string;
+          this.queued = null;
+          this.next = null;
+          return this.save(queued);
+        });
+      return this.next;
+    }
+    const run = this.send(body).finally(() => {
+      if (this.running === run) this.running = null;
+    });
+    this.running = run;
+    return run;
+  }
+}
+
+// Saves still on their way, per concept: a load waits for them, so it never shows text older
+// than what was just saved (and the next save never overwrites the newer text with it).
+const pendingSaves = new Map<number, Promise<void>>();
+
+export function trackSave<T>(conceptId: number, save: Promise<T>): Promise<T> {
+  const settled = save.then(
+    () => undefined,
+    () => undefined
+  );
+  pendingSaves.set(conceptId, settled);
+  settled.then(() => {
+    if (pendingSaves.get(conceptId) === settled) pendingSaves.delete(conceptId);
+  });
+  return save;
+}
+
+/** Resolves once every save tracked for this concept has finished (failed ones too). */
+export async function settledSave(conceptId: number): Promise<void> {
+  let pending = pendingSaves.get(conceptId);
+  while (pending) {
+    await pending;
+    const later = pendingSaves.get(conceptId);
+    pending = later === pending ? undefined : later;
+  }
+}
+
+/** The Vault page's folder decides where notebooks sync: an empty field stops syncing to a
+ *  browser-set vault, a readable folder becomes the target, anything else changes nothing. */
+export async function updateSyncTarget<T>(
+  vaultSync: (path: string) => Promise<T>,
+  path: string,
+  isDir: boolean
+): Promise<T | null> {
+  const p = path.trim();
+  if (!p) return vaultSync('');
+  return isDir ? vaultSync(p) : null;
 }

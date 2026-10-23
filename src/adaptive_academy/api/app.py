@@ -6,6 +6,8 @@ from pathlib import Path
 import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+
+from adaptive_academy.api.hosts import LocalHostMiddleware, allowed_hosts
 from fastapi.responses import FileResponse, JSONResponse
 
 from adaptive_academy.settings import settings
@@ -145,6 +147,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added last, so it runs first: a request under any other host name gets a 400 before
+    # it reaches a route (api/hosts.py).
+    app.add_middleware(LocalHostMiddleware, allowed_hosts=allowed_hosts(settings.allowed_hosts))
 
     @app.on_event("startup")
     def _startup() -> None:
