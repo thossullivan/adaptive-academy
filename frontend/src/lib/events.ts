@@ -93,7 +93,9 @@ const AREA: Record<string, string> = {
   vault: 'The vault',
   scout: 'Scout',
   story: 'The story',
-  remediate: 'Catch-up planning'
+  remediate: 'Catch-up planning',
+  roleplay: 'The role-play',
+  guard: 'The tutor\'s answer check'
 };
 
 const num = (detail: string, re: RegExp): number | null => {
@@ -210,9 +212,59 @@ export function plainEvents(events: EventOut[], concepts: Record<number, string>
       case 'tool:reveal_solution:blocked':
         say('The tutor held back a solution until you try', 'warn');
         continue;
+
+      // Warnings: the step finished, but with less than it set out to do. Amber, not red.
+      case 'curriculum:malformed':
+      case 'program_research:malformed': {
+        // "WARN 3 malformed entries skipped: …" (jsonout.dropped_summary)
+        const n = num(e.detail, /(\d+) malformed/);
+        const what = e.kind.startsWith('curriculum') ? 'track' : 'program map';
+        say(n != null ? `Left out ${plural(n, `malformed ${what} entry`, `malformed ${what} entries`)}` : `Left out malformed ${what} entries`, 'warn');
+        continue;
+      }
+      case 'research:subagent_error':
+      case 'program_research:subagent_error':
+      case 'program_revision:subagent_error':
+        // One search out of several; a retry may still recover it (…:subagent_retry).
+        say(`${AREA[e.kind.split(':')[0]]}: one search failed`, 'warn');
+        continue;
+      case 'research:subagent_retry':
+      case 'program_research:subagent_retry':
+      case 'program_revision:subagent_retry': {
+        const n = num(e.detail, /recovered (\d+)/);
+        say(n != null ? `${AREA[e.kind.split(':')[0]]}: a retry recovered ${plural(n, 'source')}` : `${AREA[e.kind.split(':')[0]]}: a retry recovered the search`);
+        continue;
+      }
+      case 'research:capped': {
+        // "dropped 4 of 16": the ranked sources past the cap.
+        const m = e.detail.match(/dropped (\d+) of (\d+)/);
+        say(m ? `Research set aside ${m[1]} of ${m[2]} sources over the limit` : 'Research set aside sources over the limit', 'warn');
+        continue;
+      }
+      case 'program_revision:aborted':
+        say('Map revision stopped: another revision was already open', 'warn');
+        continue;
+      case 'program_revision:changes_dropped': {
+        const n = num(e.detail, /(\d+)/);
+        say(n != null ? `Map revision discarded ${plural(n, 'invalid change')}` : 'Map revision discarded invalid changes', 'warn');
+        continue;
+      }
+      case 'roleplay:no_reply':
+        say(e.detail === 'refusal' ? 'The role-play persona declined to reply' : 'The role-play persona gave no usable reply', 'warn');
+        continue;
+      case 'guard:fallback':
+        // The stored reply is the guard's fallback question (engine/solution_guard.py).
+        say('The tutor\'s draft gave the answer away, so it asked a guiding question instead', 'warn');
+        continue;
+      case 'memory:reindex_partial':
+        say('The memory index covered only part of your vault this time', 'warn');
+        continue;
     }
-    // Any other failure is worth knowing about, in words; everything else is bookkeeping.
-    if (/error|failed/.test(e.kind)) say(`${AREA[e.kind.split(':')[0]] ?? 'An agent step'} hit a problem`, 'bad');
+    // Any other failure or warning is worth knowing about, in words; everything else is
+    // bookkeeping and stays in the raw trace.
+    const area = AREA[e.kind.split(':')[0]] ?? 'An agent step';
+    if (/error|failed/.test(e.kind)) say(`${area} hit a problem`, 'bad');
+    else if (/malformed|aborted|dropped|no_reply|fallback|partial/.test(e.kind)) say(`${area} finished with a warning`, 'warn');
   }
 
   const rows: PlainEventRow[] = [];

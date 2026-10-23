@@ -145,11 +145,53 @@ describe('plainEvents', () => {
   });
 
   it('reports failures in words, with the area they came from', () => {
-    const rows = plainEvents([ev('research:subagent_error', 'timeout'), ev('vault:sync_failed', 'x'), ev('weird:error')]);
+    const rows = plainEvents([ev('memory:error', 'boom'), ev('vault:sync_failed', 'x'), ev('weird:error')]);
     expect(rows.map((r) => [r.text, r.tone])).toEqual([
-      ['Research hit a problem', 'bad'],
+      ['The memory index hit a problem', 'bad'],
       ['Notebook sync to the vault failed', 'bad'],
       ['An agent step hit a problem', 'bad']
+    ]);
+  });
+
+  it('shows warnings a learner should see in amber, with the numbers the events carry', () => {
+    // Details as the engine writes them (curriculum.py, research.py, revision.py, roleplay.py,
+    // solution_guard.py, vault.py, jsonout.dropped_summary).
+    const rows = plainEvents([
+      ev('curriculum:malformed', 'WARN 3 malformed entries skipped: phases[1].items[2], phases[2] …'),
+      ev('curriculum:generated', '4 phases'),
+      ev('program_research:malformed', 'WARN 1 malformed entry skipped: milestones[0]'),
+      ev('research:subagent_error', 'math: timeout'),
+      ev('research:subagent_retry', 'math: recovered 3 sources'),
+      ev('research:capped', 'dropped 4 of 16'),
+      ev('program_revision:aborted', 'an open revision appeared during the run'),
+      ev('program_revision:changes_dropped', '2 invalid change(s) discarded'),
+      ev('roleplay:no_reply', 'refusal'),
+      ev('roleplay:no_reply', 'empty reply (stop_reason=max_tokens)'),
+      ev('guard:fallback', 'regeneration failed (timeout)'),
+      ev('memory:reindex_partial', 'scan capped at 5000 files; orphan sweep skipped')
+    ]);
+    expect(rows.map((r) => [r.text, r.tone])).toEqual([
+      ['Left out 3 malformed track entries', 'warn'],
+      ['Drafted the track: 4 phases', 'good'],
+      ['Left out 1 malformed program map entry', 'warn'],
+      ['Research: one search failed', 'warn'], // a retry may still recover it: not red
+      ['Research: a retry recovered 3 sources', 'neutral'],
+      ['Research set aside 4 of 16 sources over the limit', 'warn'],
+      ['Map revision stopped: another revision was already open', 'warn'],
+      ['Map revision discarded 2 invalid changes', 'warn'],
+      ['The role-play persona declined to reply', 'warn'],
+      ['The role-play persona gave no usable reply', 'warn'],
+      ["The tutor's draft gave the answer away, so it asked a guiding question instead", 'warn'],
+      ['The memory index covered only part of your vault this time', 'warn']
+    ]);
+  });
+
+  it('names any other warning kind generically rather than dropping it', () => {
+    const rows = plainEvents([ev('concepts:repair_partial', 'x'), ev('scout:fallback', 'y'), ev('story:aborted')]);
+    expect(rows.map((r) => [r.text, r.tone])).toEqual([
+      ['An agent step finished with a warning', 'warn'],
+      ['Scout finished with a warning', 'warn'],
+      ['The story finished with a warning', 'warn']
     ]);
   });
 

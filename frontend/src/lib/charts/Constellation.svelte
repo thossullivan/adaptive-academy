@@ -10,6 +10,7 @@
     clampToBounds,
     createLayout,
     fitLabel,
+    GLOW,
     hasRealSize,
     labelMaxWidth,
     layoutLabels,
@@ -347,8 +348,14 @@
           }}
         >
           <title>{n.name}</title>
-          <!-- glow (decorative: never steals the pointer from a neighbouring star) -->
-          <circle r={r + 8} fill={c} opacity={hovered === n.id ? 0.28 : hollow ? 0.06 : 0.14} pointer-events="none" />
+          <!-- Glow (decorative: never steals the pointer from a neighbouring star). A key concept
+               is drawn larger with a full halo; other stars get only a faint, tight glow. No ring
+               marks a key concept, so it can never be mistaken for an untested (hollow) star. -->
+          {#if n.loadBearing}
+            <circle data-testid="constellation-halo" data-node-id={n.id} r={r + GLOW} fill={c} opacity={hovered === n.id ? 0.32 : hollow ? 0.14 : 0.22} pointer-events="none" />
+          {:else}
+            <circle r={r + 5} fill={c} opacity={hovered === n.id ? 0.28 : hollow ? 0.04 : 0.1} pointer-events="none" />
+          {/if}
           <!-- hit target: r + 4 stays clear of neighbours (collision keeps stars r + 4 apart) -->
           <circle r={r + 4} fill="transparent" />
           <!-- Shape backs up colour (VERDICT_SHAPE): an untested star is a hollow ring (no
@@ -366,9 +373,6 @@
           {/if}
           {#if n.id === selected || highlightedSet.has(n.id)}
             <circle r={r + 6} fill="none" stroke="var(--accent)" stroke-width={n.id === selected ? 2 : 1.25} opacity="0.9" pointer-events="none" />
-          {/if}
-          {#if n.loadBearing}
-            <circle r={r + 3.5} fill="none" stroke={c} stroke-width="1" opacity="0.6" pointer-events="none" />
           {/if}
           {#if focused === n.id}
             <circle
@@ -420,7 +424,13 @@
           <VerdictDot verdict={v} />{VERDICT_LABEL[v]}
         </span>
       {/each}
-      <span class="flex items-center gap-1.5 text-[0.7rem] text-faint">◯ key concept</span>
+      <!-- A key concept is a larger star with a halo: the swatch draws exactly that. -->
+      <span class="flex items-center gap-1.5 text-[0.7rem] text-muted" data-testid="legend-key-concept">
+        <span
+          class="inline-block size-2.5 shrink-0 rounded-full bg-[var(--muted)] shadow-[0_0_0_3px_color-mix(in_oklab,var(--muted)_30%,transparent)]"
+          aria-hidden="true"
+        ></span>key concept (larger, with a halo)
+      </span>
     </div>
   </div>
 </div>

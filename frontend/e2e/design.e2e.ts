@@ -69,19 +69,7 @@ test('a disabled primary button is flat grey, not a faded brand button', async (
   await expect.poll(() => submit.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(accent);
 });
 
-test('every page starts at the same left edge', async ({ page }) => {
-  test.skip(isPhone(), 'one column on a phone');
-  const id = await seededTopicId(page);
-  await selectTopic(page, id);
-  const routes = ['/', '/fleet', '/programs', '/topics/new', '/usage', `/topics/${id}/teach`, `/topics/${id}/track`, `/topics/${id}/map`];
-  const edges: Record<string, number> = {};
-  for (const route of routes) {
-    await page.goto(route);
-    await settle(page);
-    edges[route] = Math.round((await page.locator('main h1').first().boundingBox())!.x);
-  }
-  expect(new Set(Object.values(edges)).size, JSON.stringify(edges)).toBe(1);
-});
+// The shared left edge of every page is checked in layout.e2e.ts.
 
 test.describe('dashboard', () => {
   test.beforeEach(async ({ page }) => {
@@ -206,6 +194,30 @@ test('Constellation draws untested stars as hollow rings and verified ones as di
   await expect(legend.locator('[data-verdict="untested"]')).toHaveAttribute('data-shape', 'ring');
   await expect(legend.locator('[data-verdict="verified"]')).toHaveAttribute('data-shape', 'diamond');
   await expect(legend.locator('[data-verdict="solid"]')).toHaveAttribute('data-shape', 'dot');
+
+  // A key concept is a larger star with a halo, never a second ring, so an untested key
+  // concept can't be read as two untested marks. Every key concept has a halo, nothing else does.
+  const keys = await page.locator('g[role="button"]').evaluateAll((gs) =>
+    gs.map((g) => ({
+      key: /, key concept$/.test(g.getAttribute('aria-label') ?? ''),
+      halo: !!g.querySelector('[data-testid="constellation-halo"]'),
+      rings: [...g.querySelectorAll('circle')].filter(
+        (c) => c.getAttribute('fill') === 'none' && c.getAttribute('stroke') !== 'var(--accent)' && c.getAttribute('data-testid') !== 'constellation-focus-ring'
+      ).length,
+      r: Number(g.querySelector('[data-testid="constellation-node"]')!.getAttribute('r'))
+    }))
+  );
+  expect(keys.some((k) => k.key)).toBe(true);
+  for (const k of keys) {
+    expect(k.halo).toBe(k.key);
+    expect(k.rings, 'no outline ring around any star').toBe(0);
+  }
+  const keyR = Math.min(...keys.filter((k) => k.key).map((k) => k.r));
+  const plainR = Math.max(...keys.filter((k) => !k.key).map((k) => k.r));
+  expect(keyR).toBeGreaterThan(plainR);
+  const keyLegend = legend.getByTestId('legend-key-concept');
+  await expect(keyLegend).toHaveText('key concept (larger, with a halo)');
+  await expect(keyLegend).not.toContainText('◯');
 });
 
 test.describe('fleet', () => {
@@ -274,5 +286,66 @@ test('track and wayfinder use line icons, not colour emoji', async ({ page }) =>
     await page.goto(`/topics/${id}/${sub}`);
     await settle(page);
     expect(await page.locator('main').innerText(), sub).not.toMatch(COLOUR_EMOJI);
+  }
+});
+
+/** Text contrast of a badge against the background as painted (read from the rendered pixels
+ * of its top padding, so stacked translucent tints count as the eye sees them). */
+async function paintedContrast(page: Page, badge: ReturnType<Page['locator']>): Promise<number> {
+  await badge.scrollIntoViewIfNeeded();
+  const box = (await badge.boundingBox())!;
+  const png = await page.screenshot({ clip: { x: box.x + box.width / 2 - 2, y: box.y + 2, width: 4, height: 1 }, animations: 'disabled' });
+  return badge.evaluate(async (el, b64) => {
+    const px = (draw: (ctx: CanvasRenderingContext2D) => void) => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = 4;
+      const ctx = cv.getContext('2d')!;
+      draw(ctx);
+      return [...ctx.getImageData(1, 0, 1, 1).data.slice(0, 3)];
+    };
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const bg = px((ctx) => ctx.drawImage(img, 0, 0));
+    const fg = px((ctx) => {
+      ctx.fillStyle = getComputedStyle(el).color;
+      ctx.fillRect(0, 0, 4, 4);
+    });
+    const lum = (c: number[]) =>
+      c
+        .map((v) => v / 255)
+        .map((s) => (s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4))
+        .reduce((sum, s, i) => sum + s * [0.2126, 0.7152, 0.0722][i], 0);
+    const [hi, lo] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  }, png.toString('base64'));
+}
+
+test('badges on tinted panels keep 4.5:1 as painted, in both themes', async ({ page }) => {
+  const id = await seededTopicId(page);
+  await selectTopic(page, id);
+  // Give the first phase a shipped deliverable, so the Track page draws its "shipped" badge
+  // on the deliverable's accent-tinted panel.
+  await page.route('**/api/topics/*/curriculum', async (r) => {
+    const json = await (await r.fetch()).json();
+    json.phases[0].deliverable = {
+      id: 9001,
+      kind: 'repo',
+      text: 'Ship the autograd engine.',
+      acceptance_criteria: ['Gradient checks pass.'],
+      review_verdict: 'Meets the criteria.'
+    };
+    await r.fulfill({ json });
+  });
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+    await page.goto(`/topics/${id}/track`);
+    await settle(page);
+    const shipped = page.locator('main span', { hasText: /^\s*⚒ shipped\s*$/ }).first();
+    expect(await paintedContrast(page, shipped), `${theme}: Track "shipped" badge`).toBeGreaterThanOrEqual(4.5);
+    await page.goto(`/topics/${id}/wayfinder`);
+    await settle(page);
+    const here = page.locator('main span', { hasText: /^\s*you are here\s*$/ }).first();
+    expect(await paintedContrast(page, here), `${theme}: Wayfinder "you are here" badge`).toBeGreaterThanOrEqual(4.5);
   }
 });
