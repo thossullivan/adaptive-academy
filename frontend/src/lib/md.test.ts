@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { inlineMd, blockMd, preMd } from './md';
 
 describe('inlineMd', () => {
+  it('formats ***both*** as bold italic, and leaves maths alone', () => {
+    expect(inlineMd('a ***key*** idea')).toBe('a <strong><em>key</em></strong> idea');
+    expect(inlineMd('x***y')).toBe('x***y');
+  });
+
   it('renders bold, em, and code', () => {
     expect(inlineMd('**Linear algebra** is *the* `softmax(x)`')).toBe(
       '<strong>Linear algebra</strong> is <em>the</em> <code>softmax(x)</code>'

@@ -228,6 +228,12 @@
       toasts.show(`Your notes on ${name} are over the limit and were not saved. The draft is kept in this tab.`, 'error', 9000);
       return;
     }
+    // The learner left without choosing between their draft and the note saved elsewhere:
+    // nothing is sent, and the draft (kept with its version) asks again next time.
+    if (conflict) {
+      toasts.show(`Your draft of your notes on ${name} is kept in this tab. Choose which version to keep next time.`, 'error', 9000);
+      return;
+    }
     const body = draft;
     send(body)
       .then(() => {

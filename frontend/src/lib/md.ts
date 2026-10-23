@@ -17,6 +17,7 @@ function clean(text: string | null | undefined): string {
   return (text ?? '').split(SENT).join('');
 }
 
+const STRONG_EM = /(^|[^\w*])\*\*\*(?=[^\s*])([^*]*?[^\s*])\*\*\*(?![\w*])/g;
 const STRONG = /(^|[^\w*])\*\*(?=[^\s*])([^*]*?[^\s*])\*\*(?![\w*])/g;
 const EM_STAR = /(^|[^\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])/g;
 const EM_UNDERSCORE = /(^|[^\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/g;
@@ -31,6 +32,7 @@ export function inlineMd(text: string): string {
     return `${SENT}${codes.length - 1}${SENT}`;
   });
 
+  s = s.replace(STRONG_EM, '$1<strong><em>$2</em></strong>');
   s = s.replace(STRONG, '$1<strong>$2</strong>');
   s = s.replace(EM_STAR, '$1<em>$2</em>');
   s = s.replace(EM_UNDERSCORE, '$1<em>$2</em>');
