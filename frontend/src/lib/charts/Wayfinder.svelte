@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Badge, Markdown } from '$lib/ui';
+  import { formatHours } from '$lib/text';
   import Icon from '$lib/shell/Icon.svelte';
 
   type WayPhase = {
@@ -114,7 +115,7 @@
               </div>
               <div class="flex items-baseline gap-2 md:block md:shrink-0 md:text-right">
                 <div class="nums text-sm text-muted"><span class="sr-only">Steps done: </span>{p.done}/{p.total}</div>
-                {#if p.est_hours}<div class="eyebrow !text-[0.55rem]">{p.est_hours}</div>{/if}
+                {#if p.est_hours.trim()}<div class="eyebrow !text-[0.55rem]">{formatHours(p.est_hours)}</div>{/if}
               </div>
             </div>
 

@@ -159,6 +159,7 @@ def comeback_move(
     if ws.state not in ("fading", "becalmed", "unsailed"):
         return None
     track = session.exec(select(Track).where(Track.topic_id == topic_id)).first()
+    has_items = False
     if track is not None:
         phases = session.exec(
             select(Phase).where(Phase.track_id == track.id).order_by(Phase.position)).all()
@@ -166,10 +167,27 @@ def comeback_move(
             items = session.exec(
                 select(Item).where(Item.phase_id == p.id).order_by(Item.position)).all()
             for it in items:
+                has_items = True
                 if it.status != "done":
                     return ComebackMove(
                         kind=it.type, label=it.text,
                         href=f"/topics/{topic_id}/track", minutes=25)
+    has_concepts = session.exec(
+        select(Concept.id).join(Track, Track.id == Concept.track_id)
+        .where(Track.topic_id == topic_id).limit(1)).first() is not None
+    if not has_items and not has_concepts:
+        # No track (or an empty one): the real next step is building it (Sources page).
+        return ComebackMove(
+            kind="build_track",
+            label="Build your track from the reading list on the Sources page",
+            href=f"/topics/{topic_id}/review", minutes=5)
+    if not has_concepts:
+        # Every item is done on a track with no concepts (an imported track): nothing to
+        # explain, so the move is looking back over the finished track.
+        return ComebackMove(
+            kind="review_track",
+            label="Look back over your finished track and pick one item to revisit",
+            href=f"/topics/{topic_id}/track", minutes=15)
     return ComebackMove(
         kind="self_explain",
         label="Do a quick self-explanation on a load-bearing concept",

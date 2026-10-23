@@ -165,3 +165,44 @@ def test_topic_subagent_error_detail_includes_exception_message(session: Session
     errs = [e for e in result.events if e.kind == "research:subagent_error"]
     assert len(errs) == 1
     assert "RuntimeError: 529 overloaded upstream" in errs[0].detail
+
+
+def test_research_topic_stores_sources_without_cite_tags_or_title_duplicates(session: Session):
+    topic, intent = _topic_with_intent(session)
+    paper = "Continuous Monitoring of A/B Tests without Pain"
+    researcher = ScriptedResearcherClient({
+        "foundational_papers": [
+            RawSource(title=f"<cite index='9-1'>{paper}</cite> (Deng, Liu, Chen)",
+                      url="https://a.org/p", tier=1, relevance=0.9,
+                      summary="<cite index='20-11,20-12'>The paper starts from</cite> a prior.",
+                      why='<cite index="3-1">Read it</cite> first'),
+        ],
+        "canonical_tutorials": [
+            RawSource(title=f"{paper} (Deng, Lu, Chen, 2016)", url="https://b.org/q", tier=2,
+                      relevance=0.9, summary="s"),
+        ],
+        "key_concepts": [], "reference_implementations": [], "critiques": [],
+    })
+    payload = json.dumps({
+        "overview": "<cite index='1-2'>Bayesian</cite> testing",
+        "key_concepts": ["<cite index='1-3'>optional stopping</cite>"],
+        "prerequisite_map": {"<cite index='1-4'>optional stopping</cite>": []},
+    })
+    llm = ScriptedLLMClient([LLMResponse(text=payload)])
+
+    research_topic(session, topic, intent, researcher=researcher, llm=llm, max_subagents=5)
+
+    sources = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic.id)).all()
+    assert len(sources) == 1
+    assert sources[0].url == "https://a.org/p"
+    assert sources[0].title == f"{paper} (Deng, Liu, Chen)"
+    assert sources[0].summary == "The paper starts from a prior."
+    assert sources[0].why == "Read it first"
+    fnd = session.exec(select(TopicFoundation).where(TopicFoundation.topic_id == topic.id)).one()
+    assert fnd.overview == "Bayesian testing"
+    assert fnd.key_concepts == ["optional stopping"]
+    assert fnd.prerequisite_map == {"optional stopping": []}
+    [deduped] = session.exec(select(AgentEvent).where(
+        AgentEvent.topic_id == topic.id, AgentEvent.kind == "research:title_deduped")).all()
+    assert f'dropped "{paper} (Deng, Lu, Chen, 2016)" (https://b.org/q)' in deduped.detail
+    assert "https://a.org/p" in deduped.detail

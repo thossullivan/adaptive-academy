@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { announce, clipWords } from './text';
+import { announce, clipWords, formatHours } from './text';
+
+describe('formatHours', () => {
+  it('adds the unit to a bare number or range', () => {
+    expect(formatHours('1.5')).toBe('1.5 hours');
+    expect(formatHours('1')).toBe('1 hour');
+    expect(formatHours(' 10-12 ')).toBe('10-12 hours');
+    expect(formatHours('12–15')).toBe('12–15 hours');
+    expect(formatHours('~3')).toBe('~3 hours');
+  });
+
+  it('leaves text that already has a unit alone', () => {
+    expect(formatHours('12–15 hours')).toBe('12–15 hours');
+    expect(formatHours('50–60 hours (~5–6 weeks)')).toBe('50–60 hours (~5–6 weeks)');
+    expect(formatHours('2 weeks')).toBe('2 weeks');
+  });
+});
 
 describe('clipWords', () => {
   it('leaves short text alone', () => {

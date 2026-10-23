@@ -16,6 +16,10 @@ export interface ConceptGraph { nodes: Concept[]; edges: GraphEdge[]; }
 export type GraphAncestor = [conceptId: number, depth: number];
 export interface Topic {
   id: number; title: string; concepts: Concept[]; intent?: Intent | null;
+  has_foundation?: boolean;
+  has_track?: boolean;
+  /** Research for this topic is running now. Absent from an older API. */
+  research_running?: boolean;
   /** The one-click example topic (POST /api/demo); removable as a unit. */
   is_demo?: boolean;
 }
@@ -160,7 +164,11 @@ export interface VaultSync {
   /** The most recent note that couldn't be updated, and why; "" when none. */
   last_error: string;
   last_error_at: string | null;
+  /** Every unresolved problem, including ones that are not about a note (the vault folder,
+   *  the sync queue). */
   problems: number;
+  /** How many of `problems` are notes the sync left out. Absent from an older API. */
+  skipped_notes?: number;
   pending: number;
 }
 export interface VaultStatus {
@@ -211,6 +219,9 @@ export interface ConceptNote {
   concept_id: number;
   body: string;
   updated_at: string;
+  /** The concept's vault note file when its notebook section was edited in Obsidian, so the
+   *  sync leaves it alone; null when it updates. Absent from an older API. */
+  vault_locked_note?: string | null;
 }
 /** GET /api/concepts/{id}/notebook: notes plus work, newest first. */
 export interface Notebook {
@@ -220,6 +231,8 @@ export interface Notebook {
   note: { body: string; updated_at: string } | null;
   counts: { attempts: number; explanations: number; solutions: number };
   items: NotebookItem[];
+  /** As on ConceptNote. */
+  vault_locked_note?: string | null;
 }
 export interface NotebookConcept {
   concept_id: number;

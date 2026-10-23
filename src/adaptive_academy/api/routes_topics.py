@@ -1,8 +1,8 @@
 from collections.abc import Callable
 from typing import Optional
 
-from adaptive_academy.engine.runlock import RunInProgress
-from fastapi import APIRouter, Depends, HTTPException
+from adaptive_academy.engine.runlock import RunInProgress, is_running
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
 
@@ -35,9 +35,19 @@ from adaptive_academy.api.schemas import (
 from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone_gate
-from adaptive_academy.engine.memory import index_source_doc, remove_source
-from adaptive_academy.engine.research import research_topic, ResearchAlreadyDone
+from adaptive_academy.engine.memory import (
+    index_accepted_sources,
+    remove_source,
+    sources_to_index,
+)
+from adaptive_academy.engine.research import (
+    ResearchAlreadyDone,
+    research_can_rerun,
+    research_topic,
+    strip_cite_tags,
+)
 from adaptive_academy.engine.revision import revision_suggested
+from adaptive_academy.engine.topics import delete_topic
 from adaptive_academy.engine.track_markdown import (
     DeliverableView,
     ItemView,
@@ -122,6 +132,8 @@ def _topic_out(session: Session, topic: Topic) -> TopicOut:
         else None,
         has_foundation=has_foundation,
         has_track=has_track,
+        research_running=is_running(f"research:{topic.id}"),
+        can_research=not has_foundation or research_can_rerun(session, topic.id),
         is_demo=topic.is_demo,
     )
 
@@ -169,17 +181,29 @@ def get_foundation(
     ).first()
     if fnd is None:
         raise HTTPException(status_code=404, detail="no foundation yet")
+    return _foundation_out(fnd)
+
+
+# Research strips web-search <cite> tags before storing; stripping again on the way out keeps
+# rows stored before that fix readable.
+def _foundation_out(fnd: TopicFoundation) -> FoundationOut:
+    prereqs = fnd.prerequisite_map if isinstance(fnd.prerequisite_map, dict) else {}
     return FoundationOut(
-        overview=fnd.overview,
-        key_concepts=fnd.key_concepts,
-        prerequisite_map=fnd.prerequisite_map,
+        overview=strip_cite_tags(fnd.overview),
+        key_concepts=[strip_cite_tags(c) for c in fnd.key_concepts],
+        prerequisite_map={
+            strip_cite_tags(k): [strip_cite_tags(x) if isinstance(x, str) else x for x in v]
+            if isinstance(v, list) else v
+            for k, v in prereqs.items()
+        },
     )
 
 
 def _source_out(s: SourceDoc) -> SourceDocOut:
     return SourceDocOut(
-        id=s.id, title=s.title, url=s.url, tier=s.tier, summary=s.summary,
-        why=s.why, rank=s.rank, angle=s.angle, status=s.status,
+        id=s.id, title=strip_cite_tags(s.title), url=s.url, tier=s.tier,
+        summary=strip_cite_tags(s.summary), why=strip_cite_tags(s.why), rank=s.rank,
+        angle=s.angle, status=s.status,
     )
 
 
@@ -212,11 +236,7 @@ def run_research(
         # json.JSONDecodeError (malformed model output), which has its own 502 handler.
         raise HTTPException(409, str(e)) from e
     return ResearchOut(
-        foundation=FoundationOut(
-            overview=result.foundation.overview,
-            key_concepts=result.foundation.key_concepts,
-            prerequisite_map=result.foundation.prerequisite_map,
-        ),
+        foundation=_foundation_out(result.foundation),
         sources=[_source_out(s) for s in sorted(result.sources, key=lambda x: x.rank)],
         events=[EventOut(kind=e.kind, detail=e.detail) for e in result.events],
     )
@@ -253,27 +273,41 @@ def list_sources(
 def review_sources(
     topic_id: int,
     body: ReviewSourcesIn,
+    background: BackgroundTasks,
     session: Session = Depends(get_session),
     fetch: Callable[[str], str | None] = Depends(get_fetcher),
     retriever: Retriever = Depends(get_retriever),
 ) -> list[SourceDocOut]:
+    """Save the reading list and return at once; accepted sources not indexed yet are fetched
+    and indexed afterwards (index_accepted_sources), so no write lock spans a network fetch.
+
+    Every accepted source with no chunks is queued, not only the ones accepted now: one whose
+    earlier indexing never ran or failed (a crash, a fetch error, an empty page) is retried on
+    the next save, unless its fetch failed in the last ten minutes. So is one with chunks the
+    embedder never reached. A source a background task is already working on is not queued
+    again (memory.sources_to_index). The task skips vault-backed ones."""
     rows = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
     by_id = {s.id: s for s in rows}
-    newly_accepted: list[SourceDoc] = []
     for sid in body.accepted_ids:
-        if sid in by_id and by_id[sid].status != "accepted":
+        if sid in by_id:
             by_id[sid].status = "accepted"
-            newly_accepted.append(by_id[sid])
     for sid in body.pruned_ids:
         if sid in by_id:
             by_id[sid].status = "pruned"
     for source in rows:
         if source.status != "accepted" and source.id is not None:
             remove_source(session, f"sourcedoc:{source.id}")
-    for source in newly_accepted:
-        if source.status == "accepted":
-            index_source_doc(session, source, fetch=fetch, retriever=retriever)
     session.commit()
+    to_index = sources_to_index(
+        session, topic_id,
+        [s.id for s in rows if s.status == "accepted" and s.id is not None],
+        retriever=retriever,
+    )
+    if to_index:
+        background.add_task(
+            index_accepted_sources, session.get_bind(), to_index,
+            fetch=fetch, retriever=retriever,
+        )
     for s in rows:
         session.refresh(s)
     rows.sort(key=lambda s: s.rank)
@@ -491,3 +525,16 @@ def get_program_context(topic_id: int, session: Session = Depends(get_session)):
         gate_status=report.verdict,
         unverified=[e.name for e in report.concepts if e.verdict != "verified"],
         revision_suggested=revision_suggested(session, program))
+
+
+@router.delete("/{topic_id}", status_code=204)
+def delete_topic_route(topic_id: int, session: Session = Depends(get_session)) -> None:
+    """Delete the topic and every row that belongs to it (demo topics too). A program slot it
+    filled goes back to a stub; usage history and files in the vault are kept."""
+    try:
+        deleted = delete_topic(session, topic_id)
+    except RunInProgress as e:
+        raise HTTPException(409, "This topic is still being researched or planned. Wait for "
+                                 "that to finish, then delete it.") from e
+    if not deleted:
+        raise HTTPException(404, "topic not found")

@@ -4,6 +4,8 @@ import {
   NOTE_MAX_CHARS,
   NoteSaver,
   clearedSyncText,
+  lastSyncedText,
+  skippedNotes,
   syncTargetText,
   draftRestore,
   showDiscard,
@@ -216,6 +218,31 @@ describe('drafts kept in this tab', () => {
     s.setItem('aa.note-draft.5', 'an old draft');
     expect(draftStore(s).get(5)).toEqual({ body: 'an old draft', base: undefined });
   });
+
+  it("forgets a deleted topic's drafts, old format too, and keeps every other draft", () => {
+    const s = memory();
+    s.setItem('aa.note-draft.5', 'an old draft');
+    const drafts = draftStore(s);
+    drafts.set(6, 'json draft', null);
+    drafts.set(7, 'another topic');
+    drafts.forget([5, 6, 99]);
+    expect(drafts.get(5)).toBeNull();
+    expect(drafts.get(6)).toBeNull();
+    expect(drafts.get(7)?.body).toBe('another topic');
+    expect(Object.keys(s.data)).toEqual(['aa.note-draft.7']);
+  });
+
+  it('never throws when storage is missing or blocked', () => {
+    const blocked = {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => {
+        throw new Error('SecurityError');
+      }
+    };
+    expect(() => draftStore(blocked).forget([1, 2])).not.toThrow();
+    expect(() => draftStore(null).forget([1])).not.toThrow();
+  });
 });
 
 describe('Discard draft', () => {
@@ -383,6 +410,49 @@ describe('what the Vault page says about notebook sync', () => {
       clearedSyncText(null)
     ]) {
       expect(t).not.toMatch(/[—–!]/);
+    }
+  });
+
+  it('says when the last sync skipped notes, instead of a bare "Last synced"', () => {
+    expect(lastSyncedText({ problems: 0 }, 'just now')).toBe('Last synced just now.');
+    expect(lastSyncedText({ problems: 1 }, 'just now')).toBe('Last synced just now, with 1 note skipped (see below).');
+    expect(lastSyncedText({ problems: 3 }, '2m ago')).toBe('Last synced 2m ago, with 3 notes skipped (see below).');
+  });
+
+  it('counts only notes as skipped when the API says how many', () => {
+    const vault = "Couldn't sync to the vault: /x is not an Obsidian vault: it has no .obsidian folder.";
+    expect(lastSyncedText({ problems: 1, skipped_notes: 0, last_error: vault }, 'just now')).toBe(
+      "Last synced just now. Notes can't sync to this vault right now (see below)."
+    );
+    expect(lastSyncedText({ problems: 3, skipped_notes: 2, last_error: vault }, '1m ago')).toBe(
+      'Last synced 1m ago, with 2 notes skipped (see below).'
+    );
+    expect(lastSyncedText({ problems: 0, skipped_notes: 0, last_error: '' }, 'just now')).toBe('Last synced just now.');
+    // A problem the message doesn't name still never reads as a skipped note.
+    expect(lastSyncedText({ problems: 1, skipped_notes: 0, last_error: 'Something new' }, 'just now')).toBe(
+      'Last synced just now, with a sync problem (see below).'
+    );
+  });
+
+  it('never calls a vault folder or sync queue problem a skipped note on an older API', () => {
+    const vault = "Couldn't sync to the vault: /x is not an Obsidian vault: it has no .obsidian folder.";
+    const queue = 'The vault sync queue is full, so 4 note update(s) were skipped. Export the topic from the Vault page to bring every note up to date.';
+    expect(lastSyncedText({ problems: 1, last_error: vault }, 'just now')).toBe(
+      "Last synced just now. Notes can't sync to this vault right now (see below)."
+    );
+    expect(lastSyncedText({ problems: 1, last_error: queue }, 'just now')).toBe(
+      'Last synced just now, but some note updates were skipped (see below).'
+    );
+    expect(lastSyncedText({ problems: 2, last_error: vault }, 'just now')).toBe(
+      'Last synced just now, with 1 note skipped (see below).'
+    );
+    expect(lastSyncedText({ problems: 1, last_error: "Couldn't update attention.md: locked" }, 'just now')).toBe(
+      'Last synced just now, with 1 note skipped (see below).'
+    );
+    expect(skippedNotes({ problems: 2, last_error: queue })).toBe(1);
+    expect(skippedNotes({ problems: 5, skipped_notes: 3, last_error: queue })).toBe(3);
+    for (const last_error of [vault, queue, 'other']) {
+      expect(lastSyncedText({ problems: 1, skipped_notes: 0, last_error }, 'now')).not.toMatch(/[—–!]|note skipped/);
     }
   });
 });

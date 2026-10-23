@@ -75,13 +75,23 @@ export class NoteConflictError extends Error {
   }
 }
 
+/** A request the API refused: the message is its `detail`, `status` the HTTP status. Its
+ *  name stays "Error", so text built from String(e) reads as it always did. */
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) {
     // Prefer the API's own `detail` (e.g. the missing-key 503 says how to fix it); fall back
     // to the status line for non-JSON bodies.
     const body: ApiErrorBody | null = await r.json().catch(() => null);
     const detail = typeof body?.detail === 'string' ? body.detail : null;
-    throw new Error(detail ?? `${r.status} ${r.statusText}`);
+    throw new ApiError(detail ?? `${r.status} ${r.statusText}`, r.status);
   }
   return r.json() as Promise<T>;
 }
@@ -132,6 +142,11 @@ export const api = {
   /** Remove this demo topic and everything that belongs to it (the API refuses a non-demo id). */
   deleteDemo: (topicId: number) =>
     fetch(`/api/demo/${topicId}`, { method: 'DELETE' }).then(async (r) => {
+      if (!r.ok && r.status !== 404) await j<unknown>(r);
+    }),
+  /** Delete a topic and everything that belongs to it (demo topics too). Gone already is fine. */
+  deleteTopic: (topicId: number) =>
+    fetch(`/api/topics/${topicId}`, { method: 'DELETE' }).then(async (r) => {
       if (!r.ok && r.status !== 404) await j<unknown>(r);
     }),
   getTopic: (id: number) => fetch(`/api/topics/${id}`).then(j<Topic>),

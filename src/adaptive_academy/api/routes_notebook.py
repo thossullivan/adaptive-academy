@@ -1,6 +1,8 @@
 """Concept notebooks: a concept's notes and work in one place (engine/notebook.py), and the
 learner's own notes on it. Saving a note, like any new attempt or grade, queues the concept's
-vault note for a rewrite (engine/notebook_sync.py); that never holds up or fails the save."""
+vault note for a rewrite (engine/notebook_sync.py); that never holds up or fails the save.
+The notebook and a saved note both name the vault note when its notebook section was edited in
+Obsidian (`vault_locked_note`), since the sync leaves such a note alone."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -25,7 +27,11 @@ from adaptive_academy.engine.notebook import (
     save_note,
     topic_notebook,
 )
-from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC, register_vault_path
+from adaptive_academy.engine.notebook_sync import (
+    NOTEBOOK_SYNC,
+    locked_note,
+    register_vault_path,
+)
 from adaptive_academy.models import Concept, Topic
 
 router = APIRouter(prefix="/api", tags=["notebook"])
@@ -40,7 +46,8 @@ def _concept(session: Session, concept_id: int) -> Concept:
 
 @router.get("/concepts/{concept_id}/notebook", response_model=NotebookOut)
 def get_notebook(concept_id: int, session: Session = Depends(get_session)) -> NotebookOut:
-    nb = build_notebook(session, _concept(session, concept_id))
+    concept = _concept(session, concept_id)
+    nb = build_notebook(session, concept)
     note = (NotebookNoteOut(body=nb.note_body, updated_at=nb.note_updated_at)
             if nb.note_updated_at is not None else None)
     return NotebookOut(
@@ -50,6 +57,7 @@ def get_notebook(concept_id: int, session: Session = Depends(get_session)) -> No
                                  explanations=nb.count("explanation"),
                                  solutions=nb.count("solution")),
         items=[NotebookItemOut(**vars(item)) for item in nb.items],
+        vault_locked_note=locked_note(session, concept),
     )
 
 
@@ -78,7 +86,10 @@ def put_note(concept_id: int, body: NoteIn, session: Session = Depends(get_sessi
                       "or window) after this page loaded them.",
             "note": current,
         })
-    return NoteOut(concept_id=note.concept_id, body=note.body, updated_at=note.updated_at)
+    # The save itself is done; the vault note is checked as it is on disk now, so the editor
+    # can say at once when the sync that follows will leave it alone.
+    return NoteOut(concept_id=note.concept_id, body=note.body, updated_at=note.updated_at,
+                   vault_locked_note=locked_note(session, concept))
 
 
 @router.get("/topics/{topic_id}/notebook", response_model=TopicNotebookOut)

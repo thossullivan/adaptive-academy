@@ -23,15 +23,20 @@
   );
   const clipped = $derived(clipWords(label, MOVE_MAX));
   let expanded = $state(false);
+  // No track yet (engine/momentum.py comeback_move): the one move is building it.
+  const uncharted = $derived(comeback.move?.kind === 'build_track');
 </script>
 
 {#if tone && comeback.move}
-  {@const eyebrow = tone === 'launch' ? 'Ready to sail' : tone === 'warm' ? 'Becalmed' : 'Catching a breeze'}
+  {@const eyebrow = uncharted ? 'Getting started' : tone === 'launch' ? 'Ready to sail' : tone === 'warm' ? 'Becalmed' : 'Catching a breeze'}
   <Card class="rise">
     <div class="eyebrow mb-1 flex items-center gap-1.5">
       <Icon name={tone === 'warm' ? 'flag' : 'ship'} class="size-3.5 shrink-0" />{eyebrow}
     </div>
-    {#if tone === 'launch'}
+    {#if uncharted}
+      <h2 class="font-display text-lg text-fg">Your voyage isn't charted yet.</h2>
+      <p class="mt-1 text-sm text-muted">There is no track for this topic yet. Build one from your reading list to get started.</p>
+    {:else if tone === 'launch'}
       <h2 class="font-display text-lg text-fg">Your voyage is charted.</h2>
       <p class="mt-1 text-sm text-muted">Take the first step and you're under way. One good move sets the sails.</p>
     {:else if tone === 'warm'}
@@ -56,7 +61,7 @@
       </p>
     </div>
     <Button size="sm" href={comeback.move.href}>
-      <Icon name="ship" class="size-4 shrink-0" />{tone === 'warm' ? 'Catch the wind' : 'Set sail'}
+      <Icon name="ship" class="size-4 shrink-0" />{uncharted ? 'Go to Sources' : tone === 'warm' ? 'Catch the wind' : 'Set sail'}
     </Button>
   </Card>
 {/if}

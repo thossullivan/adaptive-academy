@@ -19,3 +19,4 @@ export { default as LiveStatus } from './LiveStatus.svelte';
 export { default as QualityScorecard } from './QualityScorecard.svelte';
 export { default as NotesEditor } from './NotesEditor.svelte';
 export { default as NotebookItems } from './NotebookItems.svelte';
+export { default as ConfirmAction } from './ConfirmAction.svelte';

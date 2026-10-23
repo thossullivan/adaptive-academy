@@ -189,6 +189,18 @@ export function draftStore(storage?: DraftStorage | null) {
       } catch {
         /* nothing to clear */
       }
+    },
+    /** Forget every draft for these concepts, whatever it says: for a deleted topic, whose
+     *  concept ids the database hands out again (no AUTOINCREMENT), so an old draft would
+     *  otherwise restore into a new topic's concept. */
+    forget(conceptIds: Iterable<number>): void {
+      for (const conceptId of conceptIds) {
+        try {
+          from()?.removeItem(DRAFT_PREFIX + conceptId);
+        } catch {
+          /* nothing to clear */
+        }
+      }
     }
   };
 }
@@ -297,6 +309,43 @@ export function syncTargetText(sync: Pick<VaultSync, 'path' | 'source'> | null):
     return `Notes sync to ${sync.path} (set by AA_OBSIDIAN_VAULT_PATH). To stop, leave it empty in .env and restart.`;
   }
   return `Notes sync to ${sync.path}: notes, attempts, explanations, and worked solutions go into each concept's note, between two marker lines. Everything else in the note stays yours.`;
+}
+
+type SyncProblems = Pick<VaultSync, 'problems'> & Partial<Pick<VaultSync, 'last_error' | 'skipped_notes'>>;
+
+/** The sync problems that are not about one note, told apart by their message
+ *  (engine/notebook_sync.py, api/routes_notebook.py): a vault folder that can't be used,
+ *  and a full sync queue. */
+function otherProblem(lastError: string | undefined): 'vault' | 'queue' | null {
+  if (lastError?.startsWith("Couldn't sync to the vault")) return 'vault';
+  if (lastError?.startsWith('The vault sync queue is full')) return 'queue';
+  return null;
+}
+
+/** How many notes the sync left out. `problems` also counts problems that are not about a
+ *  note (the vault folder, the queue), so an API that sends `skipped_notes` is trusted; an
+ *  older one only says how many problems there are, and the latest one's message tells
+ *  whether one of them is not a note. */
+export function skippedNotes(sync: SyncProblems): number {
+  if (typeof sync.skipped_notes === 'number') return Math.max(0, sync.skipped_notes);
+  const problems = sync.problems || 0;
+  return Math.max(0, problems - (otherProblem(sync.last_error) ? 1 : 0));
+}
+
+/** When notes last synced, and whether that left notes out: never a bare "Last synced just
+ *  now" beside a note the sync skipped (its section edited in Obsidian, say). A problem with
+ *  the vault folder or the sync queue gets its own words, never "1 note skipped". */
+export function lastSyncedText(sync: SyncProblems, ago: string): string {
+  const skipped = skippedNotes(sync);
+  if (skipped) {
+    const notes = skipped === 1 ? '1 note' : `${skipped} notes`;
+    return `Last synced ${ago}, with ${notes} skipped (see below).`;
+  }
+  if ((sync.problems || 0) <= 0) return `Last synced ${ago}.`;
+  const other = otherProblem(sync.last_error);
+  if (other === 'vault') return `Last synced ${ago}. Notes can't sync to this vault right now (see below).`;
+  if (other === 'queue') return `Last synced ${ago}, but some note updates were skipped (see below).`;
+  return `Last synced ${ago}, with a sync problem (see below).`;
 }
 
 /** What to announce after the field was cleared, given where sync points now. */

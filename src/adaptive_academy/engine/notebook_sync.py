@@ -355,10 +355,12 @@ def _placeholder_hub(topic: Topic) -> str:
             "Academy to add its track and concept list here.\n")
 
 
-def topic_folder(session: Session, vault: Path, topic: Topic) -> tuple[Path, str]:
+def topic_folder(session: Session, vault: Path, topic: Topic, *,
+                 create: bool = True) -> tuple[Path, str]:
     """The topic's folder under the export folder and its hub note's name. The hub claims
     the folder: a folder whose hub is another topic's is skipped for the id-suffixed name,
-    and a folder without a hub is claimed by creating one."""
+    and a folder without a hub is claimed by creating one. `create=False` only looks: the
+    folder a sync would use, with nothing made (it may not exist)."""
     topics = [(t.id, t.title) for t in session.exec(select(Topic)).all()]
     planned = _planned(topics, "topic")[topic.id]
     with _WRITE_LOCK:
@@ -374,6 +376,8 @@ def topic_folder(session: Session, vault: Path, topic: Topic) -> tuple[Path, str
             hub = folder / f"{stem}.md"
             fm = _head_frontmatter(vault, hub)
             if fm is None:
+                if not create:
+                    return folder, stem
                 folder.mkdir(parents=True, exist_ok=True)
                 if not _create_exclusive(hub, _placeholder_hub(topic)):
                     fm = _head_frontmatter(vault, hub) or {}
@@ -381,7 +385,8 @@ def topic_folder(session: Session, vault: Path, topic: Topic) -> tuple[Path, str
                         continue
                 return folder, stem
             if _owns(fm, "topic_id", topic.id, topic.title):
-                folder.mkdir(parents=True, exist_ok=True)
+                if create:
+                    folder.mkdir(parents=True, exist_ok=True)
                 return folder, stem
     raise UnsafeNote(f"the folder {planned} belongs to another topic, so {topic.title} was "
                      "not written")
@@ -457,6 +462,42 @@ def sync_concept(session: Session, concept_id: int, vault_path: str) -> Path | N
     return write_concept_note(session, vault, topic, concept)
 
 
+def locked_note(session: Session, concept: Concept) -> str | None:
+    """The file name of this concept's vault note when its notebook section was edited in
+    Obsidian, so every sync leaves it alone (SectionEdited) until that edit is undone or the
+    section deleted; None otherwise (no sync vault, the demo topic, no note yet, or a note a
+    sync can update). Only looks: nothing is created or written. A note that can't be read
+    counts as not locked; the sync reports its own problems."""
+    vault_path = sync_vault_path()
+    if not vault_path:
+        return None
+    try:
+        track = session.get(Track, concept.track_id)
+        topic = session.get(Topic, track.topic_id) if track else None
+        if topic is None or topic.is_demo:
+            return None
+        vault = safe_vault_dir(vault_path)
+        folder, _ = topic_folder(session, vault, topic, create=False)
+        concepts_dir = safe_child(folder, "Concepts")
+        if not concepts_dir.is_dir():
+            return None
+        siblings = topic_concepts(session, topic.id)
+        planned = planned_concept_stems(siblings).get(concept.id, f"concept-{concept.id}")
+        path = concept_note_path(vault, concepts_dir, concept, planned, siblings)
+        text, _, _ = _read_existing(vault, path)
+    except (OSError, ValueError):
+        return None
+    if text is None:
+        return None
+    try:
+        splice_notebook_section(text, "")  # the same check a sync makes; the result is unused
+    except SectionEdited:
+        return path.name
+    except MarkerError:
+        pass  # markers that don't pair up: another problem, which the sync reports
+    return None
+
+
 def problem_text(exc: BaseException) -> str:
     if isinstance(exc, SectionEdited):
         return ("its notebook section was edited in Obsidian, so it was left alone. Undo that "
@@ -513,6 +554,9 @@ class NotebookSync:
                 "last_error": latest[0] if latest else "",
                 "last_error_at": latest[1] if latest else None,
                 "problems": len(self._problems),
+                # Problems keyed by a concept id are one note each; "vault_path" and "queue"
+                # are about the sync as a whole, so "N notes skipped" counts only these.
+                "skipped_notes": sum(1 for key in self._problems if isinstance(key, int)),
                 "pending": len(self._pending) + self._busy,
                 "dropped": self._dropped,
             }
@@ -542,6 +586,12 @@ class NotebookSync:
     def clear_problem(self, key: object) -> None:
         with self._lock:
             self._problems.pop(key, None)
+
+    def clear_problems(self, keys: set[int]) -> None:
+        """Forget the problems of notes that no longer exist (a deleted topic's concepts)."""
+        with self._lock:
+            for key in keys:
+                self._problems.pop(key, None)
 
     # queue ---------------------------------------------------------------------------------
 

@@ -441,6 +441,74 @@ test('the vault set by AA_OBSIDIAN_VAULT_PATH shows its sync state, and clearing
   await expect(page.getByText('no longer sync')).toHaveCount(0);
 });
 
+test('a prompt shows its emphasis formatted, and a note left alone in Obsidian is said so under the editor', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const backprop = topic.concepts.find((c) => c.name === 'Backpropagation and Autograd')!;
+  const note = 'backpropagation-and-autograd.md';
+  // The saved notebook as the API has it, with a prompt in markdown and the vault note locked.
+  await page.route(`**/api/concepts/${backprop.id}/notebook`, async (r) => {
+    const json = await (await r.fetch()).json();
+    for (const item of json.items) {
+      if (item.kind === 'explanation') item.prompt = 'Explain *why* backprop works, in your own words.';
+    }
+    json.vault_locked_note = note;
+    await r.fulfill({ json });
+  });
+  // Saves are answered here, so the shared database keeps no note on this concept.
+  let locked: string | null = null;
+  await page.route(`**/api/concepts/${backprop.id}/note`, (r) => {
+    const body = JSON.parse(r.request().postData() ?? '{}').body;
+    r.fulfill({ json: { concept_id: backprop.id, body, updated_at: new Date().toISOString(), vault_locked_note: locked } });
+  });
+
+  await page.goto(`/topics/${topic.id}/notebook?concept=${backprop.id}`);
+  await settle(page);
+  const explanations = page.getByTestId('notebook-explanations');
+  await expect(explanations.locator('em', { hasText: 'why' }).first()).toBeVisible();
+  await expect(explanations).not.toContainText('*why*');
+
+  // No notes saved on this concept yet: the notice is about the note, not a save.
+  const notice = page.getByTestId('note-vault-locked');
+  await expect(notice).toHaveText(
+    `The Obsidian note ${note} is not being updated, because its notebook section was edited there. Undo that edit, or delete the whole section with both marker lines, and it updates on the next save.`
+  );
+  // The section was put right: the next save says nothing more.
+  const box = page.getByRole('textbox', { name: 'My notes on Backpropagation and Autograd' });
+  await box.fill('Chain rule, applied backwards.');
+  await page.getByRole('button', { name: 'Save notes' }).click();
+  await expect(page.getByTestId('note-status')).toContainText('Saved');
+  await expect(notice).toHaveCount(0);
+  // Edited in Obsidian again: the save says so at once.
+  locked = note;
+  await box.fill('Chain rule, applied backwards, node by node.');
+  await page.getByRole('button', { name: 'Save notes' }).click();
+  await expect(page.getByTestId('note-vault-locked')).toHaveText(
+    `Your notes are saved in the app, but the Obsidian note ${note} was not updated, because its notebook section was edited there. Undo that edit, or delete the whole section with both marker lines, and it updates on the next save.`
+  );
+  await expect(page.getByTestId('note-status')).toContainText('Saved');
+});
+
+test('the Vault page never says "Last synced" without the notes the sync skipped', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const sync = {
+    path: '/vault',
+    source: 'env',
+    last_synced_at: new Date().toISOString(),
+    last_error: "Couldn't update c-2.md: its notebook section was edited in Obsidian",
+    last_error_at: new Date().toISOString(),
+    problems: 1,
+    pending: 0
+  };
+  await page.route('**/api/vault/status**', (r) =>
+    r.fulfill({ json: { configured: true, path: '/vault', exists: true, is_dir: true, note_count: 3, sync } })
+  );
+  await page.route('**/api/vault/sync', (r) => r.fulfill({ json: sync }));
+  await page.goto(`/topics/${topic.id}/vault`);
+  await settle(page);
+  await expect(page.getByTestId('vault-last-synced')).toHaveText('Last synced just now, with 1 note skipped (see below).');
+  await expect(page.getByTestId('vault-sync')).toContainText("Couldn't update c-2.md");
+});
+
 // --- two open editors ----------------------------------------------------------------------
 
 /** The second seeded topic, whose spare concepts these tests write notes on. */

@@ -8,7 +8,7 @@
   import { conceptSignals, conceptVerdict, meanShiftPoints, VERDICT_RANK, type ConceptSignals, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
-  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing, ScoutCard, SetupNotice } from '$lib/ui';
+  import { Card, Button, Badge, Stat, SignalStrip, ProgressRing, ScoutCard, SetupNotice, ConfirmAction } from '$lib/ui';
   import ScoreTrend from '$lib/charts/ScoreTrend.svelte';
   import CalibrationPlot from '$lib/charts/CalibrationPlot.svelte';
 
@@ -169,7 +169,6 @@
   // The demo topic: one click to a worked example (no API key), one confirmed click to remove.
   let demoBusy = $state(false);
   let demoError = $state('');
-  let confirmRemove = $state(false);
   let removing = $state(false);
 
   async function exploreDemo() {
@@ -185,18 +184,15 @@
     }
   }
 
-  // The confirm step swaps buttons under the keyboard user's focus: move focus to the safe
-  // choice (Cancel) when it appears, and back to "Remove demo" when it goes away.
-  let demoActions: HTMLDivElement | null = $state(null);
-  async function askRemove() {
-    confirmRemove = true;
+  // After a removal the panel that held focus is gone: land on the heading of what replaced it.
+  async function focusHeading() {
+    await goto('/');
     await tick();
-    demoActions?.querySelector<HTMLElement>('[data-demo-cancel]')?.focus();
-  }
-  async function cancelRemove() {
-    confirmRemove = false;
-    await tick();
-    demoActions?.querySelector<HTMLElement>('[data-demo-remove]')?.focus();
+    const h1 = document.querySelector<HTMLElement>('main h1');
+    if (h1) {
+      h1.tabIndex = -1;
+      h1.focus();
+    }
   }
 
   async function removeDemo() {
@@ -206,22 +202,30 @@
     removing = true;
     demoError = '';
     try {
-      await api.deleteDemo(id);
-      topics.forget(id);
-      await topics.refresh();
-      confirmRemove = false;
-      await goto('/');
-      // The demo's panel is gone; land on the page heading of what replaced it.
-      await tick();
-      const h1 = document.querySelector<HTMLElement>('main h1');
-      if (h1) {
-        h1.tabIndex = -1;
-        h1.focus();
-      }
+      await topics.remove(id, api.deleteDemo);
+      await focusHeading();
     } catch (e) {
       demoError = `Couldn't remove the demo: ${e instanceof Error ? e.message : String(e)}`;
     } finally {
       removing = false;
+    }
+  }
+
+  // Any other topic: a quiet action at the foot of its dashboard, behind the same confirm step.
+  let deleting = $state(false);
+  let deleteError = $state('');
+  async function deleteTopic() {
+    const current = topics.current;
+    if (current == null) return;
+    deleting = true;
+    deleteError = '';
+    try {
+      await topics.remove(current.id);
+      await focusHeading();
+    } catch (e) {
+      deleteError = `Couldn't delete the topic: ${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      deleting = false;
     }
   }
 
@@ -311,30 +315,14 @@
             <span class="font-medium text-fg">This is a demo topic:</span> example data from a few weeks of use, so you
             can see what each page does. Browsing it needs no API key; running the agents does.
           </p>
-          <div class="contents" bind:this={demoActions}>
-            {#if confirmRemove}
-              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-              <div
-                class="flex flex-wrap items-center gap-2"
-                role="group"
-                aria-labelledby="demo-remove-question"
-                onkeydown={(e) => {
-                  if (e.key === 'Escape' && !removing) {
-                    e.preventDefault();
-                    cancelRemove();
-                  }
-                }}
-              >
-                <span id="demo-remove-question" class="text-sm text-fg">Remove the demo topic and everything in it?</span>
-                <Button size="sm" variant="danger" onclick={removeDemo} disabled={removing}>
-                  {removing ? 'Removing…' : 'Yes, remove it'}
-                </Button>
-                <Button size="sm" variant="ghost" onclick={cancelRemove} disabled={removing} data-demo-cancel>Cancel</Button>
-              </div>
-            {:else}
-              <Button size="sm" variant="outline" onclick={askRemove} data-demo-remove>Remove demo</Button>
-            {/if}
-          </div>
+          <ConfirmAction
+            label="Remove demo"
+            question="Remove the demo topic and everything in it?"
+            confirmLabel="Yes, remove it"
+            busyLabel="Removing…"
+            busy={removing}
+            onconfirm={removeDemo}
+          />
         </div>
         {#if demoError}<p class="mt-2 text-xs text-danger" role="alert">{demoError}</p>{/if}
       </Card>
@@ -446,6 +434,31 @@
           {/snippet}
           <EventFeed {events} limit={12} mode={rawTrace ? 'raw' : 'plain'} concepts={conceptNames} />
         </Card>
+      </div>
+    {/if}
+
+    {#if !topics.current.is_demo}
+      <!-- Easy to find, not prominent: the last thing on the page. -->
+      <div class="mt-10 flex flex-col items-start gap-2 border-t border-border pt-5" data-testid="delete-topic">
+        <!-- Keyed: after a delete the next topic's dashboard starts with the step closed. -->
+        {#key tid}
+          <ConfirmAction
+            label="Delete topic"
+            question="Delete {topics.current.title}?"
+            confirmLabel="Yes, delete it"
+            busyLabel="Deleting…"
+            busy={deleting}
+            onconfirm={deleteTopic}
+            variant="ghost"
+          >
+            {#snippet detail()}
+              This removes its track, sources, conversations, grades and notes from the app. Notes already
+              written to your Obsidian vault stay there. This can't be undone. Download a backup first on
+              <a href="/data" class="text-accent underline-offset-2 hover:underline">Your data</a> if you might want it back.
+            {/snippet}
+          </ConfirmAction>
+        {/key}
+        {#if deleteError}<p class="text-xs text-danger" role="alert">{deleteError}</p>{/if}
       </div>
     {/if}
   </Page>

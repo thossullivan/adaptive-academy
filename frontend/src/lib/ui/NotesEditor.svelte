@@ -39,6 +39,7 @@
     saved = '',
     savedAt = null,
     rows = 8,
+    vaultLockedNote = null,
     dirty = $bindable(false),
     onsaved,
     class: klass = ''
@@ -48,6 +49,8 @@
     saved?: string;
     savedAt?: string | null;
     rows?: number;
+    /** The vault note left alone because its notebook section was edited in Obsidian. */
+    vaultLockedNote?: string | null;
     dirty?: boolean;
     onsaved?: (note: ConceptNote) => void;
     class?: string;
@@ -90,6 +93,8 @@
   let draft = $state(restored ? (kept as KeptDraft).body : untrack(() => saved));
   let saving = $state(false);
   let error = $state('');
+  // Kept current by every save: the API checks the vault note as it is on disk.
+  let locked = $state<string | null>(untrack(() => vaultLockedNote ?? null));
   let box: HTMLTextAreaElement | null = null;
   let announce = $state(
     restore === 'conflict'
@@ -167,7 +172,10 @@
       base = note.body;
       at = note.updated_at;
       offerDiscard = false;
-      announce = `Notes on ${name} saved.`;
+      if (note.vault_locked_note !== undefined) locked = note.vault_locked_note ?? null;
+      announce = locked
+        ? `Notes on ${name} saved in the app. The Obsidian note ${locked} was not updated.`
+        : `Notes on ${name} saved.`;
       onsaved?.(note);
       return true;
     } catch (e) {
@@ -293,7 +301,7 @@
     {rows}
     {onkeydown}
     {oninput}
-    aria-describedby="{conflict ? `${uid}-conflict ` : ''}{uid}-help {uid}-status"
+    aria-describedby="{conflict ? `${uid}-conflict ` : ''}{uid}-help {uid}-status{locked ? ` ${uid}-vault` : ''}"
     aria-keyshortcuts="Control+S Meta+S"
     placeholder="Your own words: what clicked, what to check, questions for next time."
     class="w-full resize-y rounded-[var(--radius-sm)] border border-control-border bg-surface-2 px-3 py-2.5 text-sm leading-relaxed text-fg placeholder:text-faint transition-colors hover:border-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
@@ -315,6 +323,18 @@
       </Button>
     </div>
   </div>
+  {#if locked}
+    <p
+      id="{uid}-vault"
+      class="rounded-[var(--radius-sm)] border border-[color-mix(in_oklab,var(--warn)_45%,transparent)] bg-[color-mix(in_oklab,var(--warn)_8%,transparent)] px-3 py-2 text-xs leading-relaxed text-fg-dim [overflow-wrap:anywhere]"
+      data-testid="note-vault-locked"
+    >
+      {#if at}Your notes are saved in the app, but the Obsidian note {locked} was not updated, because its notebook
+        section was edited there.{:else}The Obsidian note {locked} is not being updated, because its notebook section was
+        edited there.{/if} Undo that edit, or delete the whole section with both marker lines, and it updates on the next
+      save.
+    </p>
+  {/if}
   <p id="{uid}-help" class="text-xs text-muted">
     Ctrl+S or Cmd+S saves. When a vault is set on the Vault page, your notes and work also go into this concept's note
     there.

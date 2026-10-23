@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
+  import { researchFailed, runTopicResearch } from '$lib/research';
   import { billedTo } from '$lib/setup';
   import { setup } from '$lib/setup.svelte';
   import { topics } from '$lib/topics.svelte';
@@ -32,12 +33,15 @@
       await topics.refresh();
       topics.select(topic.id);
       stepIdx = 1;
-      status = 'Finding sources. This can take a moment…';
-      await api.runResearch(topic.id);
+      if (!(await runTopicResearch(topic.id, (s) => (status = s)))) {
+        busy = false;
+        stepIdx = -1;
+        return;
+      }
       stepIdx = 2;
       await goto(`/topics/${topic.id}/review`);
     } catch (e) {
-      status = 'Something went wrong: ' + (e as Error).message;
+      status = researchFailed(e);
       busy = false;
       stepIdx = -1;
     }

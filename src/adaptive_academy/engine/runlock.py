@@ -42,3 +42,38 @@ def exclusive_run(key: str) -> Iterator[None]:
         yield
     finally:
         lock.release()
+
+
+def is_running(key: str) -> bool:
+    """Whether the run guard for `key` is held right now (a status read, never a wait)."""
+    with _REGISTRY:
+        lock = _LOCKS.get(key)
+    return lock is not None and lock.locked()
+
+
+class InFlight:
+    """A process-local set of keys some thread is working on right now (thread-safe).
+
+    Unlike ``exclusive_run`` it never raises: a caller that loses ``claim`` skips the key,
+    and anyone may ask whether a key is taken (``key in inflight``) without waiting.
+    """
+
+    def __init__(self) -> None:
+        self._keys: set = set()
+        self._lock = threading.Lock()
+
+    def claim(self, key) -> bool:
+        """Take `key` and return True, or return False if another caller holds it."""
+        with self._lock:
+            if key in self._keys:
+                return False
+            self._keys.add(key)
+            return True
+
+    def release(self, key) -> None:
+        with self._lock:
+            self._keys.discard(key)
+
+    def __contains__(self, key) -> bool:
+        with self._lock:
+            return key in self._keys

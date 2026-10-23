@@ -172,7 +172,9 @@ test('the reply that shows the worked solution is labelled, and tutor replies re
   await mockTutor(page, (b) =>
     b.attempt
       ? {
-          reply: 'Right. Mask with `-inf` before the softmax:\n```python\nscores = scores.masked_fill(mask == 0, float("-inf"))\n```\nThen check:\n    assert w.sum(-1) == 1\n<img src=x onerror="window.__pwned=1">',
+          reply:
+            'Right. Mask with `-inf` before the softmax:\n```python\nscores = scores.masked_fill(mask == 0, float("-inf"))\n```\nThen check:\n    assert w.sum(-1) == 1\n<img src=x onerror="window.__pwned=1">\n' +
+            'Why it works:\n- masked scores get **zero** weight\n* rows still sum to 1 <img src=y onerror="window.__pwned=2">\nIn order:\n1. scale\n2. mask\n3. softmax\n-5 is negative, so it stays text.',
           attempt_logged: true,
           attempt_outcome: 'accepted',
           reveals_solution: true
@@ -214,6 +216,19 @@ test('the reply that shows the worked solution is labelled, and tutor replies re
   await expect(solution.locator('img')).toHaveCount(0);
   await expect(solution).toContainText('<img src=x onerror="window.__pwned=1">');
   expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();
+  // "- " / "* " lines are a bulleted list and "1. " lines a numbered one, items still formatted
+  // and escaped; "-5 is negative" stays text.
+  const bullets = solution.locator('ul.md-list > li');
+  await expect(bullets).toHaveCount(2);
+  await expect(bullets.nth(0).locator('strong')).toHaveText('zero');
+  await expect(bullets.nth(1)).toContainText('<img src=y onerror="window.__pwned=2">');
+  await expect(solution.locator('ul.md-list')).toHaveCSS('list-style-type', 'disc');
+  const steps = solution.locator('ol.md-list > li');
+  await expect(steps).toHaveCount(3);
+  await expect(steps.nth(2)).toHaveText('softmax');
+  await expect(solution.locator('ol.md-list')).toHaveCSS('list-style-type', 'decimal');
+  await expect(solution.locator('li', { hasText: 'negative' })).toHaveCount(0);
+  await expect(solution).toContainText('-5 is negative, so it stays text.');
 });
 
 test('the empty Tutor explains the gate and its starter prompts fill the message box without sending', async ({ page }) => {

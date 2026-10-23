@@ -12,9 +12,10 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-/** The input without NUL characters, which would collide with the code-span placeholder. */
+/** The input without NUL characters, which would collide with the code-span placeholder,
+ *  and with Windows (\r\n) and old Mac (\r) line endings as plain \n. */
 function clean(text: string | null | undefined): string {
-  return (text ?? '').split(SENT).join('');
+  return (text ?? '').split(SENT).join('').replace(/\r\n?/g, '\n');
 }
 
 const STRONG_EM = /(^|[^\w*])\*\*\*(?=[^\s*])([^*]*?[^\s*])\*\*\*(?![\w*])/g;
@@ -70,10 +71,60 @@ export function blockMd(text: string): string {
   return withFences(text, (s) => inlineMd(s).replace(/\n/g, '<br>'));
 }
 
+// A list line: up to three spaces, then "- " or "* " (bulleted) or "N. " (numbered, N of one
+// to three digits, so "1905. That year" stays a sentence), then text. "-5 is negative" and
+// "1.5 is a ratio" have no space after the marker: not lists.
+const BULLET = /^ {0,3}[-*] +(?=\S)(.*)$/;
+const NUMBERED = /^ {0,3}(\d{1,3})\. +(?=\S)(.*)$/;
+// A thematic break ("* * *", "- - -", "___"): only markers and spaces. Never a list item.
+const RULE = /^[ *_-]+$/;
+// A ``` line that withFences left alone has no closing fence. As in CommonMark, it runs to
+// the end of the text, so nothing after it becomes a list.
+const OPEN_FENCE = /^ {0,3}```/;
+
+/** Runs of list lines as <ul>/<ol>, everything else as inline markdown with its line
+ *  breaks kept. Each item goes through inlineMd (escaped, then formatted); the markers and
+ *  the line break on either side of a list are dropped, as for a fenced block, and so is one
+ *  blank line on either side (the list's margin). No whitespace sits between the tags, since
+ *  the result is shown pre-wrap. As in CommonMark, a list marker wins over a code span that
+ *  crosses lines: the line is a list item, and the span's backticks stay literal. */
+function withLists(src: string): string {
+  // Consecutive lines of one kind (text, ul or ol) make one block.
+  type Block = { tag: 'text' | 'ul' | 'ol'; start: number; lines: string[] };
+  const blocks: Block[] = [];
+  let fenced = false;
+  for (const line of src.split('\n')) {
+    const last = blocks.at(-1);
+    if (OPEN_FENCE.test(line)) fenced = true;
+    const listy = !fenced && !RULE.test(line);
+    const bullet = listy ? line.match(BULLET) : null;
+    const numbered = listy && !bullet ? line.match(NUMBERED) : null;
+    const tag = bullet ? 'ul' : numbered ? 'ol' : 'text';
+    const content = bullet ? bullet[1] : numbered ? numbered[2] : line;
+    if (last?.tag === tag) last.lines.push(content);
+    else blocks.push({ tag, start: numbered ? Number(numbered[1]) : 1, lines: [content] });
+  }
+  return blocks
+    .map(({ tag, start, lines }, i) => {
+      if (tag === 'text') {
+        // One blank line on either side of a list is the list's margin's job.
+        const from = i > 0 && lines[0] === '' ? 1 : 0;
+        const to = i < blocks.length - 1 && lines.length > from && lines.at(-1) === '' ? -1 : undefined;
+        return inlineMd(lines.slice(from, to).join('\n'));
+      }
+      const items = lines.map((item) => `<li>${inlineMd(item)}</li>`).join('');
+      const from = tag === 'ol' && start !== 1 ? ` start="${start}"` : '';
+      return `<${tag} class="md-list"${from}>${items}</${tag}>`;
+    })
+    .join('');
+}
+
 /**
  * Like blockMd, but line breaks and indentation stay as typed: show it in a
- * `white-space: pre-wrap` element (Markdown.svelte `pre`). For tutor replies.
+ * `white-space: pre-wrap` element (Markdown.svelte `pre`). For tutor replies. Lines that
+ * start with "- " or "* " become a <ul>, lines that start with "1. " an <ol>. An unclosed
+ * fence stays as text, as in blockMd, and nothing after it becomes a list.
  */
 export function preMd(text: string): string {
-  return withFences(text, inlineMd);
+  return withFences(text, withLists);
 }

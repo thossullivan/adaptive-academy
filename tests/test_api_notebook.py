@@ -173,6 +173,56 @@ def test_sync_errors_show_on_vault_status(client, session, tmp_path):
     assert "self-attention.md" in sync["last_error"] and sync["last_error_at"]
 
 
+def test_a_note_whose_section_was_edited_in_obsidian_is_named_as_locked(client, session, tmp_path):
+    (tmp_path / ".obsidian").mkdir()
+    _, concept = _seed(session)
+    url = f"/api/concepts/{concept.id}/note"
+    # No vault yet, then a vault with no note yet: nothing is locked, and nothing is made.
+    assert client.get(f"/api/concepts/{concept.id}/notebook").json()["vault_locked_note"] is None
+    client.put("/api/vault/sync", json={"vault_path": str(tmp_path)})
+    assert client.get(f"/api/concepts/{concept.id}/notebook").json()["vault_locked_note"] is None
+    assert not (tmp_path / EXPORT_FOLDER).exists()
+
+    first = client.put(url, json={"body": "first"})
+    assert first.status_code == 200 and first.json()["vault_locked_note"] is None
+    NOTEBOOK_SYNC.drain()
+    note = tmp_path / EXPORT_FOLDER / "build-llms" / "Concepts" / "self-attention.md"
+    assert "first" in note.read_text()
+    assert client.get(f"/api/concepts/{concept.id}/notebook").json()["vault_locked_note"] is None
+
+    # Edited inside the section in Obsidian: the save is kept, the note is named as locked
+    # (on the save itself, before the sync runs), and the sync leaves the note alone.
+    edited = note.read_text().replace("first", "typed in Obsidian")
+    note.write_text(edited)
+    saved = client.put(url, json={"body": "second"})
+    assert saved.status_code == 200
+    assert saved.json()["body"] == "second"
+    assert saved.json()["vault_locked_note"] == "self-attention.md"
+    assert client.get(f"/api/concepts/{concept.id}/notebook").json()["vault_locked_note"] == (
+        "self-attention.md")
+    NOTEBOOK_SYNC.drain()
+    assert note.read_text() == edited
+
+    # Deleting the section (both markers) unlocks it: the next save writes it again.
+    head, _, rest = edited.partition("<!-- adaptive-academy:notebook:start")
+    note.write_text(head + rest.partition("<!-- adaptive-academy:notebook:end -->")[2])
+    again = client.put(url, json={"body": "third"})
+    assert again.json()["vault_locked_note"] is None
+    NOTEBOOK_SYNC.drain()
+    assert "third" in note.read_text()
+
+
+def test_markers_that_dont_pair_up_are_not_reported_as_locked(client, session, tmp_path):
+    (tmp_path / ".obsidian").mkdir()
+    _, concept = _seed(session)
+    note = tmp_path / EXPORT_FOLDER / "build-llms" / "Concepts" / "self-attention.md"
+    note.parent.mkdir(parents=True)
+    note.write_text(f"{START_MARKER}\n")
+    client.put("/api/vault/sync", json={"vault_path": str(tmp_path)})
+    r = client.put(f"/api/concepts/{concept.id}/note", json={"body": "b"})
+    assert r.json()["vault_locked_note"] is None
+
+
 def test_export_reports_problems(client, session, tmp_path):
     topic, concept = _seed(session)
     note = tmp_path / EXPORT_FOLDER / "build-llms" / "Concepts" / "self-attention.md"

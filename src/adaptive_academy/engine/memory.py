@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import re
 import threading
@@ -12,13 +13,15 @@ from adaptive_academy.engine.untrusted import escape_markers as _escape_markers
 import unicodedata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import or_
+from sqlalchemy import Connection, Engine, or_
+from sqlalchemy import text as sql_text
 from sqlmodel import Session, col, select
 
 from adaptive_academy.engine.fetch import fetch_artifact_text
+from adaptive_academy.engine.runlock import InFlight
 from adaptive_academy.engine.vault import parse_frontmatter
 from adaptive_academy.llm.retriever_types import Hit
 from adaptive_academy.models import (
@@ -44,6 +47,8 @@ if TYPE_CHECKING:
     from adaptive_academy.llm.embedder_types import Embedder
     from adaptive_academy.llm.retriever_types import Retriever
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_K = 6
 INJECT_BUDGET_CHARS = 2400
 MEMORY_SNIPPET_CHARS = 240
@@ -54,6 +59,12 @@ REINDEX_LOCK = threading.Lock()
 REINDEX_LOCK_TIMEOUT_S = 0.5
 REEMBED_BATCH = 64
 REINDEX_TOPIC_BATCH = 64
+# Accepted sources a background task is indexing or embedding right now, by SourceDoc id. A
+# save skips them, so clicking "Save reading list" twice does not fetch a source twice.
+SOURCES_IN_FLIGHT = InFlight()
+# A save does not fetch a source again within this long of its last failed fetch (a paywall,
+# an empty page), so the event feed doesn't fill with the same skip on every click.
+FETCH_RETRY_AFTER = timedelta(minutes=10)
 
 
 def bump_progress(progress: dict[str, int] | None, **deltas: int) -> None:
@@ -463,8 +474,15 @@ def index_text(
     source_mtime: float | None = None,
     splitter: Callable[[str], list[Piece]] | None = None,
     retriever: Retriever | None = None,
+    defer_embedding: bool = False,
 ) -> IndexResult:
-    """Insert or update chunks for one source without committing the session."""
+    """Insert or update chunks for one source without committing the session.
+
+    ``defer_embedding`` leaves every chunk whose vector is missing or stale with
+    ``embedding_model`` NULL instead of calling the retriever's ``on_index``, so the caller
+    can commit the rows and embed them afterwards with no write transaction open
+    (``embed_deferred_chunks``).
+    """
     pieces = (splitter or split_plain)(text)
     existing_chunks = session.exec(
         select(Chunk).where(Chunk.source_ref == source_ref).order_by(Chunk.ordinal)
@@ -541,7 +559,11 @@ def index_text(
         tag_chunk_concepts(session, chunk, names)
 
     on_index = getattr(retriever, "on_index", None)
-    if callable(on_index):
+    if defer_embedding:
+        for chunk in changed_chunks:
+            chunk.embedding_model = None
+            session.add(chunk)
+    elif callable(on_index):
         session.flush()
         changed_ids = [chunk.id for chunk in changed_chunks if chunk.id is not None]
         try:
@@ -560,6 +582,102 @@ def index_text(
             )
 
     return IndexResult(indexed=indexed, skipped=skipped, removed=len(orphans))
+
+
+def take_write_lock(session: Session) -> None:
+    """Start the session's write transaction now, before it reads anything it acts on.
+
+    SQLite takes the write lock at a transaction's first write, so a read-then-write can act
+    on a state another connection changes in between. A no-op UPDATE takes the lock up front
+    (waiting out the busy timeout like any write); the reads after it see every commit made
+    before and none that can come after, until this session commits or rolls back.
+    """
+    session.execute(sql_text("UPDATE topic SET id = id WHERE 0"))
+
+
+def embed_deferred_chunks(
+    bind: Engine | Connection,
+    source_ref: str,
+    retriever: Retriever | None,
+    *,
+    topic_id: int | None = None,
+) -> int:
+    """Embed one source's chunks that ``index_text(defer_embedding=True)`` left without a
+    vector, after their rows were committed. Returns how many chunks got a vector.
+
+    The local embedder takes seconds to tens of seconds on a large source, about as long as a
+    writer waits for the lock (the busy timeout is 30 s). So no write transaction is open
+    while it runs: each batch is read, embedded with no session open, then written in one
+    short transaction that takes the lock first and skips any chunk that changed or went away
+    meanwhile. A retriever without ``embedder`` and ``store_vectors`` gets its ``on_index``
+    called per batch in a fresh session, so the hook starts with no write held. A failure is
+    logged as ``memory:error`` and leaves the rest without a vector (a reindex embeds them).
+    """
+    on_index = getattr(retriever, "on_index", None)
+    if not callable(on_index):
+        return 0
+    embedder = getattr(retriever, "embedder", None)
+    store_vectors = getattr(retriever, "store_vectors", None)
+    two_phase = embedder is not None and callable(store_vectors)
+    embedded = 0
+    last_id = 0
+    while True:
+        with Session(bind) as session:
+            rows = session.exec(
+                select(Chunk.id, Chunk.context, Chunk.text)
+                .where(
+                    Chunk.source_ref == source_ref,
+                    Chunk.id > last_id,
+                    col(Chunk.embedding_model).is_(None),
+                )
+                .order_by(Chunk.id)
+                .limit(REEMBED_BATCH)
+            ).all()
+        if not rows:
+            return embedded
+        last_id = rows[-1][0]
+        ids = [row[0] for row in rows]
+        try:
+            if not two_phase:
+                with Session(bind) as session:
+                    on_index(session, ids)
+                    session.commit()
+                continue
+            vectors = embedder.embed([f"{context}\n{text}" for _, context, text in rows])
+            if len(vectors) != len(rows):
+                raise ValueError(
+                    f"embedder returned {len(vectors)} vectors for {len(rows)} texts")
+            with Session(bind) as session:
+                take_write_lock(session)
+                current = {
+                    chunk.id: chunk
+                    for chunk in session.exec(
+                        select(Chunk).where(col(Chunk.id).in_(ids))
+                    ).all()
+                }
+                pairs: list[tuple[Chunk, list[float]]] = []
+                for (chunk_id, context, text), vector in zip(rows, vectors, strict=True):
+                    chunk = current.get(chunk_id)
+                    if (chunk is not None and chunk.embedding_model is None
+                            and chunk.context == context and chunk.text == text):
+                        pairs.append((chunk, vector))
+                if pairs:
+                    store_vectors(session, pairs)
+                session.commit()
+            embedded += len(pairs)
+        except Exception as exc:
+            try:
+                with Session(bind) as session:
+                    _add_memory_event(
+                        session,
+                        kind="memory:error",
+                        detail=f"embed {source_ref}: {type(exc).__name__}: {exc}"[:400],
+                        event_target={"topic_id": topic_id},
+                    )
+                    session.commit()
+            except Exception:
+                logger.exception("could not record memory:error for %s", source_ref)
+            return embedded
 
 
 def remove_source(session: Session, source_ref: str) -> int:
@@ -762,37 +880,61 @@ def index_source_doc(
     *,
     fetch: Callable[[str], str | None] = fetch_artifact_text,
     retriever: Retriever | None = None,
+    defer_embedding: bool = False,
 ) -> IndexResult:
-    """Fetch and index one accepted source without changing the source row."""
+    """Fetch and index one accepted source without changing the source row.
+
+    ``defer_embedding`` as in index_text: commit, then call embed_deferred_chunks."""
     if doc.id is None:
         raise ValueError("source document must be flushed before indexing")
 
-    if doc.url.startswith("file://"):
-        vault_chunks = session.exec(
-            select(Chunk).where(
-                Chunk.kind == "vault_note",
-                Chunk.source_ref == doc.url,
-            )
-        ).all()
-        if vault_chunks:
-            return IndexResult(indexed=0, skipped=len(vault_chunks), removed=0)
+    vault_skips = _vault_backed_chunks(session, doc)
+    if vault_skips:
+        return IndexResult(indexed=0, skipped=vault_skips, removed=0)
+    text, problem = _fetch_source_text(doc.url, fetch)
+    return _index_fetched_source(session, doc, text, problem, retriever=retriever,
+                                 defer_embedding=defer_embedding)
 
-    try:
-        text = fetch(doc.url)
-    except Exception as exc:
-        _add_memory_event(
-            session,
-            kind="memory:fetch_skipped",
-            detail=f"sourcedoc:{doc.id} {type(exc).__name__}: {exc}",
-            event_target={"topic_id": doc.topic_id},
+
+def _vault_backed_chunks(session: Session, doc: SourceDoc) -> int:
+    """A file:// source already indexed as a vault note is not fetched again."""
+    if not doc.url.startswith("file://"):
+        return 0
+    return len(session.exec(
+        select(Chunk).where(
+            Chunk.kind == "vault_note",
+            Chunk.source_ref == doc.url,
         )
-        return IndexResult(indexed=0, skipped=1, removed=0)
+    ).all())
 
+
+def _fetch_source_text(
+    url: str, fetch: Callable[[str], str | None]
+) -> tuple[str | None, str | None]:
+    """Return (text, None) or (None, why it was skipped). Touches no database state."""
+    try:
+        text = fetch(url)
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
     if not text or not text.strip():
+        return None, "empty response"
+    return text, None
+
+
+def _index_fetched_source(
+    session: Session,
+    doc: SourceDoc,
+    text: str | None,
+    problem: str | None,
+    *,
+    retriever: Retriever | None,
+    defer_embedding: bool = False,
+) -> IndexResult:
+    if text is None:
         _add_memory_event(
             session,
             kind="memory:fetch_skipped",
-            detail=f"sourcedoc:{doc.id} empty response",
+            detail=f"sourcedoc:{doc.id} {problem}",
             event_target={"topic_id": doc.topic_id},
         )
         return IndexResult(indexed=0, skipped=1, removed=0)
@@ -805,7 +947,132 @@ def index_source_doc(
         topic_id=doc.topic_id,
         heading=doc.title,
         retriever=retriever,
+        defer_embedding=defer_embedding,
     )
+
+
+def _recently_fetch_skipped(session: Session, topic_id: int | None) -> set[int]:
+    """Ids of the topic's sources with a ``memory:fetch_skipped`` event newer than
+    FETCH_RETRY_AFTER (the event detail starts "sourcedoc:<id> ")."""
+    cutoff = (datetime.now(timezone.utc) - FETCH_RETRY_AFTER).replace(tzinfo=None)
+    details = session.exec(
+        select(AgentEvent.detail).where(
+            AgentEvent.kind == "memory:fetch_skipped",
+            AgentEvent.topic_id == topic_id,
+            AgentEvent.created_at >= cutoff,
+        )
+    ).all()
+    ids: set[int] = set()
+    for detail in details:
+        match = re.match(r"sourcedoc:(\d+)\b", detail or "")
+        if match:
+            ids.add(int(match.group(1)))
+    return ids
+
+
+def sources_to_index(
+    session: Session,
+    topic_id: int,
+    accepted_ids: Iterable[int],
+    *,
+    retriever: Retriever | None = None,
+) -> list[int]:
+    """The accepted sources a save should hand to index_accepted_sources.
+
+    A source is queued when it has no chunks yet (its indexing never ran or failed) and no
+    fetch of it failed in the last FETCH_RETRY_AFTER, or when the retriever embeds and some of
+    its chunks have no vector (the embedding failed or was cut short). A source a background
+    task is working on right now (SOURCES_IN_FLIGHT) is never queued twice.
+    """
+    indexed_refs = set(session.exec(
+        select(Chunk.source_ref).distinct().where(
+            Chunk.topic_id == topic_id, Chunk.kind == "source_doc")).all())
+    unembedded_refs: set[str] = set()
+    if getattr(retriever, "embedder", None) is not None:
+        unembedded_refs = set(session.exec(
+            select(Chunk.source_ref).distinct().where(
+                Chunk.topic_id == topic_id,
+                Chunk.kind == "source_doc",
+                col(Chunk.embedding_model).is_(None),
+            )).all())
+    skipped = _recently_fetch_skipped(session, topic_id)
+    queue: list[int] = []
+    for source_id in accepted_ids:
+        if source_id in SOURCES_IN_FLIGHT:
+            continue
+        ref = f"sourcedoc:{source_id}"
+        if ref in unembedded_refs or (ref not in indexed_refs and source_id not in skipped):
+            queue.append(source_id)
+    return queue
+
+
+def index_accepted_sources(
+    bind: Engine | Connection,
+    source_ids: list[int],
+    *,
+    fetch: Callable[[str], str | None] = fetch_artifact_text,
+    retriever: Retriever | None = None,
+) -> None:
+    """Fetch and index sources the learner just accepted, after the review request returned.
+
+    Each source gets its own short sessions: a read, the network fetch with no session open,
+    one write transaction for the chunk rows, then the embedding in committed batches with no
+    write transaction open while the embedder runs (embed_deferred_chunks). No write lock
+    spans a fetch or an embedding, so a second save (or any other writer) waits at most for
+    one short write. A source pruned meanwhile is left alone. A failure on one source is
+    logged as an event and never touches the saved statuses.
+
+    Each source is claimed in SOURCES_IN_FLIGHT while it is worked on; one another task holds
+    is skipped. A source that already has chunks is not fetched again, only its chunks without
+    a vector are embedded; one whose fetch failed within FETCH_RETRY_AFTER is skipped.
+    """
+    for source_id in source_ids:
+        if not SOURCES_IN_FLIGHT.claim(source_id):
+            continue
+        topic_id = None
+        source_ref = f"sourcedoc:{source_id}"
+        try:
+            with Session(bind) as session:
+                doc = session.get(SourceDoc, source_id)
+                if doc is None or doc.status != "accepted" or _vault_backed_chunks(session, doc):
+                    continue
+                url, topic_id = doc.url, doc.topic_id
+                has_chunks = session.exec(
+                    select(Chunk.id).where(Chunk.source_ref == source_ref).limit(1)
+                ).first() is not None
+                if not has_chunks and source_id in _recently_fetch_skipped(session, topic_id):
+                    continue
+            if not has_chunks:
+                text, problem = _fetch_source_text(url, fetch)
+                with Session(bind) as session:
+                    # Lock first, so the status check and index_text's read of the existing
+                    # chunks can't miss a prune, a topic delete or another save of this source
+                    # that commits before this write.
+                    take_write_lock(session)
+                    doc = session.get(SourceDoc, source_id)
+                    if doc is None or doc.status != "accepted":
+                        continue
+                    _index_fetched_source(session, doc, text, problem, retriever=retriever,
+                                          defer_embedding=True)
+                    session.commit()
+                if text is None:
+                    continue
+            embed_deferred_chunks(bind, source_ref, retriever, topic_id=topic_id)
+        except Exception as exc:
+            try:
+                with Session(bind) as session:
+                    _add_memory_event(
+                        session,
+                        kind="memory:index_skipped",
+                        detail=f"sourcedoc:{source_id} {type(exc).__name__}: {exc}"[:400],
+                        event_target={"topic_id": topic_id},
+                    )
+                    session.commit()
+            except Exception:
+                logger.exception("could not record memory:index_skipped for sourcedoc:%s",
+                                 source_id)
+        finally:
+            SOURCES_IN_FLIGHT.release(source_id)
 
 
 def index_paper(
@@ -974,11 +1241,16 @@ def reindex_topic(
                 if time.perf_counter() >= deadline:
                     truncated = True
                     break
-                result = index_source_doc(session, doc, fetch=fetch, retriever=retriever)
+                # The chunk rows are committed first and embedded after, with no write
+                # transaction open while the embedder runs (as in index_accepted_sources).
+                result = index_source_doc(session, doc, fetch=fetch, retriever=retriever,
+                                          defer_embedding=True)
                 indexed += result.indexed
                 skipped += result.skipped
                 removed += result.removed
                 session.commit()
+                embed_deferred_chunks(session.get_bind(), f"sourcedoc:{doc.id}", retriever,
+                                      topic_id=topic_id)
                 bump_progress(progress, indexed=result.indexed, skipped=result.skipped, removed=result.removed)
             if truncated:
                 break

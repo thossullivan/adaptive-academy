@@ -53,4 +53,26 @@ describe('ComebackCard', () => {
     });
     expect(body).toContain('Implement log_softmax with torch.no_grad in _one_ pass');
   });
+
+  it('points at building the track when the topic has none, without claiming it is charted', () => {
+    const { body } = render(ComebackCard, {
+      props: {
+        wind,
+        comeback: {
+          move: {
+            kind: 'build_track',
+            label: 'Build your track from the reading list on the Sources page',
+            href: '/topics/1/review',
+            minutes: 5
+          }
+        }
+      }
+    });
+    expect(body).not.toContain('Your voyage is charted.');
+    expect(body).toContain('charted yet');
+    expect(body).toContain('Build your track from the reading list on the Sources page');
+    expect(body).toContain('href="/topics/1/review"');
+    expect(body).toContain('Go to Sources');
+    expect(body).not.toContain('Set sail');
+  });
 });
