@@ -39,6 +39,7 @@ from adaptive_academy.models import (
     Attempt,
     Concept,
     ConceptEdge,
+    ConceptNote,
     Conversation,
     Deliverable,
     Item,
@@ -502,6 +503,14 @@ TUTOR_MESSAGES = [
               "weight must be exactly 1.", 13),
 ]
 
+# My notes on one concept (the concept notebook), written after its tutor session.
+DEMO_NOTE = ("causal", _ago(3, 0), (
+    "Mask before the softmax, not after.\n\n"
+    "- Set future logits to -inf, so exp gives exact zeros and each row still sums to 1.\n"
+    "- Zeroing after the softmax breaks the sum, and renormalizing just recomputes the same "
+    "thing the long way.\n\n"
+    "Next: check how the KV cache keeps the same mask during generation."))
+
 TUTOR_SESSIONS = [
     ("chain", _ago(20, 5), CHAIN_MESSAGES),
     ("causal", _ago(3, 1), TUTOR_MESSAGES),
@@ -784,12 +793,16 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
         # The estimate as it stood then: unmeasured (medium) or graded low.
         level = "medium" if at(first_probe[key].ago) > convo_at else "low"
         levels = compute_levels(KnowledgeEstimate(concept_id=tutor_concept.id, level=level))
+        after_attempt = False
         for role, content, minutes in script:
             when = convo_at + timedelta(minutes=minutes)
             is_attempt = role == "attempt"
+            # The tutor's reply to an accepted attempt is the worked solution it revealed.
+            reveals = role == "tutor" and after_attempt
+            after_attempt = is_attempt
             message = Message(conversation_id=convo.id, role="tutor" if role == "tutor" else "user",
                               content=content, is_attempt=True if is_attempt else None,
-                              created_at=when)
+                              reveals_solution=True if reveals else None, created_at=when)
             session.add(message)
             session.flush()
             index_message(session, message, concept_id=tutor_concept.id, topic_id=tid,
@@ -814,6 +827,11 @@ def build_demo(session: Session, *, now: datetime | None = None) -> Topic:
             if is_attempt:
                 emit(when, "tool:reveal_solution:allowed", conversation_id=convo.id)
                 emit(when, "llm_call", "step=2", conversation_id=convo.id)
+
+    # The learner's own notes on the concept they worked through with the tutor.
+    note_key, note_ago, note_body = DEMO_NOTE
+    session.add(ConceptNote(concept_id=concepts[note_key].id, body=note_body,
+                            updated_at=at(note_ago)))
 
     # The trace, written in time order so its ids read chronologically.
     for when, fields in sorted(events, key=lambda e: e[0]):

@@ -76,6 +76,10 @@ class Message(SQLModel, table=True):
     # True when the learner sent it with Submit attempt (engine/attempt.py). NULL for every
     # other message, including those from before the Attempt button.
     is_attempt: Optional[bool] = None
+    # True on the tutor message that is a worked solution the attempt gate allowed
+    # (reveal_solution, engine/tutor.py and engine/tutor_sdk.py), so the notebook can list it.
+    # NULL for every other message, including reveals stored before the column existed.
+    reveals_solution: Optional[bool] = None
     created_at: datetime = Field(default_factory=_now)
     conversation: Optional[Conversation] = Relationship(back_populates="messages")
 
@@ -94,6 +98,23 @@ class Attempt(SQLModel, table=True):
     message_id: int = Field(foreign_key="message.id")
     accepted: bool
     created_at: datetime = Field(default_factory=_now)
+
+
+class ConceptNote(SQLModel, table=True):
+    """The learner's own notes on one concept: "My notes" in the concept notebook
+    (engine/notebook.py). One row per concept. The learner's data: included in the JSON
+    export and backups, and never sent to a model.
+
+    A surrogate `id` like every other table (demo removal walks rows by `id`); `concept_id`
+    is unique, so it identifies the note.
+    """
+
+    __tablename__ = "concept_note"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    concept_id: int = Field(foreign_key="concept.id", unique=True)
+    body: str = ""
+    updated_at: datetime = Field(default_factory=_now)
 
 
 class RoleplaySession(SQLModel, table=True):

@@ -274,7 +274,7 @@ const OUTLINE_PAGES = (id: number) => [
   '/topics/new',
   '/usage',
   '/data',
-  ...['today', 'tutor', 'track', 'practice', 'assess', 'teach', 'retention', 'review', 'story', 'vault', 'wayfinder', 'map'].map(
+  ...['today', 'tutor', 'track', 'practice', 'assess', 'teach', 'retention', 'review', 'notebook', 'story', 'vault', 'wayfinder', 'map'].map(
     (s) => `/topics/${id}/${s}`
   )
 ];

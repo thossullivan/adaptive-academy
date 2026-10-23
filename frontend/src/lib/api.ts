@@ -27,6 +27,8 @@ import type {
   MemorySearchResult,
   MemoryStats,
   MilestoneInfo,
+  Notebook,
+  ConceptNote,
   PaperProbe,
   Program,
   ProgramContext,
@@ -50,12 +52,14 @@ import type {
   StoryFacts,
   TeachResult,
   Topic,
+  TopicNotebook,
   TopicSuggestion,
   UsageReport,
   VaultExportAllResult,
   VaultExportResult,
   VaultIngestResult,
   VaultStatus,
+  VaultSync,
   WindState
 } from './types';
 
@@ -258,6 +262,22 @@ export const api = {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ vault_path })
     }).then(j<VaultExportAllResult>),
+  /** Where concept notebooks sync: register the browser's vault path ("" falls back to the env). */
+  vaultSync: (vault_path: string) =>
+    fetch('/api/vault/sync', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vault_path })
+    }).then(j<VaultSync>),
+  getNotebook: (conceptId: number) =>
+    fetch(`/api/concepts/${conceptId}/notebook`).then(j<Notebook>),
+  /** Save My notes; `vault_path` (the browser's, if any) lets the note reach the vault. */
+  saveNote: (conceptId: number, body: string, vault_path = '') =>
+    fetch(`/api/concepts/${conceptId}/note`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ body, vault_path })
+    }).then(j<ConceptNote>),
+  getTopicNotebook: (topicId: number) =>
+    fetch(`/api/topics/${topicId}/notebook`).then(j<TopicNotebook>),
   searchMemory: (
     q: string,
     opts: { topic_id?: number; concept_id?: number; kinds?: string[]; k?: number } = {}

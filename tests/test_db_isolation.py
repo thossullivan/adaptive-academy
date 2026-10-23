@@ -35,7 +35,8 @@ TEMP = Path(tempfile.gettempdir()).resolve()
 # pinned in _isolated_env.ISOLATED_ENV).
 PATH_SETTINGS = {"database_url", "embedding_cache_dir", "obsidian_vault_path", "frontend_dist"}
 OTHER_SETTINGS = {"retriever", "embedding_model", "embedding_allow_download",
-                  "reasoning_model", "copy_model", "daily_budget_usd", "grading_strictness"}
+                  "reasoning_model", "copy_model", "daily_budget_usd", "grading_strictness",
+                  "allowed_hosts"}
 
 
 def assert_isolated(path_text: str | None, what: str) -> None:

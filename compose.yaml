@@ -21,6 +21,8 @@ services:
       AA_DAILY_BUDGET_USD: ${AA_DAILY_BUDGET_USD:-}
       # Optional grading strictness: lenient, standard or strict; blank = standard.
       AA_GRADING_STRICTNESS: ${AA_GRADING_STRICTNESS:-}
+      # Optional extra host names the app answers (comma-separated); localhost always works.
+      AA_ALLOWED_HOSTS: ${AA_ALLOWED_HOSTS:-}
       # Optional IANA time zone from .env (e.g. America/Los_Angeles) for "today" in the
       # spending limit and in the date the agents are told; blank = UTC. The base image
       # ships tzdata, so any zone name works.

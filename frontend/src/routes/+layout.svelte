@@ -7,12 +7,18 @@
   import Rail from '$lib/shell/Rail.svelte';
   import MobileNav from '$lib/shell/MobileNav.svelte';
   import Toaster from '$lib/ui/Toaster.svelte';
+  import { api } from '$lib/api';
+  import { storedVaultPath } from '$lib/notebook';
 
   let { children } = $props();
   let ready = $state(false);
 
   onMount(async () => {
     theme.init();
+    // The vault path lives in this browser: tell the API, so concept notebooks keep syncing
+    // after it restarts (best effort; the Vault page shows any problem).
+    const vaultPath = storedVaultPath();
+    if (vaultPath) api.vaultSync(vaultPath).catch(() => undefined);
     try {
       await topics.load();
     } catch (e) {

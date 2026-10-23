@@ -41,7 +41,8 @@ There's also a [phone layout](docs/images/phone-today.png).
 - Lets you practise under pressure: defend your ideas to a generated persona (a skeptical
   buyer, a thesis committee), or answer questions about a real paper.
 - Tracks your momentum without punishing breaks.
-- Reads your Obsidian notes and writes notes back.
+- Reads your Obsidian notes and writes notes back, including a notebook per concept: your own
+  notes, attempts, graded explanations, and worked solutions.
 - Remembers what you've read and what it already explained, so it doesn't repeat itself.
 - Shows what each agent did and what each call cost.
 

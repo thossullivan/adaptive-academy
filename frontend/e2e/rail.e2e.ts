@@ -19,6 +19,7 @@ const LINKS = [
   'Constellation',
   'Retention',
   'Sources',
+  'Notebook',
   'Vault',
   'Story',
   'Fleet',

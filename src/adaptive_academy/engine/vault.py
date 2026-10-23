@@ -12,6 +12,7 @@ import os
 import re
 import stat
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -60,8 +61,18 @@ _HAS_DESCRIPTOR_WALK = (
 
 
 def slugify(name: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", (name or "").lower())
-    return s.strip("-")
+    """A file-name slug that keeps letters and digits in any script ("微积分" stays, "Café"
+    becomes "café"); everything else, underscores included, becomes one "-". ASCII names
+    slug as before. Can be "" (a name of only symbols, like "C++" minus its letter: callers
+    fall back to an id-based name)."""
+    text = unicodedata.normalize("NFKC", name or "").casefold()
+    return re.sub(r"[\W_]+", "-", text).strip("-")
+
+
+def legacy_slugify(name: str) -> str:
+    """The ASCII-only slug exports used before slugify kept other scripts ("Cálculo" was
+    "c-lculo"): an existing note or folder under it is reused, not copied."""
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
 
 
 # --- frontmatter -------------------------------------------------------------
@@ -139,6 +150,14 @@ def _is_safe_vault_path(path: Path, vault: Path) -> bool:
     return resolved == root or root in resolved.parents
 
 
+def _inside_skipped(root: Path, vault: Path, skip_dirs: frozenset[str]) -> bool:
+    try:
+        relative = root.resolve().relative_to(vault.resolve())
+    except ValueError:
+        return False
+    return any(part in skip_dirs for part in relative.parts)
+
+
 def _scan_notes_with_skips(
     root: Path,
     *,
@@ -149,9 +168,13 @@ def _scan_notes_with_skips(
     """List safe notes, rejected paths, and whether the scan reached its end.
 
     The scan stops (complete=False) at the file cap or when the absolute deadline passes.
+    A root at or inside a skipped export folder (a subfolder of "Adaptive Academy/...") lists
+    nothing: the app's own notes are never read back as the learner's.
     """
     notes: list[Path] = []
     rejected: list[Path] = []
+    if _inside_skipped(root, vault, skip_dirs):
+        return notes, rejected, True
     for directory, dirnames, filenames in os.walk(root, followlinks=False):
         if deadline is not None and time.perf_counter() >= deadline:
             return sorted(notes), sorted(rejected), False
@@ -211,13 +234,17 @@ def _read_text(
     vault: Path,
     limit: int,
     errors: str,
+    newline: str | None = None,
 ) -> str:
+    """Read a vault note without following symlinks. `newline=""` keeps the file's own line
+    endings (the notebook sync writes the note back and must not change them)."""
     if _HAS_DESCRIPTOR_WALK:
         return _read_text_descriptor(
             path,
             vault=vault,
             limit=limit,
             errors=errors,
+            newline=newline,
         )
 
     return _read_text_fallback(
@@ -225,6 +252,7 @@ def _read_text(
         vault=vault,
         limit=limit,
         errors=errors,
+        newline=newline,
     )
 
 
@@ -234,6 +262,7 @@ def _read_text_descriptor(
     vault: Path,
     limit: int,
     errors: str,
+    newline: str | None = None,
 ) -> str:
     root = vault.resolve()
     try:
@@ -267,7 +296,8 @@ def _read_text_descriptor(
         final_descriptor = descriptor
         descriptor = -1
         with os.fdopen(final_descriptor, "rb") as raw:
-            with io.TextIOWrapper(raw, encoding="utf-8", errors=errors) as handle:
+            with io.TextIOWrapper(raw, encoding="utf-8", errors=errors,
+                                  newline=newline) as handle:
                 text = handle.read(limit)
         _LAST_READ_MTIME[path] = final_stat.st_mtime
         return text
@@ -297,20 +327,21 @@ def _read_text_fallback(
     vault: Path,
     limit: int,
     errors: str,
+    newline: str | None = None,
 ) -> str:
     if not _is_safe_vault_path(path, vault):
         raise OSError("outside-vault-or-symlink")
 
     nofollow = getattr(os, "O_NOFOLLOW", None)
     if nofollow is None:
-        with path.open(encoding="utf-8", errors=errors) as handle:
+        with path.open(encoding="utf-8", errors=errors, newline=newline) as handle:
             return handle.read(limit)
 
     flags = os.O_RDONLY | nofollow
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     descriptor = os.open(path, flags)
-    with os.fdopen(descriptor, encoding="utf-8", errors=errors) as handle:
+    with os.fdopen(descriptor, encoding="utf-8", errors=errors, newline=newline) as handle:
         return handle.read(limit)
 
 
@@ -389,16 +420,25 @@ def safe_child(vault: Path, *parts: str) -> Path:
 # --- entity → markdown renderers (pure; DB extraction happens in the caller) --
 
 def render_hub_note(
-    topic_title: str, overview: str, track_markdown: str, concept_names: list[str]
+    topic_title: str, overview: str, track_markdown: str, concept_names: list[str],
+    *, concept_stems: list[str] | None = None, topic_id: int | None = None,
 ) -> str:
-    fm = render_frontmatter({"title": topic_title, "tags": ["adaptive-academy"]})
+    """`concept_stems`: each concept note's file name (without .md), in the same order as
+    `concept_names`, when it differs from the plain slug (engine/notebook_sync.py
+    disambiguates names that slug alike). `topic_id` marks the hub as this topic's."""
+    data: dict = {"title": topic_title, "tags": ["adaptive-academy"]}
+    if topic_id is not None:
+        data["topic_id"] = topic_id
+    fm = render_frontmatter(data)
     parts = [fm, f"# {topic_title}\n"]
     if overview:
         parts.append(overview + "\n")
     if concept_names:
+        stems = concept_stems or [slugify(n) for n in concept_names]
         parts.append("## Concepts\n")
         parts.append(
-            "\n".join(f"- [[{slugify(n)}|{n}]]" for n in concept_names) + "\n"
+            "\n".join(f"- [[{stem}|{n}]]" for stem, n in zip(stems, concept_names, strict=True))
+            + "\n"
         )
     if track_markdown:
         parts.append("## Track\n")
@@ -435,12 +475,16 @@ class IngestResult:
 @dataclass
 class ExportResult:
     written: list[str] = field(default_factory=list)
+    # Concept notes left as they were, with why (engine/notebook_sync.py: unbalanced
+    # notebook markers, a symlink, a note too large to update safely).
+    problems: list[str] = field(default_factory=list)
 
 
 @dataclass
 class ExportAllResult:
     topics: int
     written: list[str] = field(default_factory=list)
+    problems: list[str] = field(default_factory=list)
 
 
 def _sync_vault_links(
@@ -748,7 +792,7 @@ def _concept_verdict_summary(session: Session, concept: Concept) -> tuple[str, s
                                          col(Assessment.kind).in_(GRADING_KINDS))
                 .order_by(Assessment.id.desc())).first()
             verdict = level_from_score(graded.score)[0]
-    bits = [f"Latest: **{latest.kind}** — score {latest.score:.2f}"]
+    bits = [f"Latest: **{latest.kind}**, score {latest.score:.2f}"]
     if latest.verdict:
         bits.append(latest.verdict)
     if latest.gaps:
@@ -808,53 +852,103 @@ def ingest_vault(
 
 def export_vault(session: Session, topic_id: int, vault_path: str) -> ExportResult:
     """Write the topic's hub note + per-concept notes into `<vault>/Adaptive Academy/<topic>/`.
-    Idempotent — we own that folder and regenerate it; the learner's own notes are never touched."""
+    Idempotent. The hub note is regenerated. A concept note is created with its header and
+    notebook section, or, when it exists, only its notebook section (and its frontmatter
+    `verdict:` value) is rewritten (engine/notebook_sync.py): what the learner wrote outside
+    the markers stays as it is. Folder and file names never take over another topic's or
+    concept's note: names that slug alike get an id suffix."""
+    from adaptive_academy.engine.notebook import MarkerError
+    from adaptive_academy.engine.notebook_sync import (
+        NOTEBOOK_SYNC,
+        UnsafeNote,
+        concept_note_path,
+        planned_concept_stems,
+        problem_text,
+        topic_folder,
+        write_concept_note,
+        write_hub_note,
+    )
+
     vault = safe_vault_dir(vault_path)
     topic = session.get(Topic, topic_id)
     if topic is None:
         raise ValueError("topic not found")
-    topic_slug = slugify(topic.title)
-    base = safe_child(vault, EXPORT_FOLDER, topic_slug)
-    base.mkdir(parents=True, exist_ok=True)
+    folder, hub_stem = topic_folder(session, vault, topic)
 
     track = session.exec(select(Track).where(Track.topic_id == topic_id)).first()
     overview = track.overview if track else ""
     track_md = _track_markdown(session, track) if track else ""
     concepts = (
-        session.exec(select(Concept).where(Concept.track_id == track.id)).all() if track else []
+        session.exec(select(Concept).where(Concept.track_id == track.id)
+                     .order_by(Concept.id)).all() if track else []
     )
 
+    # Where each concept's note goes, before the hub links to them.
+    planned = planned_concept_stems(concepts)
+    concepts_dir = safe_child(folder, "Concepts")
+    concepts_dir.mkdir(parents=True, exist_ok=True)
+    paths: dict[int, Path] = {}
+    problems: list[str] = []
+    for c in concepts:
+        try:
+            paths[c.id] = concept_note_path(vault, concepts_dir, c, planned[c.id])
+        except UnsafeNote as exc:
+            message = f"{planned[c.id]}.md: {problem_text(exc)}"
+            problems.append(message)
+            NOTEBOOK_SYNC.record_problem(c.id, f"Couldn't update {message}")
+
     written: list[str] = []
-    hub_path = safe_child(base, f"{topic_slug}.md")
-    hub_path.write_text(
-        render_hub_note(topic.title, overview, track_md, [c.name for c in concepts]),
-        encoding="utf-8")
+    hub_path = write_hub_note(
+        vault, folder, hub_stem,
+        render_hub_note(topic.title, overview, track_md, [c.name for c in concepts],
+                        concept_stems=[paths[c.id].stem if c.id in paths else planned[c.id]
+                                       for c in concepts],
+                        topic_id=topic.id),
+        replace=True)
     written.append(str(hub_path))
 
-    if concepts:
-        concepts_dir = safe_child(base, "Concepts")
-        concepts_dir.mkdir(parents=True, exist_ok=True)
-        for c in concepts:
-            verdict, summary = _concept_verdict_summary(session, c)
-            note_path = safe_child(concepts_dir, f"{slugify(c.name)}.md")
-            note_path.write_text(
-                render_concept_note(c.name, verdict, c.is_load_bearing, summary, topic_slug),
-                encoding="utf-8")
-            written.append(str(note_path))
+    for c in concepts:
+        if c.id not in paths:
+            continue
+        try:
+            note_path = write_concept_note(session, vault, topic, c, path=paths[c.id],
+                                           hub_stem=hub_stem)
+        except (MarkerError, UnsafeNote) as exc:
+            message = f"{paths[c.id].name}: {problem_text(exc)}"
+            problems.append(message)
+            NOTEBOOK_SYNC.record_problem(c.id, f"Couldn't update {message}")
+            continue
+        NOTEBOOK_SYNC.note_ok(c.id)
+        written.append(str(note_path))
 
-    session.add(AgentEvent(
-        topic_id=topic_id, kind="vault:export", detail=f"{len(written)} note(s) to vault"))
+    detail = f"{len(written)} note(s) to vault"
+    if problems:
+        detail += f", {len(problems)} left unchanged"
+    session.add(AgentEvent(topic_id=topic_id, kind="vault:export", detail=detail))
     session.commit()
-    return ExportResult(written=written)
+    return ExportResult(written=written, problems=problems)
 
 
 def export_all_topics(session: Session, vault_path: str) -> ExportAllResult:
     """Mirror every one of the learner's topics into its own `Adaptive Academy/<topic>/`
     folder in one pass. The demo topic is sample data, not the learner's, so it is skipped
     (an explicit single-topic export of it via export_vault still works: that is a choice)."""
+    from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC, UnsafeNote
+
     safe_vault_dir(vault_path)  # validate once, up front
     topics = session.exec(select(Topic).where(col(Topic.is_demo).is_(False))).all()
     written: list[str] = []
+    problems: list[str] = []
     for t in topics:
-        written.extend(export_vault(session, t.id, vault_path).written)
-    return ExportAllResult(topics=len(topics), written=written)
+        try:
+            res = export_vault(session, t.id, vault_path)
+        except UnsafeNote as exc:
+            # This topic's folder or hub can't be written safely: say so, do the rest.
+            session.rollback()
+            problems.append(f"{t.title}: {exc}")
+            continue
+        written.extend(res.written)
+        problems.extend(res.problems)
+
+    NOTEBOOK_SYNC.clear_problem("queue")  # every topic's notes were just rewritten
+    return ExportAllResult(topics=len(topics), written=written, problems=problems)

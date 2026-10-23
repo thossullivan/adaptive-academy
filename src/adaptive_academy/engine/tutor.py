@@ -113,6 +113,9 @@ def run_tutor_turn(
 
     step = 0
     max_steps = _MAX_STEPS
+    # Set when the reply is a worked solution the attempt gate allowed: the stored message is
+    # marked (Message.reveals_solution) so the concept notebook can list it.
+    revealed = False
     while step < max_steps:
         step += 1
         emit("llm_call", f"step={step}")
@@ -180,6 +183,7 @@ def run_tutor_turn(
         # (and is never guarded: the attempt-gate already allowed it).
         if revealed_text is not None:
             reply_text = revealed_text
+            revealed = bool(reply_text.strip())
             break
 
     if not reply_text.strip():
@@ -190,7 +194,8 @@ def run_tutor_turn(
         reply_text = _FALLBACK
 
     # Persist the tutor reply.
-    tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply_text)
+    tutor_message = Message(conversation_id=convo.id, role="tutor", content=reply_text,
+                            reveals_solution=True if revealed else None)
     session.add(tutor_message)
     session.flush()
     index_message(

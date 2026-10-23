@@ -20,6 +20,13 @@ from adaptive_academy.api.schemas import (
     VaultIngestIn,
     VaultIngestOut,
     VaultStatusOut,
+    VaultSyncIn,
+    VaultSyncOut,
+)
+from adaptive_academy.engine.notebook_sync import (
+    NOTEBOOK_SYNC,
+    UnsafeNote,
+    register_vault_path,
 )
 from adaptive_academy.engine.vault import (
     export_all_topics,
@@ -97,11 +104,14 @@ def export(
         res = export_vault(session, topic_id, _resolve_path(body.vault_path))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    except UnsafeNote as e:
+        # The topic's folder or hub note can't be written safely (another topic's, a link).
+        raise HTTPException(400, str(e)) from e
     except OSError as e:
         if e.errno not in _UNWRITABLE:
             raise
         raise _unwritable(e) from e
-    return VaultExportOut(written=res.written)
+    return VaultExportOut(written=res.written, problems=res.problems)
 
 
 @router.post("/vault/export-all", response_model=VaultExportAllOut)
@@ -114,17 +124,35 @@ def export_all(body: VaultExportIn, session: Session = Depends(get_session)) -> 
         if e.errno not in _UNWRITABLE:
             raise
         raise _unwritable(e) from e
-    return VaultExportAllOut(topics=res.topics, written=res.written)
+    return VaultExportAllOut(topics=res.topics, written=res.written, problems=res.problems)
+
+
+def _sync_out() -> VaultSyncOut:
+    return VaultSyncOut(**NOTEBOOK_SYNC.status())
 
 
 @router.get("/vault/status", response_model=VaultStatusOut)
 def status(vault_path: str = Query("")) -> VaultStatusOut:
     path = (vault_path or settings.obsidian_vault_path or "").strip()
     if not path:
-        return VaultStatusOut(configured=False)
+        return VaultStatusOut(configured=False, sync=_sync_out())
     try:
         root = safe_vault_dir(path)
     except ValueError:
-        return VaultStatusOut(configured=True, path=path, exists=False, is_dir=False)
+        return VaultStatusOut(configured=True, path=path, exists=False, is_dir=False,
+                              sync=_sync_out())
     return VaultStatusOut(
-        configured=True, path=str(root), exists=True, is_dir=True, note_count=len(scan_notes(root)))
+        configured=True, path=str(root), exists=True, is_dir=True, note_count=len(scan_notes(root)),
+        sync=_sync_out())
+
+
+@router.put("/vault/sync", response_model=VaultSyncOut)
+def set_sync_target(body: VaultSyncIn) -> VaultSyncOut:
+    """Where concept notebooks sync (engine/notebook_sync.py): the browser registers its
+    vault path here when it checks the vault and when the app loads. "" falls back to
+    AA_OBSIDIAN_VAULT_PATH."""
+    try:
+        register_vault_path(body.vault_path)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return _sync_out()
