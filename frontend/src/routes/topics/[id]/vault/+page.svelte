@@ -296,7 +296,7 @@
       <Card eyebrow="Ingest" title="Vault notes → grounding sources">
         <p class="mb-3 text-sm text-muted">
           Registers your vault's markdown as <i>proposed</i> sources for this topic, so curricula
-          and quizzes can be grounded in your own material. Safe to re-run — already-ingested notes
+          and quizzes can be grounded in your own material. Safe to run again: notes already added
           are skipped.
         </p>
         <Button variant="outline" size="sm" onclick={runIngest} disabled={!ready || ingesting}>

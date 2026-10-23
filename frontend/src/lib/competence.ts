@@ -168,9 +168,9 @@ function stateRole(state: SignalState): SignalRole {
 
 const NOTE: Record<keyof ConceptSignals, Record<string, string>> = {
   grade: {
-    high: 'Graded high — a strong mechanism-anchored read.',
-    medium: 'Graded medium — partial command.',
-    low: 'Graded low — the latest read is weak.',
+    high: 'Graded high: the latest answer explained the mechanism well.',
+    medium: 'Graded medium: partly there.',
+    low: 'Graded low: the latest answer was weak.',
     unknown: 'Not graded yet.'
   },
   decay: {
@@ -227,24 +227,24 @@ export function verdictRationale(s: ConceptSignals): VerdictRationale {
   let nextStep: string | null;
   switch (verdict) {
     case 'untested':
-      headline = 'No signals yet — this concept is untested.';
+      headline = 'No evidence yet. This concept is untested.';
       nextStep = 'Get a first read: answer a probe or take an assessment.';
       break;
     case 'shaky':
-      headline = `Shaky — ${faults.join('; ')}.`;
+      headline = `Shaky: ${faults.join('; ')}.`;
       nextStep = 'Shore it up: revisit the concept, then re-grade or retest it cold.';
       break;
     case 'solid':
-      headline = `Solid — graded high and corroborated by ${litLabels.join(' & ')}.`;
+      headline = `Solid: graded high and backed up by ${litLabels.join(' & ')}.`;
       nextStep = null;
       break;
     case 'verified':
-      headline = `Verified — graded ${s.grade} and corroborated by ${litLabels.join(' & ')}.`;
+      headline = `Verified: graded ${s.grade} and backed up by ${litLabels.join(' & ')}.`;
       nextStep = 'Push to solid: hold it cold on delayed recall, teach it, or ship it.';
       break;
     default: // unverified
-      headline = `Unverified — graded ${s.grade}, but nothing corroborates it yet.`;
-      nextStep = 'Corroborate it: pass a delayed recall, teach it, or ship an artifact.';
+      headline = `Unverified: graded ${s.grade}, but nothing backs it up yet.`;
+      nextStep = 'Back it up: pass a delayed recall, teach it, or ship an artifact.';
   }
   return { verdict, headline, signals, nextStep };
 }

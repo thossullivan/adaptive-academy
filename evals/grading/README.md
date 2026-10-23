@@ -201,6 +201,20 @@ ignores prompt caching, so the real input cost is usually lower. For the 55 case
 A model that is not in `llm/pricing.py` gets no dollar estimate, only token counts. On OpenRouter
 each call reports what it actually cost, and the report adds those up.
 
+## Latest results
+
+Claude Sonnet 5.5, prompt `assess.grade@v7`, 2026-10-22, all 55 cases:
+
+| Strictness | False mastery | False caps | Band accuracy |
+|---|---|---|---|
+| lenient | 0/34 | 0/52 | 85% |
+| standard (default) | 0/34 | 1/52 | 80% |
+| strict | 0/34 | 4/52 | 78% |
+
+The run before the v7 tune (`assess.grade@v6`) had 5 false caps out of 52. DeepSeek V4.1 Flash
+on v6, through OpenRouter: 0/34 false mastery, 2/53 false caps, 95% band accuracy, about 2 cents
+for the run.
+
 ## How to read the report
 
 The printed table puts the model's row above the four baselines. Read the two costly-error

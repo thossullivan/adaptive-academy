@@ -45,7 +45,7 @@ test('README screenshots', async ({ page }) => {
   for (const name of ['Causal Self-Attention', 'Token Embeddings']) {
     await page.getByRole('button', { name: new RegExp(`^Why is ${name} `) }).click();
   }
-  await expect(page.getByText(/^Shaky — /).first()).toBeVisible();
+  await expect(page.getByText(/^Shaky: /).first()).toBeVisible();
   const map = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Where you stand' }) });
   await shoot(map, 'competence');
 
