@@ -19,9 +19,6 @@ Items marked **good first issue** are self-contained and a good way into the cod
   milestone today, so a single topic (and the demo) can't use them.
 - **Each learner's own time zone.** "Today" comes from the server's clock. Using the browser's
   time zone would give the right date on a shared or remote server.
-- **Published container image.** The release workflow builds `ghcr.io/thossullivan/adaptive-academy`
-  when a version is tagged (see [docs/RELEASING.md](docs/RELEASING.md)). After the first tag,
-  `docker run` is the quickest way in.
 
 ## Later
 
