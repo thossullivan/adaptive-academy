@@ -140,10 +140,10 @@ Open **Today** and work from top to bottom:
 
 A full worked solution can only come through the tutor's `reveal_solution` tool, and the
 code blocks it until you've made an attempt in that conversation (`reveal_gate` in
-`src/adaptive_academy/engine/tools.py`). Because this is in the code and not just the prompt,
-it holds no matter how you ask. Before you try, you get questions and hints.
+`src/adaptive_academy/engine/tools.py`). Because the code enforces it, it holds no matter how
+you ask. Before you try, you get questions and hints.
 
-You decide what counts as your attempt, not the tutor. Write it and press **Submit attempt**.
+You decide what counts as your attempt. Write it and press **Submit attempt**.
 Before the tutor replies, the app checks that the message has some substance: your
 reasoning, a step, or code, right or wrong (`engine/attempt.py`). If it does, the header
 changes to **attempt logged** and the tutor can show the full solution. A bare guess ("is it

@@ -1,32 +1,33 @@
 # Security Policy
 
 Adaptive Academy runs on your own machine with your own API key. Your learning records and your
-`ANTHROPIC_API_KEY` stay on your computer. Each AI request does send its content to Anthropic's
-API. There is no hosted service and no telemetry.
+key stay on your computer. Each AI request still sends its content to Anthropic's API, or through
+OpenRouter if you use it. There's no hosted service. There's no telemetry either.
 
 ## Reporting a vulnerability
 
 Please **do not open a public issue** for security vulnerabilities.
 
-Instead, report privately via GitHub's **[Report a vulnerability](../../security/advisories/new)**
-(the "Security" tab → "Report a vulnerability"). This opens a private advisory visible only to you
-and the maintainer.
+Report it privately with GitHub's **[Report a vulnerability](../../security/advisories/new)**
+button, on the repo's "Security" tab. Only you and the maintainer can see the advisory it opens.
 
 Please include:
 
-- A description of the issue and its impact
-- Steps to reproduce (a minimal proof of concept if possible)
-- The affected version / commit
+- what the issue is and what an attacker could do with it
+- how to reproduce it, with a small proof of concept if you have one
+- the version or commit you tested
 
-You can expect an initial acknowledgment within a few days. Because this is a small,
-volunteer-run project, please allow reasonable time for a fix before any public disclosure.
+Expect a reply within a few days. This is a one-person project, so please allow time for a fix
+before you disclose anything publicly.
 
 ## Good to know
 
-- **Secrets:** never commit your `.env` or API key. If you believe a key was exposed in a commit,
-  rotate it immediately at the Anthropic console.
-- **Artifact fetching** (e.g. shipped-deliverable URLs, arXiv paper ingestion) is deliberately
-  SSRF-guarded: https-only, a host allowlist, and public-IP resolution checks. Reports that
-  strengthen or bypass these guards are especially welcome.
-- **Prompt-injection surfaces:** ingested papers, artifacts, and vault notes are treated as
-  untrusted content in the prompts. Findings that defeat those boundaries are in scope.
+Never commit your `.env` or your API key. If a key ends up in a commit, rotate it at once in
+your provider's console.
+
+The app fetches links you give it, such as a URL for something you built or an arXiv paper. Those
+fetches are guarded against SSRF. Only https is allowed, the host must be on an allowlist, and it
+must resolve to a public address. A way around any of these checks is a very useful report.
+
+Papers, fetched pages and your vault notes go into prompts as untrusted content. A prompt
+injection that gets past that boundary is in scope.
