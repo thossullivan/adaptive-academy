@@ -69,6 +69,12 @@ def slugify(name: str) -> str:
     return re.sub(r"[\W_]+", "-", text).strip("-")
 
 
+def legacy_slugify(name: str) -> str:
+    """The ASCII-only slug exports used before slugify kept other scripts ("Cálculo" was
+    "c-lculo"): an existing note or folder under it is reused, not copied."""
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+
+
 # --- frontmatter -------------------------------------------------------------
 
 def render_frontmatter(data: dict) -> str:
@@ -927,15 +933,22 @@ def export_all_topics(session: Session, vault_path: str) -> ExportAllResult:
     """Mirror every one of the learner's topics into its own `Adaptive Academy/<topic>/`
     folder in one pass. The demo topic is sample data, not the learner's, so it is skipped
     (an explicit single-topic export of it via export_vault still works: that is a choice)."""
+    from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC, UnsafeNote
+
     safe_vault_dir(vault_path)  # validate once, up front
     topics = session.exec(select(Topic).where(col(Topic.is_demo).is_(False))).all()
     written: list[str] = []
     problems: list[str] = []
     for t in topics:
-        res = export_vault(session, t.id, vault_path)
+        try:
+            res = export_vault(session, t.id, vault_path)
+        except UnsafeNote as exc:
+            # This topic's folder or hub can't be written safely: say so, do the rest.
+            session.rollback()
+            problems.append(f"{t.title}: {exc}")
+            continue
         written.extend(res.written)
         problems.extend(res.problems)
-    from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC
 
     NOTEBOOK_SYNC.clear_problem("queue")  # every topic's notes were just rewritten
     return ExportAllResult(topics=len(topics), written=written, problems=problems)

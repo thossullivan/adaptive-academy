@@ -299,8 +299,27 @@ def _solution_lines(item: NotebookItem) -> list[str]:
     return [f"**{_day(item.created_at)}** · Tutor", "", _quote(item.text), ""]
 
 
+def _normalised(body: str) -> str:
+    """A section body as compared: line endings unified, trailing spaces gone, runs of blank
+    lines collapsed to one, no blank lines at either end. Whitespace tidying (an Obsidian
+    plugin that trims lines on save, a blank line added) is not an edit; changed text is."""
+    lines = [line.rstrip() for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    out: list[str] = []
+    for line in lines:
+        if line or (out and out[-1]):
+            out.append(line)
+    while out and not out[-1]:
+        out.pop()
+    return "\n".join(out)
+
+
 def section_digest(body: str) -> str:
-    """Short hash of a section's body (between the marker lines), line endings normalised."""
+    """Short hash of a section's normalised body (between the marker lines)."""
+    return hashlib.sha256(_normalised(body).encode("utf-8")).hexdigest()[:16]
+
+
+def _legacy_digest(body: str) -> str:
+    """The hash sections were first written with (line endings only): still accepted."""
     norm = body.replace("\r\n", "\n").replace("\r", "\n")
     if norm.endswith("\n"):
         norm = norm[:-1]
@@ -318,8 +337,11 @@ def render_notebook_section(nb: Notebook, verdict: str, summary: str = "") -> st
         f"**Verdict:** {verdict}",
         "",
     ]
-    if summary.strip():
-        lines += [_neutral(summary.strip()), ""]
+    # The summary comes as Markdown hard-broken lines ("  \n"): one paragraph per line here,
+    # so no line ends in spaces.
+    for part in summary.split("\n"):
+        if part.strip():
+            lines += [_neutral(part.strip()), ""]
     lines += [
         "Adaptive Academy writes this section and rewrites it on every sync. Write your own "
         "notes above or below it, not inside it: once this section is edited here, syncing "
@@ -334,6 +356,9 @@ def render_notebook_section(nb: Notebook, verdict: str, summary: str = "") -> st
     lines += _part("My attempts", by_kind["attempt"], _attempt_lines)
     lines += _part("My explanations", by_kind["explanation"], _explanation_lines)
     lines += _part("Worked solutions", by_kind["solution"], _solution_lines)
+    # No trailing spaces anywhere (a learner's Markdown hard break included): a plugin that
+    # trims lines on save must not look like an edit.
+    lines = [line.rstrip() for line in "\n".join(lines).split("\n")]
     while lines and lines[-1] == "":
         lines.pop()
     body = "\n".join(lines)
@@ -394,28 +419,81 @@ def splice_notebook_section(text: str, section: str) -> str:
                           else "the notebook markers don't pair up")
     (s, _), (e, _) = marks
     match = _SHA.search(lines[s])
-    if match and section_digest("".join(lines[s + 1:e])) != match.group(1):
+    on_disk = "".join(lines[s + 1:e])
+    if match and match.group(1) not in (section_digest(on_disk), _legacy_digest(on_disk)):
         raise SectionEdited("the notebook section was edited in the note")
     ending = lines[e][len(lines[e].rstrip("\r\n")):]
     return "".join(lines[:s]) + section + ending + "".join(lines[e + 1:])
 
 
-_FRONTMATTER_KEY = re.compile(r"^(?P<key>[A-Za-z0-9_-]+)\s*:")
+_FRONTMATTER_KEY = re.compile(r"^(?P<key>[A-Za-z0-9_-]+)\s*:(?P<value>.*)$")
+
+
+def frontmatter_block(text: str) -> tuple[list[str], int] | None:
+    """The note's lines (endings kept) and the index of the line closing its frontmatter,
+    or None when the note has no closed frontmatter block (`---` first, then a line that is
+    `---` or `...` once whitespace is stripped)."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return None
+    for i in range(1, len(lines)):
+        if lines[i].strip() in ("---", "..."):
+            return lines, i
+    return None
+
+
+def _top_level_keys(lines: list[str], end: int):
+    """(index, key, value) for each top-level key line inside the block, skipping the
+    continuation lines of a quoted value that spans lines and of indented values."""
+    quote = ""
+    for i in range(1, end):
+        bare = lines[i].rstrip("\r\n")
+        if quote:
+            # Inside a multi-line quoted value: find its closing quote ('' is an escaped ').
+            scan = bare.replace("''", "") if quote == "'" else bare.replace('\\"', "")
+            if quote in scan:
+                quote = ""
+            continue
+        m = _FRONTMATTER_KEY.match(bare)
+        if not m:
+            continue
+        yield i, m.group("key"), m.group("value")
+        value = m.group("value").strip()
+        if value[:1] in ("'", '"'):
+            q = value[0]
+            rest = value[1:].replace("''", "") if q == "'" else value[1:].replace('\\"', "")
+            if q not in rest:
+                quote = q
+
+
+def frontmatter_values(text: str) -> dict[str, str]:
+    """Top-level scalar values of a closed frontmatter block, YAML quotes removed."""
+    found = frontmatter_block(text)
+    if found is None:
+        return {}
+    lines, end = found
+    return {key: unquote(value) for _, key, value in _top_level_keys(lines, end)}
+
+
+def unquote(value: str) -> str:
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] == "'":
+        return v[1:-1].replace("''", "'")
+    if len(v) >= 2 and v[0] == v[-1] == '"':
+        return v[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    return v
 
 
 def set_frontmatter_value(text: str, key: str, value: str) -> str:
-    """Set an existing `key:` line's value in the note's YAML frontmatter, and nothing else:
-    no frontmatter, or no such key, leaves the text as it was."""
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].rstrip("\r\n") != "---":
+    """Set an existing top-level `key:` line's value inside the note's closed frontmatter
+    block, and nothing else: no closed block, or no such key, leaves the text as it was."""
+    found = frontmatter_block(text)
+    if found is None:
         return text
-    for i in range(1, len(lines)):
-        bare = lines[i].rstrip("\r\n")
-        if bare in ("---", "..."):
-            return text
-        m = _FRONTMATTER_KEY.match(bare)
-        if m and m.group("key") == key:
-            ending = lines[i][len(bare):]
-            lines[i] = f"{key}: {value}{ending}"
+    lines, end = found
+    for i, k, _ in _top_level_keys(lines, end):
+        if k == key:
+            bare = lines[i].rstrip("\r\n")
+            lines[i] = f"{key}: {value}{lines[i][len(bare):]}"
             return "".join(lines)
     return text

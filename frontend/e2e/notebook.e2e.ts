@@ -249,3 +249,37 @@ test('clearing the vault folder stops notebooks syncing to it', async ({ page })
   await expect.poll(() => syncs.includes('')).toBe(true);
   expect(await page.evaluate(() => localStorage.getItem('aa_vault_path'))).toBeNull();
 });
+
+test('the vault set by AA_OBSIDIAN_VAULT_PATH shows its sync state, and clearing the field never claims it stopped', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const envSync = {
+    path: '/vault',
+    source: 'env',
+    last_synced_at: null,
+    last_error: "Couldn't update c-2.md: its notebook section was edited in Obsidian",
+    last_error_at: '2026-10-22T09:00:00',
+    problems: 1,
+    pending: 0
+  };
+  await page.route('**/api/vault/status**', (r) =>
+    r.fulfill({ json: { configured: true, path: '/vault', exists: true, is_dir: true, note_count: 3, sync: envSync } })
+  );
+  await page.route('**/api/vault/sync', (r) => r.fulfill({ json: envSync }));
+
+  await page.goto(`/topics/${topic.id}/vault`);
+  await settle(page);
+  const sync = page.getByTestId('vault-sync');
+  await expect(sync).toContainText('Notes sync to /vault (set by AA_OBSIDIAN_VAULT_PATH). To stop, leave it empty in .env and restart.');
+  await expect(sync).toContainText("Couldn't update c-2.md");
+
+  // A folder saved in this browser, then cleared: the env vault is still where notes go.
+  await page.evaluate(() => localStorage.setItem('aa_vault_path', '/somewhere'));
+  await page.reload();
+  await settle(page);
+  const field = page.getByRole('textbox', { name: 'Vault folder path' });
+  await expect(field).toHaveValue('/somewhere');
+  await field.fill('');
+  await field.blur();
+  await expect(page.getByRole('status').filter({ hasText: 'set by AA_OBSIDIAN_VAULT_PATH' }).first()).toBeAttached();
+  await expect(page.getByText('no longer sync')).toHaveCount(0);
+});

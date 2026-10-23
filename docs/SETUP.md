@@ -152,8 +152,10 @@ The app answers only when you open it as `localhost`, `127.0.0.1` or `[::1]`. An
 name gets an error. This stops a web page on another site from reaching the app by pointing
 its own domain at your machine. To open the app under another name, for example a name on
 your own network, list it in `.env` as `AA_ALLOWED_HOSTS=mybox.local` (several names are
-separated by commas) and restart the API. The app has no login, so only add names on a
-network you trust.
+separated by commas) and restart the API. A name that starts with `*.` covers every name
+under it: OrbStack users who open the container at its `.orb.local` address can add
+`AA_ALLOWED_HOSTS=*.orb.local`. The app has no login, so only add names on a network you
+trust.
 
 ## Time zone
 

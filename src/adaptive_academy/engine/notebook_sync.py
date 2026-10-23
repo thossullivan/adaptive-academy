@@ -10,25 +10,34 @@ verdict and the latest-assessment summary live inside the section. Notes exporte
 change keep their old `**Verdict:**` body line as it was (it is outside the markers); the
 current verdict is the one in the section and the frontmatter.
 
-The section's start marker carries a hash of what was written. If the section on disk no longer
-matches (edited in Obsidian), the sync leaves the note alone and reports it on the vault status.
+The section's start marker carries a hash of what was written (whitespace-normalised: trailing
+spaces, blank-line runs and line endings don't count, and the section is written without
+trailing spaces). If the section's text on disk no longer matches (edited in Obsidian), the
+sync leaves the note alone and reports it on the vault status.
 
 Names: folders and files use vault.slugify (letters in any script). A name that slugs to nothing
 falls back to `topic-<id>` / `concept-<id>`; names that slug alike get an `-<id>` suffix (the
-lowest id keeps the plain name); and a file whose frontmatter says it belongs to another topic
-or concept (`topic_id` / `concept_id`, or for older notes the title) is never written: the
-id-suffixed name is used instead. A topic folder is claimed by its hub note, which a sync
+lowest id keeps the plain name); an existing note or folder of this topic or concept under the
+name the previous ASCII-only slug gave it is reused rather than copied; and a file whose
+frontmatter says it belongs to another topic or concept (`topic_id` / `concept_id`, or for
+older notes the title, compared without YAML quotes) is never written: the id-suffixed name is
+used instead. Ownership is checked again on the text read under the write lock, so a note
+that changed hands after an export planned its path is still left alone. The frontmatter
+`verdict:` is edited only inside a closed frontmatter block, and only on a note the app made
+(our concept_id, or our title with the adaptive-academy tag). A topic folder is claimed by its hub note, which a sync
 creates when it is missing.
 
 Where the vault is: the path the browser last registered (PUT /api/vault/sync, or a note saved
-with a vault_path; it must be an Obsidian vault, with a `.obsidian` folder), else
-AA_OBSIDIAN_VAULT_PATH (trusted as set). The registered path is process state, like the
+with a vault_path; it must be an Obsidian vault, with a `.obsidian` folder, which may be a
+link to a folder), else AA_OBSIDIAN_VAULT_PATH (trusted as set; only .env turns it off). The registered path is process state, like the
 browser's own copy of it; the frontend registers it again on load.
 
 When it runs: a commit that adds, changes or deletes a ConceptNote, an Attempt, an Assessment,
 or a revealed-solution Message queues that concept (SQLAlchemy session events, so every write
 site is covered without each one calling in). Keys are kept until the outermost transaction
-ends: a rolled-back savepoint (the embedder's) does not drop them. One background thread works
+ends: a savepoint (every memory.index_* call opens one) neither queues them when it is
+released nor drops them when it is rolled back; only the outermost commit queues them, and
+only its rollback forgets them. One background thread works
 the queue, after the request has answered: a sync never holds up or fails the action that
 triggered it. The queue is a capped, de-duplicated set, and each write is bounded
 (notebook.SECTION_* caps, a note-size cap). An engine with a StaticPool (the in-memory test
@@ -69,6 +78,7 @@ from adaptive_academy.engine.notebook import (
     SectionEdited,
     build_notebook,
     render_notebook_section,
+    frontmatter_values,
     set_frontmatter_value,
     splice_notebook_section,
 )
@@ -76,7 +86,7 @@ from adaptive_academy.engine.vault import (
     EXPORT_FOLDER,
     _concept_verdict_summary,
     _read_text,
-    parse_frontmatter,
+    legacy_slugify,
     render_frontmatter,
     safe_child,
     safe_vault_dir,
@@ -177,9 +187,12 @@ def _replace_if_unchanged(path: Path, content: str, signature: tuple, mode: int)
 
 
 def write_note_file(vault: Path, path: Path, header: str, section: str,
-                    verdict: str | None = None) -> None:
+                    verdict: str | None = None, *, concept: Concept | None = None) -> None:
     """Create the note (header + section) or splice the section into it, and set the
-    frontmatter `verdict:` value when the note has that key.
+    frontmatter `verdict:` value when the note is one the app made for `concept`.
+
+    With `concept`, ownership is checked again on the text read here, under the write lock:
+    a note that became another concept's since its path was chosen is left alone.
 
     Raises MarkerError (SectionEdited included) or UnsafeNote and leaves the note as it was
     when it can't be done safely; other OSErrors (permissions, a full disk) propagate."""
@@ -190,8 +203,12 @@ def write_note_file(vault: Path, path: Path, header: str, section: str,
                 if _create_exclusive(path, header.rstrip("\n") + "\n\n" + section + "\n"):
                     return
                 continue  # created meanwhile (Obsidian): update it instead
+            fm = frontmatter_values(existing)
+            if concept is not None and not _owns(fm, "concept_id", concept.id, concept.name):
+                raise UnsafeNote(f"{path.name} belongs to another note now, so it was left "
+                                 "alone")
             content = splice_notebook_section(existing, section)
-            if verdict is not None:
+            if verdict is not None and (concept is None or _made_by_us(fm, concept)):
                 content = set_frontmatter_value(content, "verdict", verdict)
             if content == existing:
                 return
@@ -223,7 +240,8 @@ def _candidates(planned: str, ident: int) -> list[str]:
 
 
 def _head_frontmatter(vault: Path, path: Path) -> dict | None:
-    """The frontmatter of an existing note (None when there is no file)."""
+    """The frontmatter values of an existing note, YAML quotes removed (None when there is
+    no file, {} when it has no closed frontmatter block)."""
     try:
         st = os.lstat(path)
     except FileNotFoundError:
@@ -234,17 +252,36 @@ def _head_frontmatter(vault: Path, path: Path) -> dict | None:
         text = _read_text(path, vault=vault, limit=8_000, errors="strict")
     except UnicodeError:
         return {}
-    return parse_frontmatter(text)[0]
+    return frontmatter_values(text)
 
 
 def _owns(fm: dict, id_key: str, ident: int, title: str) -> bool:
     """Whether an existing note at our path is this topic's or concept's: its id key says
     so, or (older notes, written before the id) its title does. A note with neither, inside
-    the app's own folder, is taken as ours: every note of another concept has one of them."""
+    the app's own folder, is taken as ours: every note of another concept has one of them.
+    Values compare without YAML quotes (Obsidian's Properties editor may add them)."""
     if fm.get(id_key, "").strip():
         return fm[id_key].strip() == str(ident)
     existing = fm.get("title", "").strip()
     return not existing or existing == title.strip()
+
+
+def _names_us(fm: dict | None, id_key: str, ident: int, title: str) -> bool:
+    """Stricter than _owns: the note says it is ours (id, or title), not just "no owner"."""
+    if not fm:
+        return False
+    if fm.get(id_key, "").strip():
+        return fm[id_key].strip() == str(ident)
+    return fm.get("title", "").strip() == title.strip()
+
+
+def _made_by_us(fm: dict, concept: Concept) -> bool:
+    """A note the app made for this concept: it carries our concept_id, or (exported before
+    the id) our title and the adaptive-academy tag. Only then is its `verdict:` the app's."""
+    if fm.get("concept_id", "").strip():
+        return fm["concept_id"].strip() == str(concept.id)
+    return (fm.get("title", "").strip() == concept.name.strip()
+            and "adaptive-academy" in fm.get("tags", ""))
 
 
 def topic_concepts(session: Session, topic_id: int) -> list[Concept]:
@@ -257,9 +294,26 @@ def planned_concept_stems(concepts: list[Concept]) -> dict[int, str]:
     return _planned([(c.id, c.name) for c in concepts], "concept")
 
 
+def _adopt(vault: Path, folder: Path, names: list[str], id_key: str, ident: int,
+           title: str, file_of) -> str | None:  # noqa: ANN001
+    """The first of `names` whose existing note says it is ours (an export made under that
+    name, before a slug change): reused instead of starting a second copy."""
+    for stem in dict.fromkeys(n for n in names if n):
+        if _names_us(_head_frontmatter(vault, file_of(folder, stem)), id_key, ident, title):
+            return stem
+    return None
+
+
 def concept_note_path(vault: Path, concepts_dir: Path, concept: Concept, planned: str) -> Path:
-    """This concept's note path: the planned name unless that file is another note's, then
-    the id-suffixed one. Never another concept's note (UnsafeNote when both are taken)."""
+    """This concept's note path: an existing note of this concept under the planned name or
+    the name the previous slug rules gave it (legacy_slugify), else the planned name unless
+    that file is another note's, then the id-suffixed one. Never another concept's note
+    (UnsafeNote when both are taken)."""
+    adopted = _adopt(vault, concepts_dir, [planned, legacy_slugify(concept.name)],
+                     "concept_id", concept.id, concept.name,
+                     lambda folder, stem: folder / f"{stem}.md")
+    if adopted is not None:
+        return concepts_dir / f"{adopted}.md"
     for stem in _candidates(planned, concept.id):
         # Not resolved: a note that is itself a symlink must be seen (and refused) as one.
         path = concepts_dir / f"{stem}.md"
@@ -283,6 +337,13 @@ def topic_folder(session: Session, vault: Path, topic: Topic) -> tuple[Path, str
     topics = [(t.id, t.title) for t in session.exec(select(Topic)).all()]
     planned = _planned(topics, "topic")[topic.id]
     with _WRITE_LOCK:
+        # A folder this topic was exported to under the previous slug rules is kept.
+        root = safe_child(vault, EXPORT_FOLDER)
+        adopted = _adopt(vault, root, [planned, legacy_slugify(topic.title)], "topic_id",
+                         topic.id, topic.title,
+                         lambda folder, stem: folder / stem / f"{stem}.md")
+        if adopted is not None:
+            return safe_child(vault, EXPORT_FOLDER, adopted), adopted
         for stem in _candidates(planned, topic.id):
             folder = safe_child(vault, EXPORT_FOLDER, stem)
             hub = folder / f"{stem}.md"
@@ -344,8 +405,15 @@ def write_concept_note(session: Session, vault: Path, topic: Topic, concept: Con
                                      planned.get(concept.id, f"concept-{concept.id}"))
         verdict, summary = _concept_verdict_summary(session, concept)
         section = render_notebook_section(build_notebook(session, concept), verdict, summary)
-        write_note_file(vault, path, render_note_header(concept, verdict, hub_stem), section,
-                        verdict)
+        try:
+            write_note_file(vault, path, render_note_header(concept, verdict, hub_stem),
+                            section, verdict, concept=concept)
+        except OSError as exc:
+            exc.note_name = path.name  # problems name the note that was actually checked
+            raise
+        except MarkerError as exc:
+            exc.note_name = path.name
+            raise
     return path
 
 
@@ -414,6 +482,7 @@ class NotebookSync:
             latest = max(self._problems.values(), key=lambda p: p[1], default=None)
             return {
                 "path": sync_vault_path(),
+                "source": sync_vault_source(),
                 "last_synced_at": self._last_ok,
                 "last_error": latest[0] if latest else "",
                 "last_error_at": latest[1] if latest else None,
@@ -558,6 +627,7 @@ class NotebookSync:
             if written is not None:
                 self.note_ok(concept_id)
         except Exception as exc:  # noqa: BLE001 - a sync never fails anything; it reports
+            note = getattr(exc, "note_name", note)
             self.record_problem(concept_id, f"Couldn't update {note}: {problem_text(exc)}",
                                 topic_id=topic_id, bind=bind)
 
@@ -575,7 +645,7 @@ def register_vault_path(path: str) -> str:
     if path:
         vault = safe_vault_dir(path)
         marker = vault / ".obsidian"
-        if marker.is_symlink() or not marker.is_dir():
+        if not marker.is_dir():  # follows a symlink: a linked .obsidian folder is fine
             raise ValueError(
                 f"{vault} is not an Obsidian vault: it has no .obsidian folder. Pick the "
                 "vault's top folder, the one you open in Obsidian.")
@@ -588,6 +658,14 @@ def register_vault_path(path: str) -> str:
 
 def sync_vault_path() -> str:
     return NOTEBOOK_SYNC.path or (settings.obsidian_vault_path or "").strip()
+
+
+def sync_vault_source() -> str:
+    """Where the sync target comes from: "browser" (registered), "env"
+    (AA_OBSIDIAN_VAULT_PATH), or "" when notes sync nowhere."""
+    if NOTEBOOK_SYNC.path:
+        return "browser"
+    return "env" if (settings.obsidian_vault_path or "").strip() else ""
 
 
 # --- write triggers --------------------------------------------------------------------------
@@ -648,6 +726,11 @@ def _collect(session: OrmSession, _flush_context) -> None:  # noqa: ANN001
 
 @event.listens_for(OrmSession, "after_commit")
 def _queue(session: OrmSession) -> None:
+    # after_commit also fires when a SAVEPOINT is released (every memory.index_* call uses
+    # begin_nested); the outer transaction is still open then and its rows are not visible
+    # to the writer yet. Keep the keys until the outermost commit.
+    if session.in_nested_transaction():
+        return
     keys = session.info.pop(_INFO_KEY, None)
     if not keys:
         return

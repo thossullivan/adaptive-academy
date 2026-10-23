@@ -9,7 +9,7 @@ from adaptive_academy.settings import settings
 
 
 @pytest.mark.parametrize("host", ["localhost", "localhost:8000", "127.0.0.1:5173", "[::1]:8000",
-                                  "[::1]", "testserver", "LOCALHOST:8000"])
+                                  "[::1]", "0.0.0.0:8000", "LOCALHOST:8000"])
 def test_local_names_are_answered(host):
     client = TestClient(create_app())
     assert client.get("/api/health", headers={"host": host}).status_code == 200
@@ -35,4 +35,14 @@ def test_extra_names_come_from_the_setting(monkeypatch):
 def test_host_parsing():
     assert host_name("[::1]:8000") == "[::1]"
     assert host_name("Example.COM:80") == "example.com"
-    assert allowed_hosts("a.b, ,A.B") == ["localhost", "127.0.0.1", "[::1]", "testserver", "a.b"]
+    assert allowed_hosts("a.b, ,A.B") == ["localhost", "127.0.0.1", "[::1]", "0.0.0.0", "a.b"]
+
+
+def test_testserver_is_allowed_only_because_the_tests_say_so(monkeypatch):
+    """TestClient's Host is "testserver": the suite allows it via AA_ALLOWED_HOSTS
+    (tests/_isolated_env.py); an install never does by default."""
+    assert "testserver" not in allowed_hosts("")
+    assert settings.allowed_hosts == "testserver"
+    monkeypatch.setattr(settings, "allowed_hosts", "")
+    client = TestClient(create_app())
+    assert client.get("/api/health").status_code == 400

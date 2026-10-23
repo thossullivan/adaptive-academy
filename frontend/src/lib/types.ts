@@ -150,6 +150,8 @@ export interface TeachResult { score: number; feedback: string; strengths: strin
 export interface VaultSync {
   /** Where notebooks sync; "" when nowhere. */
   path: string;
+  /** Where that path comes from: the browser (Vault page), AA_OBSIDIAN_VAULT_PATH, or "". */
+  source?: 'browser' | 'env' | '';
   last_synced_at: string | null;
   /** The most recent note that couldn't be updated, and why; "" when none. */
   last_error: string;

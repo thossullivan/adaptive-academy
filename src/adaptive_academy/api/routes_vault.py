@@ -23,7 +23,11 @@ from adaptive_academy.api.schemas import (
     VaultSyncIn,
     VaultSyncOut,
 )
-from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC, register_vault_path
+from adaptive_academy.engine.notebook_sync import (
+    NOTEBOOK_SYNC,
+    UnsafeNote,
+    register_vault_path,
+)
 from adaptive_academy.engine.vault import (
     export_all_topics,
     export_vault,
@@ -99,6 +103,9 @@ def export(
     try:
         res = export_vault(session, topic_id, _resolve_path(body.vault_path))
     except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except UnsafeNote as e:
+        # The topic's folder or hub note can't be written safely (another topic's, a link).
         raise HTTPException(400, str(e)) from e
     except OSError as e:
         if e.errno not in _UNWRITABLE:

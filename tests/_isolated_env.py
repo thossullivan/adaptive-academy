@@ -45,6 +45,8 @@ ISOLATED_ENV = {
     # settings.embedding_cache_dir (OnnxEmbedder) and fastembed's own fallback location.
     "AA_EMBEDDING_CACHE_DIR": str(EMBEDDING_CACHE),
     "FASTEMBED_CACHE_PATH": str(EMBEDDING_CACHE),
+    # settings.allowed_hosts: TestClient sends Host "testserver", which production refuses.
+    "AA_ALLOWED_HOSTS": "testserver",
     # settings.frontend_dist: read-only, but pinned so a local build never changes routing.
     "AA_FRONTEND_DIST": str(TEST_DATA_DIR / "frontend_build"),
 }

@@ -449,6 +449,9 @@ class VaultSyncOut(BaseModel):
     """Concept-notebook sync to the vault (engine/notebook_sync.py)."""
 
     path: str = ""  # where notebooks sync; "" = nowhere
+    # Where that path comes from: "browser" (PUT /api/vault/sync), "env"
+    # (AA_OBSIDIAN_VAULT_PATH, which only .env can turn off), or "".
+    source: Literal["browser", "env", ""] = ""
     last_synced_at: Optional[datetime] = None
     # The most recent problem still unresolved (a note that couldn't be updated), else "".
     last_error: str = ""

@@ -5,7 +5,7 @@
   import { toasts } from '$lib/toast.svelte';
   import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, VaultSync } from '$lib/types';
   import { timeAgo } from '$lib/events';
-  import { updateSyncTarget } from '$lib/notebook';
+  import { clearedSyncText, syncTargetText, updateSyncTarget } from '$lib/notebook';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Input, Badge, LiveStatus } from '$lib/ui';
   import MemorySearchResults from './MemorySearchResults.svelte';
@@ -56,8 +56,17 @@
   onMount(() => {
     path = localStorage.getItem(STORE_KEY) ?? '';
     if (path) check();
+    else loadDefaultStatus();
     loadStats();
   });
+
+  // No folder saved in this browser: show the AA_OBSIDIAN_VAULT_PATH vault, if one is set
+  // (Docker sets /vault), so its sync state and problems are visible too.
+  async function loadDefaultStatus() {
+    const st = await api.vaultStatus('').catch(() => null);
+    sync = st?.sync ?? null;
+    status = st?.configured ? st : null;
+  }
 
   async function check() {
     error = '';
@@ -92,9 +101,10 @@
     } catch {
       /* storage blocked */
     }
-    status = null;
     await registerSync(false);
-    announce = 'Notebooks no longer sync to a vault set in this browser.';
+    await loadDefaultStatus();
+    // With AA_OBSIDIAN_VAULT_PATH set, notes still sync there: say so, never "stopped".
+    announce = clearedSyncText(sync);
   }
 
   const ready = $derived(!!status?.is_dir);
@@ -224,12 +234,11 @@
         {#if syncError}
           <p class="text-sm text-danger" role="status" data-testid="vault-sync-error">{syncError}</p>
         {/if}
-        {#if status?.is_dir && sync}
+        {#if sync && (sync.path || sync.last_error)}
           <div class="text-sm text-fg-dim" data-testid="vault-sync">
             {#if sync.path}
-              <p>
-                Concept notebooks sync here: notes, attempts, explanations, and worked solutions go into each concept's note,
-                between two marker lines. Everything else in the note stays yours.
+              <p class="[overflow-wrap:anywhere]">
+                {syncTargetText(sync)}
                 {#if sync.last_synced_at}<span class="text-faint">Last synced {timeAgo(sync.last_synced_at)}.</span>{/if}
               </p>
             {/if}

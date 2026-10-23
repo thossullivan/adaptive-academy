@@ -1,6 +1,6 @@
 // Concept notebook helpers: a concept's notes and work in one place (GET /api/concepts/{id}/notebook).
 
-import type { ConceptNote, NotebookItem, NotebookSource } from './types';
+import type { ConceptNote, NotebookItem, NotebookSource, VaultSync } from './types';
 
 /** Mirrors engine/notebook.py NOTE_MAX_CHARS (tests/test_frontend_constants.py keeps them equal). */
 export const NOTE_MAX_CHARS = 50000;
@@ -212,4 +212,20 @@ export async function updateSyncTarget<T>(
   const p = path.trim();
   if (!p) return vaultSync('');
   return isDir ? vaultSync(p) : null;
+}
+
+/** What the Vault page says about notebook sync. Honest about AA_OBSIDIAN_VAULT_PATH: only
+ *  .env turns that vault off, so clearing the field never "stops" it. */
+export function syncTargetText(sync: Pick<VaultSync, 'path' | 'source'> | null): string {
+  if (!sync?.path) return 'Notebooks do not sync to a vault. Check a vault folder above to start.';
+  if (sync.source === 'env') {
+    return `Notes sync to ${sync.path} (set by AA_OBSIDIAN_VAULT_PATH). To stop, leave it empty in .env and restart.`;
+  }
+  return `Notes sync to ${sync.path}: notes, attempts, explanations, and worked solutions go into each concept's note, between two marker lines. Everything else in the note stays yours.`;
+}
+
+/** What to announce after the field was cleared, given where sync points now. */
+export function clearedSyncText(sync: Pick<VaultSync, 'path' | 'source'> | null): string {
+  if (sync?.path && sync.source === 'env') return syncTargetText(sync);
+  return 'Notebooks no longer sync to a vault set in this browser.';
 }

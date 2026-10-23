@@ -207,3 +207,30 @@ def test_the_json_export_includes_concept_notes(session, tmp_path):
         assert con.execute("SELECT body FROM concept_note").fetchall() == [("exported words",)]
     finally:
         con.close()
+
+
+def test_sync_status_says_where_the_vault_comes_from(client, session, tmp_path, monkeypatch):
+    from adaptive_academy.settings import settings
+
+    assert client.get("/api/vault/status").json()["sync"]["source"] == ""
+    monkeypatch.setattr(settings, "obsidian_vault_path", "/vault")
+    st = client.get("/api/vault/status").json()
+    assert st["sync"]["path"] == "/vault" and st["sync"]["source"] == "env"
+    (tmp_path / ".obsidian").mkdir()
+    assert client.put("/api/vault/sync", json={"vault_path": str(tmp_path)}).json()["source"] == (
+        "browser")
+    # Clearing the browser's path falls back to the env vault, and says so.
+    cleared = client.put("/api/vault/sync", json={"vault_path": ""}).json()
+    assert cleared["path"] == "/vault" and cleared["source"] == "env"
+
+
+def test_exporting_a_topic_whose_folder_is_taken_is_a_400(client, session, tmp_path):
+    topic, _ = _seed(session)
+    root = tmp_path / EXPORT_FOLDER
+    for stem, owner in (("build-llms", 998), (f"build-llms-{topic.id}", 999)):
+        (root / stem).mkdir(parents=True)
+        (root / stem / f"{stem}.md").write_text(f"---\ntitle: Other\ntopic_id: {owner}\n---\n")
+    r = client.post(f"/api/topics/{topic.id}/vault/export", json={"vault_path": str(tmp_path)})
+    assert r.status_code == 400 and "belongs to another topic" in r.json()["detail"]
+    r = client.post("/api/vault/export-all", json={"vault_path": str(tmp_path)})
+    assert r.status_code == 200 and len(r.json()["problems"]) == 1

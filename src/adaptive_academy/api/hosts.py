@@ -16,8 +16,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import Receive, Scope, Send
 
-# This machine by name and address, and FastAPI's TestClient ("testserver").
-LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]", "testserver")
+# This machine by name and address. 0.0.0.0 is an address, so no DNS name can be rebound to
+# it. (The test suite adds TestClient's "testserver" through AA_ALLOWED_HOSTS.)
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]", "0.0.0.0")
 
 
 def allowed_hosts(extra: str = "") -> list[str]:

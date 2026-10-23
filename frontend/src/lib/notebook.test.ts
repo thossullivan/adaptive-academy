@@ -3,6 +3,8 @@ import type { ConceptNote, NotebookItem } from './types';
 import {
   NOTE_MAX_CHARS,
   NoteSaver,
+  clearedSyncText,
+  syncTargetText,
   draftStore,
   settledSave,
   trackSave,
@@ -271,5 +273,35 @@ describe('updateSyncTarget', () => {
     expect(await updateSyncTarget(sync, '/not/a/folder', false)).toBeNull();
     expect((await updateSyncTarget(sync, ' /vault ', true))?.path).toBe('/vault');
     expect(calls).toEqual(['', '/vault']);
+  });
+});
+
+describe('what the Vault page says about notebook sync', () => {
+  it('names the env vault and how to really turn it off', () => {
+    const env = { path: '/vault', source: 'env' as const };
+    expect(syncTargetText(env)).toBe(
+      'Notes sync to /vault (set by AA_OBSIDIAN_VAULT_PATH). To stop, leave it empty in .env and restart.'
+    );
+    // Clearing the field never claims syncing stopped while the env vault is in effect.
+    expect(clearedSyncText(env)).toBe(syncTargetText(env));
+    expect(clearedSyncText(env)).not.toMatch(/no longer/);
+  });
+
+  it('says syncing stopped only when nothing is left to sync to', () => {
+    expect(clearedSyncText({ path: '', source: '' })).toBe('Notebooks no longer sync to a vault set in this browser.');
+    expect(clearedSyncText(null)).toMatch(/no longer/);
+    expect(syncTargetText({ path: '/v', source: 'browser' })).toMatch(/^Notes sync to \/v:/);
+    expect(syncTargetText(null)).toMatch(/do not sync/);
+  });
+
+  it('uses plain words', () => {
+    for (const t of [
+      syncTargetText({ path: '/v', source: 'env' }),
+      syncTargetText({ path: '/v', source: 'browser' }),
+      syncTargetText(null),
+      clearedSyncText(null)
+    ]) {
+      expect(t).not.toMatch(/[—–!]/);
+    }
   });
 });
