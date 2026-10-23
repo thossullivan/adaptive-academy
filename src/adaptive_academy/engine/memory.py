@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import re
 import threading
@@ -15,7 +16,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import or_
+from sqlalchemy import Connection, Engine, or_
 from sqlmodel import Session, col, select
 
 from adaptive_academy.engine.fetch import fetch_artifact_text
@@ -43,6 +44,8 @@ if TYPE_CHECKING:
     from adaptive_academy.engine.levels import Levels
     from adaptive_academy.llm.embedder_types import Embedder
     from adaptive_academy.llm.retriever_types import Retriever
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_K = 6
 INJECT_BUDGET_CHARS = 2400
@@ -767,32 +770,51 @@ def index_source_doc(
     if doc.id is None:
         raise ValueError("source document must be flushed before indexing")
 
-    if doc.url.startswith("file://"):
-        vault_chunks = session.exec(
-            select(Chunk).where(
-                Chunk.kind == "vault_note",
-                Chunk.source_ref == doc.url,
-            )
-        ).all()
-        if vault_chunks:
-            return IndexResult(indexed=0, skipped=len(vault_chunks), removed=0)
+    vault_skips = _vault_backed_chunks(session, doc)
+    if vault_skips:
+        return IndexResult(indexed=0, skipped=vault_skips, removed=0)
+    text, problem = _fetch_source_text(doc.url, fetch)
+    return _index_fetched_source(session, doc, text, problem, retriever=retriever)
 
-    try:
-        text = fetch(doc.url)
-    except Exception as exc:
-        _add_memory_event(
-            session,
-            kind="memory:fetch_skipped",
-            detail=f"sourcedoc:{doc.id} {type(exc).__name__}: {exc}",
-            event_target={"topic_id": doc.topic_id},
+
+def _vault_backed_chunks(session: Session, doc: SourceDoc) -> int:
+    """A file:// source already indexed as a vault note is not fetched again."""
+    if not doc.url.startswith("file://"):
+        return 0
+    return len(session.exec(
+        select(Chunk).where(
+            Chunk.kind == "vault_note",
+            Chunk.source_ref == doc.url,
         )
-        return IndexResult(indexed=0, skipped=1, removed=0)
+    ).all())
 
+
+def _fetch_source_text(
+    url: str, fetch: Callable[[str], str | None]
+) -> tuple[str | None, str | None]:
+    """Return (text, None) or (None, why it was skipped). Touches no database state."""
+    try:
+        text = fetch(url)
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
     if not text or not text.strip():
+        return None, "empty response"
+    return text, None
+
+
+def _index_fetched_source(
+    session: Session,
+    doc: SourceDoc,
+    text: str | None,
+    problem: str | None,
+    *,
+    retriever: Retriever | None,
+) -> IndexResult:
+    if text is None:
         _add_memory_event(
             session,
             kind="memory:fetch_skipped",
-            detail=f"sourcedoc:{doc.id} empty response",
+            detail=f"sourcedoc:{doc.id} {problem}",
             event_target={"topic_id": doc.topic_id},
         )
         return IndexResult(indexed=0, skipped=1, removed=0)
@@ -806,6 +828,57 @@ def index_source_doc(
         heading=doc.title,
         retriever=retriever,
     )
+
+
+def index_accepted_sources(
+    bind: Engine | Connection,
+    source_ids: list[int],
+    *,
+    fetch: Callable[[str], str | None] = fetch_artifact_text,
+    retriever: Retriever | None = None,
+) -> None:
+    """Fetch and index sources the learner just accepted, after the review request returned.
+
+    Each source gets its own short sessions: a read, the network fetch with no session open,
+    then one write transaction. No write lock spans a fetch, so a second save (or any other
+    writer) waits at most for one source's write. A source pruned meanwhile is left alone. A
+    failure on one source is logged as an event and never touches the saved statuses.
+    """
+    for source_id in source_ids:
+        topic_id = None
+        try:
+            with Session(bind) as session:
+                doc = session.get(SourceDoc, source_id)
+                if doc is None or doc.status != "accepted" or _vault_backed_chunks(session, doc):
+                    continue
+                url, topic_id = doc.url, doc.topic_id
+            text, problem = _fetch_source_text(url, fetch)
+            with Session(bind) as session:
+                doc = session.get(SourceDoc, source_id)
+                if doc is None or doc.status != "accepted":
+                    continue
+                _index_fetched_source(session, doc, text, problem, retriever=retriever)
+                # The flush took the write lock, so this re-read can't miss a prune that
+                # committed after the check above.
+                session.flush()
+                session.refresh(doc)
+                if doc.status != "accepted":
+                    session.rollback()
+                    continue
+                session.commit()
+        except Exception as exc:
+            try:
+                with Session(bind) as session:
+                    _add_memory_event(
+                        session,
+                        kind="memory:index_skipped",
+                        detail=f"sourcedoc:{source_id} {type(exc).__name__}: {exc}"[:400],
+                        event_target={"topic_id": topic_id},
+                    )
+                    session.commit()
+            except Exception:
+                logger.exception("could not record memory:index_skipped for sourcedoc:%s",
+                                 source_id)
 
 
 def index_paper(

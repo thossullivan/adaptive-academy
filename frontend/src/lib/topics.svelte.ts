@@ -27,13 +27,20 @@ class TopicStore {
     if (browser) localStorage.setItem(KEY, String(id));
   }
 
-  /** Forget a topic that no longer exists (e.g. the removed demo); select the next one. */
+  /** Forget a topic that no longer exists (a deleted topic, the removed demo); select the next one. */
   forget(id: number) {
     this.list = this.list.filter((t) => t.id !== id);
     if (this.currentId === id) {
       this.currentId = this.list[0]?.id ?? null;
       if (browser) localStorage.removeItem(KEY);
     }
+  }
+
+  /** Delete a topic for good, then select the next one (or none) and re-fetch the list. */
+  async remove(id: number) {
+    await api.deleteTopic(id);
+    this.forget(id);
+    await this.refresh();
   }
 
   /** Build (or reuse) the demo topic and make it current. Returns its id. */

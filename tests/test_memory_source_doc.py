@@ -226,6 +226,118 @@ def test_review_sources_prune_removes_accepted_source_chunks(session):
     ).all()
 
 
+def test_review_sources_commits_statuses_when_the_fetcher_raises(session):
+    doc = _source_doc(session)
+    doc.status = "proposed"
+    other = SourceDoc(topic_id=doc.topic_id, title="Other", url="https://e.com/o")
+    session.add(doc)
+    session.add(other)
+    session.commit()
+
+    def raising_fetch(_: str) -> str:
+        raise RuntimeError("offline")
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_fetcher] = lambda: raising_fetch
+    client = TestClient(app)
+
+    resp = client.post(
+        f"/api/topics/{doc.topic_id}/sources/review",
+        json={"accepted_ids": [doc.id], "pruned_ids": [other.id]},
+    )
+
+    assert resp.status_code == 200
+    assert {s["id"]: s["status"] for s in resp.json()} == {
+        doc.id: "accepted", other.id: "pruned"}
+    session.expire_all()
+    assert session.get(SourceDoc, doc.id).status == "accepted"
+    assert session.get(SourceDoc, other.id).status == "pruned"
+    assert not session.exec(select(Chunk)).all()
+    event = session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:fetch_skipped")
+    ).one()
+    assert event.topic_id == doc.topic_id
+    assert "RuntimeError: offline" in event.detail
+
+
+def test_index_accepted_sources_logs_an_index_failure_and_keeps_the_status(
+    session, monkeypatch
+):
+    from adaptive_academy.engine import memory
+
+    doc = _source_doc(session)
+    second = SourceDoc(topic_id=doc.topic_id, title="Second", url="https://e.com/2",
+                       status="accepted")
+    session.add(second)
+    session.commit()
+    real_index_text = memory.index_text
+
+    def flaky_index_text(s, **kw):
+        if kw["source_ref"] == f"sourcedoc:{doc.id}":
+            raise RuntimeError("disk full")
+        return real_index_text(s, **kw)
+
+    monkeypatch.setattr(memory, "index_text", flaky_index_text)
+
+    memory.index_accepted_sources(
+        session.get_bind(), [doc.id, second.id], fetch=lambda _: "Fetched source text.")
+
+    session.expire_all()
+    assert session.get(SourceDoc, doc.id).status == "accepted"
+    refs = {c.source_ref for c in session.exec(select(Chunk)).all()}
+    assert refs == {f"sourcedoc:{second.id}"}
+    event = session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:index_skipped")
+    ).one()
+    assert event.topic_id == doc.topic_id
+    assert "RuntimeError: disk full" in event.detail
+
+
+def test_index_accepted_sources_skips_a_source_pruned_during_the_fetch(session):
+    from adaptive_academy.engine.memory import index_accepted_sources
+
+    doc = _source_doc(session)
+
+    def fetch_then_prune(_: str) -> str:
+        session.get(SourceDoc, doc.id).status = "pruned"
+        session.commit()
+        return "Fetched source text."
+
+    index_accepted_sources(session.get_bind(), [doc.id], fetch=fetch_then_prune)
+
+    assert not session.exec(select(Chunk)).all()
+
+
+def test_source_and_foundation_output_strip_stored_cite_tags(session):
+    from adaptive_academy.models import TopicFoundation
+
+    doc = _source_doc(session)
+    doc.summary = "<cite index='20-11,20-12'>The paper starts from</cite> a prior."
+    doc.why = '<cite index="1-1">Read</cite> it'
+    session.add(doc)
+    session.add(TopicFoundation(
+        topic_id=doc.topic_id, overview="<cite index='2-1'>Overview</cite>",
+        key_concepts=["<cite index='2-2'>attention</cite>"],
+        prerequisite_map={"<cite index='2-3'>attention</cite>": ["<cite index='2-4'>dot</cite>"]},
+    ))
+    session.commit()
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    client = TestClient(app)
+
+    [source] = client.get(f"/api/topics/{doc.topic_id}/sources").json()
+    foundation = client.get(f"/api/topics/{doc.topic_id}/foundation").json()
+
+    assert source["summary"] == "The paper starts from a prior."
+    assert source["why"] == "Read it"
+    assert foundation == {
+        "overview": "Overview",
+        "key_concepts": ["attention"],
+        "prerequisite_map": {"attention": ["dot"]},
+    }
+
+
 def test_reindex_topic_removes_stale_chunk_for_nonaccepted_source(session):
     doc = _source_doc(session)
     doc.status = "pruned"

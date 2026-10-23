@@ -138,11 +138,32 @@ def test_comeback_move_picks_next_undone_item_when_fading(session):
     assert move.href == f"/topics/{t.id}/track"
 
 
-def test_comeback_move_falls_back_without_track(session):
+def test_comeback_move_without_track_points_at_building_one(session):
+    # No track and no concepts: a self-explanation is impossible, so the move is to build the
+    # track from the reading list on the Sources page.
     t = Topic(title="No track")
     session.add(t)
     session.commit()
     session.refresh(t)  # no track/assessments -> unsailed
+    move = comeback_move(session, t.id, now=NOW)
+    assert move is not None and move.kind == "build_track"
+    assert move.href == f"/topics/{t.id}/review"
+    assert "Sources page" in move.label
+
+
+def test_comeback_move_with_an_empty_track_points_at_building_one(session):
+    t = Topic(title="Empty track")
+    session.add(t)
+    session.commit()
+    session.refresh(t)
+    session.add(Track(topic_id=t.id, title="tr"))
+    session.commit()
+    move = comeback_move(session, t.id, now=NOW)
+    assert move is not None and move.kind == "build_track"
+
+
+def test_comeback_move_falls_back_to_self_explain_with_concepts_and_no_items(session):
+    t, _c = _topic_with_concept(session, "Concepts, no items")
     move = comeback_move(session, t.id, now=NOW)
     assert move is not None and move.kind == "self_explain"
     assert move.href == f"/topics/{t.id}/assess"

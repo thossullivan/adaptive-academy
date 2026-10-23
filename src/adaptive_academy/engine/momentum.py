@@ -170,6 +170,15 @@ def comeback_move(
                     return ComebackMove(
                         kind=it.type, label=it.text,
                         href=f"/topics/{topic_id}/track", minutes=25)
+    has_concepts = session.exec(
+        select(Concept.id).join(Track, Track.id == Concept.track_id)
+        .where(Track.topic_id == topic_id).limit(1)).first() is not None
+    if not has_concepts:
+        # Nothing to explain yet: the real next step is building the track (Sources page).
+        return ComebackMove(
+            kind="build_track",
+            label="Build your track from the reading list on the Sources page",
+            href=f"/topics/{topic_id}/review", minutes=5)
     return ComebackMove(
         kind="self_explain",
         label="Do a quick self-explanation on a load-bearing concept",

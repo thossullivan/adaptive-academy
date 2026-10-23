@@ -153,6 +153,7 @@
                 conceptName={notebook.concept_name}
                 saved={notebook.note?.body ?? ''}
                 savedAt={notebook.note?.updated_at ?? null}
+                vaultLockedNote={notebook.vault_locked_note ?? null}
                 {onsaved}
               />
             {/key}

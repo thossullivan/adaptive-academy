@@ -428,6 +428,7 @@
             conceptName={panelNotebook.concept_name}
             saved={panelNotebook.note?.body ?? ''}
             savedAt={panelNotebook.note?.updated_at ?? null}
+            vaultLockedNote={panelNotebook.vault_locked_note ?? null}
             rows={10}
             onsaved={(n) => {
               if (notebook?.concept_id === n.concept_id) notebook.note = { body: n.body, updated_at: n.updated_at };

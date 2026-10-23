@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import { canShip } from '$lib/ship';
+  import { formatHours } from '$lib/text';
   import { deliverableKindLabel, sidebarKindLabel } from '$lib/labels';
   import type { Curriculum, ShipResult, ProgramContext } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
@@ -128,7 +129,7 @@
                 <h2 class="min-w-0 pt-0.5 text-lg leading-snug text-fg text-balance break-words" data-testid="phase-title">{p.title}</h2>
               </div>
               <div class="mt-1.5 flex flex-wrap items-center gap-1.5 pl-9">
-                {#if p.est_hours}<span class="eyebrow">{p.est_hours}</span>{/if}
+                {#if p.est_hours.trim()}<span class="eyebrow">{formatHours(p.est_hours)}</span>{/if}
                 {#each p.flags as f}<Badge tone="neutral" mono>{f}</Badge>{/each}
               </div>
             </div>

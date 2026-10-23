@@ -8,19 +8,16 @@ the `AgentEvent` trace each engine would have emitted. Dates are relative to "no
 decay, retention and momentum views look alive whenever it is created.
 
 The topic is flagged `is_demo` and titled "(demo)"; `remove_demo` deletes it and every row
-that belongs to it by walking the foreign-key graph down from the topic.
+that belongs to it through the same path as any topic (engine/topics.py `delete_topic`).
 """
 
 from __future__ import annotations
 
 import threading
-from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Table, delete, update
-from sqlalchemy import select as sa_select
-from sqlmodel import Session, SQLModel, col, select
+from sqlmodel import Session, col, select
 
 from adaptive_academy.engine import graph
 from adaptive_academy.engine.assess import GRADING_KINDS, level_from_score
@@ -33,6 +30,7 @@ from adaptive_academy.engine.memory import (
     index_question,
     index_text,
 )
+from adaptive_academy.engine.topics import delete_topic
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
@@ -855,35 +853,10 @@ def ensure_demo(session: Session, *, now: datetime | None = None) -> tuple[Topic
 # --- removal --------------------------------------------------------------------------------
 
 
-def _owned_rows(session: Session, topic_id: int) -> dict[Table, set[int]]:
-    """Every row that belongs to the topic: the closure of rows referencing it, through every
-    foreign key in the schema (so a table added later is covered without touching this)."""
-    tables = SQLModel.metadata.sorted_tables
-    referrers: dict[Table, list] = defaultdict(list)
-    for table in tables:
-        for fk in table.foreign_keys:
-            referrers[fk.column.table].append((table, fk.parent))
-    topic_table = Topic.__table__
-    owned: dict[Table, set[int]] = defaultdict(set)
-    owned[topic_table].add(topic_id)
-    frontier: list[tuple[Table, set[int]]] = [(topic_table, {topic_id})]
-    while frontier:
-        table, ids = frontier.pop()
-        for child, column in referrers[table]:
-            found = set(
-                session.execute(sa_select(child.c.id).where(column.in_(ids))).scalars()
-            )
-            new = found - owned[child]
-            if new:
-                owned[child] |= new
-                frontier.append((child, new))
-    return owned
-
-
 def remove_demo(session: Session, topic_id: int | None = None) -> bool:
     """Delete a demo topic and every row that belongs to it: the one with `topic_id`, or the
     oldest demo when no id is given. False when there is no such demo topic (a non-demo
-    topic's id is never deleted here)."""
+    topic's id is never deleted here). The cascade is engine/topics.py `delete_topic`."""
     with _LOCK:
         if topic_id is None:
             topic = find_demo(session)
@@ -893,18 +866,4 @@ def remove_demo(session: Session, topic_id: int | None = None) -> bool:
                 topic = None
         if topic is None:
             return False
-        owned = _owned_rows(session, topic.id)
-        session.flush()
-        # Self-references (an assessment's baseline) would block row-by-row deletes.
-        for table, ids in owned.items():
-            for fk in table.foreign_keys:
-                if fk.column.table is table:
-                    session.execute(update(table).where(table.c.id.in_(ids))
-                                    .values({fk.parent.name: None}))
-        # Children before parents, so every delete satisfies foreign_keys=ON as it runs.
-        for table in reversed(SQLModel.metadata.sorted_tables):
-            ids = owned.get(table)
-            if ids:
-                session.execute(delete(table).where(table.c.id.in_(ids)))
-        session.commit()
-        return True
+        return delete_topic(session, topic.id)

@@ -4,6 +4,7 @@ import {
   NOTE_MAX_CHARS,
   NoteSaver,
   clearedSyncText,
+  lastSyncedText,
   syncTargetText,
   draftRestore,
   showDiscard,
@@ -384,5 +385,11 @@ describe('what the Vault page says about notebook sync', () => {
     ]) {
       expect(t).not.toMatch(/[—–!]/);
     }
+  });
+
+  it('says when the last sync skipped notes, instead of a bare "Last synced"', () => {
+    expect(lastSyncedText({ problems: 0 }, 'just now')).toBe('Last synced just now.');
+    expect(lastSyncedText({ problems: 1 }, 'just now')).toBe('Last synced just now, with 1 note skipped (see below).');
+    expect(lastSyncedText({ problems: 3 }, '2m ago')).toBe('Last synced 2m ago, with 3 notes skipped (see below).');
   });
 });

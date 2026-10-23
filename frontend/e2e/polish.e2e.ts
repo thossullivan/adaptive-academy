@@ -63,6 +63,34 @@ test('the comeback move is clipped on a word boundary and can be read in full', 
   await expectNoSideScroll(page);
 });
 
+test('a topic with no track is sent to the Sources page to build one, not told it is charted', async ({ page }) => {
+  // The API's answer for a topic with no track and no concepts (engine/momentum.py).
+  const id = await seededTopicId(page);
+  await page.route('**/api/topics/*/wind', (r) =>
+    r.fulfill({
+      json: { topic_id: id, topic_title: 't', value: 0, state: 'unsailed', last_sailed: null, days_since: null, progress: 0 }
+    })
+  );
+  await page.route('**/api/topics/*/comeback', (r) =>
+    r.fulfill({
+      json: {
+        move: { kind: 'build_track', label: 'Build your track from the reading list on the Sources page', href: `/topics/${id}/review`, minutes: 5 }
+      }
+    })
+  );
+  await page.goto(`/topics/${id}/today`);
+  await settle(page);
+  await expect(page.getByText('Your voyage is charted.')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: "Your voyage isn't charted yet." })).toBeVisible();
+  await expect(page.getByText('Build your track from the reading list on the Sources page')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Set sail' })).toHaveCount(0);
+  const go = page.getByRole('link', { name: 'Go to Sources' });
+  await expect(go).toHaveAttribute('href', `/topics/${id}/review`);
+  await go.click();
+  await expect(page).toHaveURL(new RegExp(`/topics/${id}/review$`));
+  await expectNoSideScroll(page);
+});
+
 test('wayfinder phase titles are shown in full, never clipped', async ({ page }) => {
   const id = await seededTopicId(page);
   await page.goto(`/topics/${id}/wayfinder`);

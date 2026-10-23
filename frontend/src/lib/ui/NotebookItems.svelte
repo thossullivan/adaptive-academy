@@ -55,15 +55,17 @@
               </span>
             </div>
             {#if item.prompt}
-              <p class="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">Prompt: {item.prompt}</p>
+              <!-- Prompts carry markdown emphasis ("Explain *why* …"): formatted, not shown raw. -->
+              <p class="md-wrap mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">Prompt: <Markdown text={item.prompt} /></p>
             {/if}
             <!-- A worked solution is the tutor's markdown; attempts and explanations are the
                  learner's own words, shown exactly as typed. -->
-            <p class="md-wrap mt-1.5 text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]">
+            <!-- A div, not a p: a worked solution can hold a list. -->
+            <div class="md-wrap mt-1.5 text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]">
               {#if !item.text}(empty){:else if item.kind === 'solution'}<Markdown text={item.text} pre />{:else}<span
                   class="whitespace-pre-wrap">{item.text}</span
                 >{/if}
-            </p>
+            </div>
             {#if item.verdict}
               <p class="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">{item.verdict}</p>
             {/if}

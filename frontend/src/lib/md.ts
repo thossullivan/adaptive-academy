@@ -70,10 +70,49 @@ export function blockMd(text: string): string {
   return withFences(text, (s) => inlineMd(s).replace(/\n/g, '<br>'));
 }
 
+// A list line: up to three spaces, then "- " or "* " (bulleted) or "N. " (numbered), then
+// text. "-5 is negative" and "1.5 is a ratio" have no space after the marker: not lists.
+const BULLET = /^ {0,3}[-*] +(?=\S)(.*)$/;
+const NUMBERED = /^ {0,3}(\d{1,9})\. +(?=\S)(.*)$/;
+
+/** Runs of list lines as <ul>/<ol>, everything else as inline markdown with its line
+ *  breaks kept. Each item goes through inlineMd (escaped, then formatted); the markers and
+ *  the line break on either side of a list are dropped, as for a fenced block, and so is one
+ *  blank line on either side (the list's margin). No whitespace sits between the tags, since
+ *  the result is shown pre-wrap. */
+function withLists(src: string): string {
+  // Consecutive lines of one kind (text, ul or ol) make one block.
+  type Block = { tag: 'text' | 'ul' | 'ol'; start: number; lines: string[] };
+  const blocks: Block[] = [];
+  for (const line of src.split('\n')) {
+    const bullet = line.match(BULLET);
+    const numbered = bullet ? null : line.match(NUMBERED);
+    const tag = bullet ? 'ul' : numbered ? 'ol' : 'text';
+    const content = bullet ? bullet[1] : numbered ? numbered[2] : line;
+    const last = blocks.at(-1);
+    if (last?.tag === tag) last.lines.push(content);
+    else blocks.push({ tag, start: numbered ? Number(numbered[1]) : 1, lines: [content] });
+  }
+  return blocks
+    .map(({ tag, start, lines }, i) => {
+      if (tag === 'text') {
+        // One blank line on either side of a list is the list's margin's job.
+        const from = i > 0 && lines[0] === '' ? 1 : 0;
+        const to = i < blocks.length - 1 && lines.length > from && lines.at(-1) === '' ? -1 : undefined;
+        return inlineMd(lines.slice(from, to).join('\n'));
+      }
+      const items = lines.map((item) => `<li>${inlineMd(item)}</li>`).join('');
+      const from = tag === 'ol' && start !== 1 ? ` start="${start}"` : '';
+      return `<${tag} class="md-list"${from}>${items}</${tag}>`;
+    })
+    .join('');
+}
+
 /**
  * Like blockMd, but line breaks and indentation stay as typed: show it in a
- * `white-space: pre-wrap` element (Markdown.svelte `pre`). For tutor replies.
+ * `white-space: pre-wrap` element (Markdown.svelte `pre`). For tutor replies. Lines that
+ * start with "- " or "* " become a <ul>, lines that start with "1. " an <ol>.
  */
 export function preMd(text: string): string {
-  return withFences(text, inlineMd);
+  return withFences(text, withLists);
 }

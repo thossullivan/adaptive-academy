@@ -27,6 +27,31 @@ describe('NotesEditor', () => {
     const { body } = render(NotesEditor, { props: { conceptId: 4, conceptName: 'Softmax' } });
     expect(body).toContain('No notes yet');
   });
+
+  it('says plainly when the Obsidian note is left alone because its section was edited there', () => {
+    const { body } = render(NotesEditor, {
+      props: { conceptId: 4, conceptName: 'Softmax', saved: 'mine', savedAt: '2026-10-22T09:00:00', vaultLockedNote: 'softmax.md' }
+    });
+    expect(body).toContain('data-testid="note-vault-locked"');
+    expect(body).toContain('Your notes are saved in the app, but the Obsidian note softmax.md was not updated');
+    expect(body).toContain('Undo that edit, or delete the whole section');
+    expect(body).toMatch(/aria-describedby="[^"]*-vault"/);
+    const notice = (body.match(/data-testid="note-vault-locked">([\s\S]*?)<\/p>/)?.[1] ?? '')
+      .replace(/<!--[^>]*-->/g, '')
+      .replace(/\s+/g, ' ');
+    expect(notice).toContain('it updates on the next save');
+    expect(notice).not.toMatch(/[—!]/);
+
+    // No notes saved yet: it says nothing about notes being saved.
+    const fresh = render(NotesEditor, { props: { conceptId: 4, conceptName: 'Softmax', vaultLockedNote: 'softmax.md' } }).body;
+    expect(fresh.replace(/\s+/g, ' ')).toContain('The Obsidian note softmax.md is not being updated, because its notebook section was edited there.');
+    expect(fresh).not.toContain('Your notes are saved in the app');
+  });
+
+  it('shows no vault notice when the note updates normally', () => {
+    const { body } = render(NotesEditor, { props: { conceptId: 4, conceptName: 'Softmax', saved: 'mine', savedAt: '2026-10-22T09:00:00' } });
+    expect(body).not.toContain('note-vault-locked');
+  });
 });
 
 const item = (over: Partial<NotebookItem>): NotebookItem => ({

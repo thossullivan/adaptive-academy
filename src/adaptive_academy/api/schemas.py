@@ -494,6 +494,9 @@ class NoteOut(BaseModel):
     concept_id: int
     body: str
     updated_at: datetime
+    # The concept's vault note file when its notebook section was edited in Obsidian, so the
+    # sync leaves it alone (engine/notebook_sync.locked_note); None when it updates normally.
+    vault_locked_note: Optional[str] = None
 
 
 class NotebookNoteOut(BaseModel):
@@ -530,6 +533,7 @@ class NotebookOut(BaseModel):
     note: Optional[NotebookNoteOut] = None
     counts: NotebookCountsOut
     items: list[NotebookItemOut]  # newest first
+    vault_locked_note: Optional[str] = None  # as on NoteOut
 
 
 class NotebookConceptOut(BaseModel):

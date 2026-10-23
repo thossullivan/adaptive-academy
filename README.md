@@ -95,7 +95,7 @@ else (OpenRouter, vault setup, Linux file ownership, ports, models, offline use)
 ## Cost and privacy
 
 Several agents work together, so it uses more tokens than a single chatbot. In measured runs,
-starting a new topic (research, curriculum, a few tutor turns, a grade) cost about 85 cents on
+starting a new topic (research, curriculum, a few tutor turns, a grade) cost about a dollar on
 Claude Sonnet 5.5 and about 20 cents on DeepSeek V4.1 Flash through OpenRouter. Most of that is
 the web research. A tutor turn costs about a cent. A busy day can reach a few dollars.
 

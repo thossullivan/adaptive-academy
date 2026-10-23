@@ -74,6 +74,20 @@ for (const path of ['/programs', '/programs/new', '/topics/new', '/usage', '/dat
   });
 }
 
+test("a bad URL shows the app's own page with a plain message and a way back", async ({ page }) => {
+  await open(page, '/topics/2');
+  await expect(page.locator('main h1')).toHaveText("This page doesn't exist.");
+  // Inside the app's frame, beside the rail, not SvelteKit's bare "404 Not Found".
+  await expect(page.locator('main [data-page-frame]')).toBeVisible();
+  await expect(page.getByText('Not Found', { exact: true })).toHaveCount(0);
+  const text = (await page.locator('main').textContent()) ?? '';
+  for (const word of JARGON) expect(text, `404: ${word}`).not.toMatch(word);
+  expect(text).not.toContain('!');
+  await page.locator('main').getByRole('link', { name: 'Go to the dashboard' }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expectNoSideScroll(page);
+});
+
 test('the dashboard says plainly what it shows', async ({ page }) => {
   await open(page, '/');
   const text = (await page.locator('main').textContent()) ?? '';

@@ -570,6 +570,54 @@ def test_trace_writer_survives_a_failing_batch_and_keeps_writing(file_session):
     assert details == ["also fine", "fine"]
 
 
+def test_review_sources_releases_write_lock_before_fetching_sources(file_session):
+    """UAT: saving a 12-source reading list held the write lock for ~2 minutes of fetching
+    and embedding, so a second save got 500 "database is locked". The statuses must be
+    committed, and the lock free, while a source is being fetched."""
+    from fastapi.testclient import TestClient
+
+    from adaptive_academy.api.app import create_app
+    from adaptive_academy.api.deps import get_fetcher, get_session
+    from adaptive_academy.models import Chunk
+
+    session, probe = file_session
+    topic = Topic(title="Reading list")
+    session.add(topic)
+    session.commit()
+    docs = [SourceDoc(topic_id=topic.id, title=f"S{i}", url=f"https://e.com/{i}") for i in range(2)]
+    session.add_all(docs)
+    session.commit()
+    seen_status: list[str] = []
+
+    def probing_fetch(url: str) -> str:
+        probe()
+        conn = sqlite3.connect(probe.path, timeout=0.2)
+        try:
+            seen_status.append(conn.execute(
+                "SELECT status FROM sourcedoc WHERE url = ?", (url,)).fetchone()[0])
+        finally:
+            conn.close()
+        return "Fetched source text."
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_fetcher] = lambda: probing_fetch
+    try:
+        response = TestClient(app).post(
+            f"/api/topics/{topic.id}/sources/review",
+            json={"accepted_ids": [d.id for d in docs], "pruned_ids": []},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert len(probe.results) == 2
+    assert not probe.held, "review held the SQLite write lock across a source fetch"
+    assert seen_status == ["accepted", "accepted"]
+    session.expire_all()
+    assert len(session.exec(select(Chunk)).all()) == 2
+
+
 def test_trace_writer_staticpool_path_never_raises(session):
     """The inline (StaticPool) path must not turn a trace failure into a request failure."""
     from adaptive_academy.engine.trace_writer import TraceWriter

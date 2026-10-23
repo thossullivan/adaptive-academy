@@ -1,4 +1,5 @@
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, urlencode, urlsplit
@@ -81,6 +82,54 @@ def dedupe_by_url(sources: list[RawSource]) -> list[RawSource]:
     return [best[k] for k in sorted(best)]
 
 
+_CITE_TAG = re.compile(r"</?cite\b[^>]*>", re.IGNORECASE)
+
+
+def strip_cite_tags(text: str) -> str:
+    """Drop web-search citation tags (`<cite index='20-11'>…</cite>`), keeping the text inside.
+
+    The search tool's citations sometimes leak into the model's JSON strings; they are markup
+    for the API, not words for the learner.
+    """
+    return _CITE_TAG.sub("", text) if "<" in text else text
+
+
+def clean_source(s: RawSource) -> RawSource:
+    """Strip citation tags from every text field of a raw source, in place."""
+    s.title = strip_cite_tags(s.title)
+    s.summary = strip_cite_tags(s.summary)
+    s.why = strip_cite_tags(s.why)
+    return s
+
+
+def title_key(title: str) -> str:
+    """Normalize a title for dedup: the part before the first "(" (authors, year), case-folded,
+    punctuation collapsed to single spaces."""
+    head = title.split("(", 1)[0]
+    return " ".join(re.sub(r"[^\w]+", " ", head.casefold()).split())
+
+
+# A shorter key ("introduction", "documentation") is too generic to call two pages the same.
+_MIN_TITLE_KEY = 16
+
+
+def dedupe_by_title(sources: list[RawSource]) -> list[RawSource]:
+    """Collapse the same work found under different URLs (e.g. "Paper (Deng, Liu, Chen)" and
+    "Paper (Deng, Lu, Chen, 2016)"). Keeps the better tier, else the first; order is kept."""
+    kept: list[RawSource] = []
+    slot: dict[str, int] = {}
+    for s in sources:
+        key = title_key(s.title)
+        if len(key) < _MIN_TITLE_KEY:
+            kept.append(s)
+        elif key not in slot:
+            slot[key] = len(kept)
+            kept.append(s)
+        elif s.tier < kept[slot[key]].tier:
+            kept[slot[key]] = s
+    return kept
+
+
 _TIER_SCORE = {1: 1.0, 2: 0.6, 3: 0.3}
 _W_TIER = 0.6
 _W_REL = 0.4
@@ -133,9 +182,10 @@ def _parse_foundation_json(text: str) -> Foundation:
             "malformed", "research foundation: key_concepts has no usable concept name")
     prerequisite_map = data.get("prerequisite_map")
     return Foundation(
-        overview=str(data.get("overview", "")),
-        key_concepts=key_concepts,
-        prerequisite_map=({str(k): text_items(v) for k, v in prerequisite_map.items()}
+        overview=strip_cite_tags(str(data.get("overview", ""))),
+        key_concepts=[strip_cite_tags(c) for c in key_concepts],
+        prerequisite_map=({strip_cite_tags(str(k)): [strip_cite_tags(v) for v in text_items(vs)]
+                           for k, vs in prerequisite_map.items()}
                           if isinstance(prerequisite_map, dict) else {}),
     )
 
@@ -286,6 +336,7 @@ def _research_topic_locked(
         found = per_brief[i]
         for s in found:
             s.angle = brief.angle
+            clean_source(s)
         if i in failures:
             emit("research:subagent_error", f"{brief.angle}: {failures[i]}")
         elif i in recovered:
@@ -295,7 +346,7 @@ def _research_topic_locked(
         raw.extend(found)
 
     deduped = dedupe_by_url(raw)
-    ranked = rank_sources(deduped)
+    ranked = dedupe_by_title(rank_sources(deduped))
     kept, dropped = ranked[:cap], ranked[cap:]
     if dropped:
         emit("research:capped", f"dropped {len(dropped)} of {len(ranked)}")

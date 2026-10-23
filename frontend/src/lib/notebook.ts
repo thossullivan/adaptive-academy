@@ -299,6 +299,14 @@ export function syncTargetText(sync: Pick<VaultSync, 'path' | 'source'> | null):
   return `Notes sync to ${sync.path}: notes, attempts, explanations, and worked solutions go into each concept's note, between two marker lines. Everything else in the note stays yours.`;
 }
 
+/** When notes last synced, and whether that left notes out: never a bare "Last synced just
+ *  now" beside a note the sync skipped (its section edited in Obsidian, say). */
+export function lastSyncedText(sync: Pick<VaultSync, 'problems'>, ago: string): string {
+  if (!sync.problems) return `Last synced ${ago}.`;
+  const notes = sync.problems === 1 ? '1 note' : `${sync.problems} notes`;
+  return `Last synced ${ago}, with ${notes} skipped (see below).`;
+}
+
 /** What to announce after the field was cleared, given where sync points now. */
 export function clearedSyncText(sync: Pick<VaultSync, 'path' | 'source'> | null): string {
   if (sync?.path && sync.source === 'env') return syncTargetText(sync);

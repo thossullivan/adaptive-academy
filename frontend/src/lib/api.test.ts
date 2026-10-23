@@ -327,4 +327,19 @@ describe('demo api client', () => {
     ) as any;
     await expect(api.deleteDemo(7)).rejects.toThrow('boom');
   });
+
+  it('deleteTopic deletes the topic and treats an already-deleted one as done', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(null, { status: 404 })) as any;
+    await expect(api.deleteTopic(42)).resolves.toBeUndefined();
+    const [url, opts] = (globalThis.fetch as any).mock.calls[0];
+    expect(url).toBe('/api/topics/42');
+    expect(opts.method).toBe('DELETE');
+  });
+
+  it('deleteTopic surfaces a refusal while the topic is still being researched', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'This topic is still being researched' }), { status: 409 })
+    ) as any;
+    await expect(api.deleteTopic(3)).rejects.toThrow('still being researched');
+  });
 });

@@ -73,6 +73,41 @@ describe('preMd', () => {
   it('renders fenced code the same way blockMd does, and escapes HTML', () => {
     expect(preMd('Mask:\n```\nx = 1\n```\n<b>done</b>')).toBe('Mask:<code class="md-pre">x = 1</code>&lt;b&gt;done&lt;/b&gt;');
   });
+
+  it('renders "- " and "* " lines as a bulleted list, dropping the line break on either side', () => {
+    expect(preMd('Check:\n- the **mask**\n* the `scale`\nThen run it.')).toBe(
+      'Check:<ul class="md-list"><li>the <strong>mask</strong></li><li>the <code>scale</code></li></ul>Then run it.'
+    );
+  });
+
+  it('renders "N. " lines as a numbered list, keeping a start other than 1', () => {
+    expect(preMd('1. derive\n2. *code* it')).toBe('<ol class="md-list"><li>derive</li><li><em>code</em> it</li></ol>');
+    expect(preMd('3. test it\n4. ship')).toBe('<ol class="md-list" start="3"><li>test it</li><li>ship</li></ol>');
+  });
+
+  it('starts a new list when the kind changes, and lets the list margin stand for one blank line around it', () => {
+    expect(preMd('- a\n1. b\n\nafter')).toBe('<ul class="md-list"><li>a</li></ul><ol class="md-list"><li>b</li></ol>after');
+    expect(preMd('before\n\n- a\n\n\nafter')).toBe('before<ul class="md-list"><li>a</li></ul>\nafter');
+    expect(preMd('one\n\ntwo')).toBe('one\n\ntwo');
+  });
+
+  it('escapes HTML inside a list item', () => {
+    expect(preMd('- <img src=x onerror=alert(1)>\n- **<script>x</script>**')).toBe(
+      '<ul class="md-list"><li>&lt;img src=x onerror=alert(1)&gt;</li><li><strong>&lt;script&gt;x&lt;/script&gt;</strong></li></ul>'
+    );
+    expect(preMd('1. "><svg onload=alert(1)>')).toBe('<ol class="md-list"><li>"&gt;&lt;svg onload=alert(1)&gt;</li></ol>');
+  });
+
+  it('leaves lines that only look like list markers as text', () => {
+    for (const text of ['-5 is negative', '1.5 is a ratio', '*not a bullet*', '**bold** line', '- ', '2024.', '    - indented code']) {
+      expect(preMd(text), text).toBe(inlineMd(text));
+    }
+    expect(preMd('x = 3\n-5 is negative')).toBe('x = 3\n-5 is negative');
+  });
+
+  it('never makes lists inside fenced code', () => {
+    expect(preMd('```\n- a\n1. b\n```')).toBe('<code class="md-pre">- a\n1. b</code>');
+  });
 });
 
 describe('blockMd', () => {

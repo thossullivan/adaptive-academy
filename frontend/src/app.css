@@ -230,6 +230,23 @@
     overflow-wrap: anywhere;
     line-height: 1.55;
   }
+  /* "- " and "1. " lists in tutor replies (lib/md.ts preMd): a small indent, plain markers. */
+  .md .md-list {
+    margin: 0.35em 0;
+    padding-left: 1.4em;
+  }
+  .md ul.md-list {
+    list-style: disc;
+  }
+  .md ol.md-list {
+    list-style: decimal;
+  }
+  .md .md-list li + li {
+    margin-top: 0.2em;
+  }
+  .md .md-list li::marker {
+    color: var(--muted);
+  }
   /* Long text (tutor messages, notebook items): inline code wraps instead of overflowing. */
   .md-wrap code {
     white-space: normal;

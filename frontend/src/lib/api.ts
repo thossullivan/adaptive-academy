@@ -134,6 +134,11 @@ export const api = {
     fetch(`/api/demo/${topicId}`, { method: 'DELETE' }).then(async (r) => {
       if (!r.ok && r.status !== 404) await j<unknown>(r);
     }),
+  /** Delete a topic and everything that belongs to it (demo topics too). Gone already is fine. */
+  deleteTopic: (topicId: number) =>
+    fetch(`/api/topics/${topicId}`, { method: 'DELETE' }).then(async (r) => {
+      if (!r.ok && r.status !== 404) await j<unknown>(r);
+    }),
   getTopic: (id: number) => fetch(`/api/topics/${id}`).then(j<Topic>),
   /** Levels a new session on this concept would use, read without creating a conversation. */
   previewConversation: (topic_id: number, concept_id: number) =>

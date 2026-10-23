@@ -16,6 +16,8 @@ export interface ConceptGraph { nodes: Concept[]; edges: GraphEdge[]; }
 export type GraphAncestor = [conceptId: number, depth: number];
 export interface Topic {
   id: number; title: string; concepts: Concept[]; intent?: Intent | null;
+  has_foundation?: boolean;
+  has_track?: boolean;
   /** The one-click example topic (POST /api/demo); removable as a unit. */
   is_demo?: boolean;
 }
@@ -211,6 +213,9 @@ export interface ConceptNote {
   concept_id: number;
   body: string;
   updated_at: string;
+  /** The concept's vault note file when its notebook section was edited in Obsidian, so the
+   *  sync leaves it alone; null when it updates. Absent from an older API. */
+  vault_locked_note?: string | null;
 }
 /** GET /api/concepts/{id}/notebook: notes plus work, newest first. */
 export interface Notebook {
@@ -220,6 +225,8 @@ export interface Notebook {
   note: { body: string; updated_at: string } | null;
   counts: { attempts: number; explanations: number; solutions: number };
   items: NotebookItem[];
+  /** As on ConceptNote. */
+  vault_locked_note?: string | null;
 }
 export interface NotebookConcept {
   concept_id: number;
