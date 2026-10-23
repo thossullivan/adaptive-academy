@@ -187,6 +187,10 @@ def seed() -> None:
         session.add(other_track)
         session.flush()
         session.add(Concept(track_id=other_track.id, name="Eigenvectors", is_load_bearing=True))
+        # Spare concepts for the notes tests (notebook.e2e.ts), one per test and project, so
+        # parallel runs never share a note.
+        for name in ("Determinants", "Matrix Rank", "Orthogonality", "Singular Values"):
+            session.add(Concept(track_id=other_track.id, name=name))
 
         session.commit()
         print(f"e2e seed: topic {topic.id}, {len(concepts)} concepts, {len(EDGES)} edges")

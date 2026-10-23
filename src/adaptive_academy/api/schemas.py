@@ -484,6 +484,10 @@ class NoteIn(BaseModel):
     # The browser's vault path, if it has one: registered as the sync target (like
     # PUT /api/vault/sync) so the note reaches the vault. A bad path never fails the save.
     vault_path: str = ""
+    # The saved note the editor was showing: its updated_at, or null for "no note yet". When
+    # sent and the saved note has changed since (another tab saved), the save is refused
+    # with 409 and the note saved now. Left out: no check (older clients).
+    base_updated_at: Optional[datetime] = None
 
 
 class NoteOut(BaseModel):

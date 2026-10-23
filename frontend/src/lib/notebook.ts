@@ -151,9 +151,11 @@ function parseDraft(raw: string | null): KeptDraft | null {
 
 /** Unsaved notes per concept, kept in this tab (sessionStorage) until a save is confirmed,
  *  so a failed save, a draft over the limit, or a switch away never loses them. Each draft
- *  records the saved note it was written on, so a newer save is never silently overwritten
- *  (see draftRestore). Never throws: without storage, drafts simply aren't kept. `storage`
- *  defaults to sessionStorage. */
+ *  records the saved note it was written on: a restored draft whose note changed since asks
+ *  before it is kept (draftRestore). Overwrites between two open editors are caught by the
+ *  API, not here: each save sends the version it was written on, and the API refuses (409)
+ *  when another save came first (api.saveNote). Never throws: without storage, drafts simply
+ *  aren't kept. `storage` defaults to sessionStorage. */
 export function draftStore(storage?: DraftStorage | null) {
   const from = (): DraftStorage | null => {
     if (storage !== undefined) return storage;
@@ -189,6 +191,13 @@ export function draftStore(storage?: DraftStorage | null) {
       }
     }
   };
+}
+
+/** Whether the editor offers Discard draft. Only for a draft the learner didn't just type:
+ *  one restored from this tab, or one left after a save was refused because the note was
+ *  saved elsewhere. Ordinary live edits get no one-click wipe (there is no undo). */
+export function showDiscard(s: { offer: boolean; changed: boolean; conflict: boolean; saving: boolean }): boolean {
+  return s.offer && s.changed && !s.conflict && !s.saving;
 }
 
 /**

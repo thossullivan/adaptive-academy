@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
   import { beforeNavigate } from '$app/navigation';
-  import { api } from '$lib/api';
+  import { NoteConflictError, api } from '$lib/api';
   import { toasts } from '$lib/toast.svelte';
   import {
     NOTE_MAX_CHARS,
@@ -11,6 +11,7 @@
     formatWhen,
     isSaveShortcut,
     noteStatus,
+    showDiscard,
     storedVaultPath,
     trackSave,
     type KeptDraft
@@ -28,7 +29,10 @@
   // after the draft was written, the learner picks which one to keep. Discard draft goes back
   // to the saved note. Edits made while a save runs are saved right after it. Leaving with
   // unsaved changes saves them on the way out; a reload, or leaving the page with a draft over
-  // the limit, asks first.
+  // the limit, asks first. Every save sends the saved note it was written on; when another
+  // tab or window saved first, the API refuses it (409) and the same choice is offered: keep
+  // my draft (saved over the newer note) or use the saved note. Discard draft is offered only
+  // for a restored draft or after such a refusal, never for ordinary typing.
   let {
     conceptId,
     conceptName,
@@ -53,7 +57,17 @@
   const drafts = draftStore();
   const id = untrack(() => conceptId);
   const name = untrack(() => conceptName);
-  const saver = new NoteSaver((body: string) => api.saveNote(id, body, storedVaultPath()));
+  // The saved note's version as the server last told this editor: every save is sent on it,
+  // and it moves on as each save lands (before a queued save goes out).
+  let serverAt: string | null = untrack(() => savedAt);
+  // A save queued behind one the API refused must not go out on the newer version unasked.
+  class ChoicePending extends Error {}
+  const saver = new NoteSaver(async (body: string) => {
+    if (conflict) throw new ChoicePending('waiting for keep my draft or use the saved note');
+    const note = await api.saveNote(id, body, storedVaultPath(), serverAt);
+    serverAt = note.updated_at;
+    return note;
+  });
 
   let base = $state(untrack(() => saved));
   let at = $state<string | null>(untrack(() => savedAt));
@@ -64,8 +78,13 @@
   const restore = draftRestore(kept, untrack(() => saved), untrack(() => savedAt));
   const restored = restore !== 'none';
   let conflict = $state(restore === 'conflict');
+  // Why the choice is offered: a restored draft whose note changed, or a save refused
+  // because the note was saved elsewhere while this one was open.
+  let conflictKind = $state<'restored' | 'saved-elsewhere'>('restored');
   // The saved note a kept draft was written on, kept with it until the conflict is settled.
-  const keptBase = kept?.base;
+  let keptBase = $state(kept?.base);
+  // Discard draft is for a draft the learner didn't just type (see showDiscard).
+  let offerDiscard = $state(restore !== 'none');
   // A restored draft is saved on the way out only once the learner edits it or keeps it.
   let touched = $state(!restored);
   let draft = $state(restored ? (kept as KeptDraft).body : untrack(() => saved));
@@ -96,21 +115,38 @@
 
   /** Keep my draft: it replaces the saved note when saved, or on the way out. */
   function keepDraft() {
+    const refused = conflictKind === 'saved-elsewhere';
     conflict = false;
     touched = true;
     announce = `Keeping your draft of the notes on ${name}. Save it to replace the saved note.`;
     box?.focus(); // the buttons are gone: carry on in the box
+    // A refused save is sent again, now on the note saved elsewhere.
+    if (refused) save();
   }
 
   /** Use the saved note, or Discard draft: back to what is saved, and the draft is gone. */
   function discardDraft(message = `Draft discarded. Showing your saved notes on ${name}.`) {
     conflict = false;
     touched = true;
+    offerDiscard = false;
     draft = base;
     error = '';
     drafts.clear(id);
     announce = message;
     box?.focus();
+  }
+
+  /** Another tab or window saved the note first: show what is saved now and let the learner
+   *  choose. The draft stays in the box (and in this tab) until they do. */
+  function savedElsewhere(note: ConceptNote | null) {
+    keptBase = at; // the version this draft was written on
+    base = note?.body ?? '';
+    at = note?.updated_at ?? null;
+    serverAt = at;
+    conflictKind = 'saved-elsewhere';
+    conflict = true;
+    offerDiscard = true;
+    announce = `Your notes on ${name} were saved in another tab or window. Keep your draft or use the saved note.`;
   }
 
   function send(body: string): Promise<ConceptNote> {
@@ -130,10 +166,16 @@
       // Edits typed meanwhile were saved after this one: the newest saved body is kept.
       base = note.body;
       at = note.updated_at;
+      offerDiscard = false;
       announce = `Notes on ${name} saved.`;
       onsaved?.(note);
       return true;
     } catch (e) {
+      if (e instanceof NoteConflictError) {
+        savedElsewhere(e.note);
+        return false;
+      }
+      if (e instanceof ChoicePending) return false; // the choice above decides
       if (draft === body) {
         error = e instanceof Error ? e.message : String(e);
         announce = `Notes not saved. ${error}`;
@@ -220,8 +262,13 @@
       data-testid="note-conflict"
     >
       <p class="text-xs leading-relaxed text-fg-dim">
-        This is a draft kept in this tab, but your saved notes changed after it{at ? ` (saved ${formatWhen(at)})` : ''}.
-        Which one do you want?
+        {#if conflictKind === 'saved-elsewhere'}
+          Your notes were saved in another tab or window while you were editing{at ? ` (saved ${formatWhen(at)})` : ''}.
+          Your draft was not saved. Which one do you want?
+        {:else}
+          This is a draft kept in this tab, but your saved notes changed after it{at ? ` (saved ${formatWhen(at)})` : ''}.
+          Which one do you want?
+        {/if}
       </p>
       <div class="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onclick={keepDraft}>Keep my draft</Button>
@@ -254,7 +301,7 @@
       {#if restored && changed}<span class="text-faint" data-testid="note-restored">{' · restored from this tab'}</span>{/if}
     </p>
     <div class="flex flex-wrap items-center gap-2">
-      {#if changed && !conflict && !saving}
+      {#if showDiscard({ offer: offerDiscard, changed, conflict, saving })}
         <Button size="sm" variant="ghost" onclick={() => discardDraft()}>Discard draft</Button>
       {/if}
       <Button size="sm" onclick={save} disabled={!changed || tooLong}>

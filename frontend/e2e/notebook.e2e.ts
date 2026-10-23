@@ -440,3 +440,67 @@ test('the vault set by AA_OBSIDIAN_VAULT_PATH shows its sync state, and clearing
   await expect(page.getByRole('status').filter({ hasText: 'set by AA_OBSIDIAN_VAULT_PATH' }).first()).toBeAttached();
   await expect(page.getByText('no longer sync')).toHaveCount(0);
 });
+
+// --- two open editors ----------------------------------------------------------------------
+
+/** The second seeded topic, whose spare concepts these tests write notes on. */
+async function spareTopic(page: Page): Promise<Topic> {
+  const res = await page.request.get('/api/topics');
+  const topics = (await res.json()) as Topic[];
+  return topics.find((t) => t.title === 'Linear Algebra Refresher')!;
+}
+
+test('two open editors never overwrite each other silently', async ({ page }) => {
+  const topic = await spareTopic(page);
+  const name = isPhone() ? 'Matrix Rank' : 'Determinants';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  const other = await page.context().newPage();
+
+  const one = await openNotes(page, topic.id, concept.id, name);
+  const two = await openNotes(other, topic.id, concept.id, name);
+  const panelOne = page.locator('#tutor-notes');
+  const panelTwo = other.locator('#tutor-notes');
+
+  await two.fill('From tab two.');
+  await two.press('Control+s');
+  await expect(panelTwo.getByTestId('note-status')).toContainText('Saved');
+
+  // Tab one still shows the note as it was when it opened: its save is refused, not applied.
+  await one.fill('From tab one.');
+  await one.press('Control+s');
+  const notice = panelOne.getByTestId('note-conflict');
+  await expect(notice).toContainText('saved in another tab or window');
+  await expect(one).toHaveValue('From tab one.');
+  expect(await savedBody(page, concept.id)).toBe('From tab two.');
+  await expect(panelOne.getByRole('button', { name: 'Discard draft' })).toHaveCount(0);
+
+  // Use the saved note: tab one now shows tab two's text, and saves on top of it cleanly.
+  await panelOne.getByRole('button', { name: 'Use the saved note' }).click();
+  await expect(one).toHaveValue('From tab two.');
+  await one.fill('From tab two, then tab one.');
+  await one.press('Control+s');
+  await expect(panelOne.getByTestId('note-status')).toContainText('Saved');
+  expect(await savedBody(page, concept.id)).toBe('From tab two, then tab one.');
+
+  // Now tab two is behind: Keep my draft sends it again, on the note saved now.
+  await two.fill('Tab two insists.');
+  await two.press('Control+s');
+  await expect(panelTwo.getByTestId('note-conflict')).toBeVisible();
+  expect(await savedBody(page, concept.id)).toBe('From tab two, then tab one.');
+  await panelTwo.getByRole('button', { name: 'Keep my draft' }).click();
+  await expect(panelTwo.getByTestId('note-status')).toContainText('Saved');
+  expect(await savedBody(page, concept.id)).toBe('Tab two insists.');
+  await other.close();
+});
+
+test('Discard draft is not offered for what you are typing now', async ({ page }) => {
+  const topic = await spareTopic(page);
+  const name = isPhone() ? 'Singular Values' : 'Orthogonality';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  const box = await openNotes(page, topic.id, concept.id, name);
+  const panel = page.locator('#tutor-notes');
+  await box.fill('Typed just now, not saved yet.');
+  await expect(page.getByTestId('note-status')).toHaveText('Unsaved changes');
+  await expect(panel.getByRole('button', { name: 'Discard draft' })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Save notes' })).toBeEnabled();
+});

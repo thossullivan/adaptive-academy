@@ -294,24 +294,49 @@ def planned_concept_stems(concepts: list[Concept]) -> dict[int, str]:
     return _planned([(c.id, c.name) for c in concepts], "concept")
 
 
-def _adopt(vault: Path, folder: Path, names: list[str], id_key: str, ident: int,
-           title: str, file_of) -> str | None:  # noqa: ANN001
-    """The first of `names` whose existing note says it is ours (an export made under that
-    name, before a slug change): reused instead of starting a second copy."""
-    for stem in dict.fromkeys(n for n in names if n):
-        if _names_us(_head_frontmatter(vault, file_of(folder, stem)), id_key, ident, title):
-            return stem
-    return None
+def _first_of_title(items: list[tuple[int, str]], ident: int, title: str) -> bool:
+    """Whether `ident` is the lowest id among the items with exactly this title (the one
+    that keeps the plain name, as in _planned)."""
+    same = [i for i, t in items if t.strip() == title.strip()]
+    return not same or ident == min(same)
 
 
-def concept_note_path(vault: Path, concepts_dir: Path, concept: Concept, planned: str) -> Path:
+def _adopt(vault: Path, folder: Path, planned: str, name: str, id_key: str, ident: int,
+           first_of_title: bool, file_of) -> str | None:  # noqa: ANN001
+    """An existing note of this topic or concept to reuse instead of starting a second copy:
+    under the planned name when it says it is ours (id, or title), or under the name the
+    previous ASCII-only slug gave it (an export made before the slug change).
+
+    The old name is taken on an id match; on a title alone only when the slug really changed
+    for this name (else the old name is just the plain name, which belongs to the lowest id)
+    and this is the lowest id with that exact title, so two same-named concepts or topics
+    never both claim one older note or folder."""
+    if _names_us(_head_frontmatter(vault, file_of(folder, planned)), id_key, ident, name):
+        return planned
+    legacy = legacy_slugify(name)
+    if not legacy or legacy == planned:
+        return None
+    fm = _head_frontmatter(vault, file_of(folder, legacy))
+    if not fm:
+        return None
+    if fm.get(id_key, "").strip():
+        return legacy if fm[id_key].strip() == str(ident) else None
+    title_only = (fm.get("title", "").strip() == name.strip() and first_of_title
+                  and legacy != slugify(name))
+    return legacy if title_only else None
+
+
+def concept_note_path(vault: Path, concepts_dir: Path, concept: Concept, planned: str,
+                      siblings: list[Concept] | None = None) -> Path:
     """This concept's note path: an existing note of this concept under the planned name or
-    the name the previous slug rules gave it (legacy_slugify), else the planned name unless
-    that file is another note's, then the id-suffixed one. Never another concept's note
-    (UnsafeNote when both are taken)."""
-    adopted = _adopt(vault, concepts_dir, [planned, legacy_slugify(concept.name)],
-                     "concept_id", concept.id, concept.name,
-                     lambda folder, stem: folder / f"{stem}.md")
+    the name the previous slug rules gave it (legacy_slugify, see _adopt), else the planned
+    name unless that file is another note's, then the id-suffixed one. Never another
+    concept's note (UnsafeNote when both are taken). `siblings`: the topic's concepts, to
+    tell which of several same-named ones may take an older note by title."""
+    first = _first_of_title([(c.id, c.name) for c in siblings or [concept]], concept.id,
+                            concept.name)
+    adopted = _adopt(vault, concepts_dir, planned, concept.name, "concept_id", concept.id,
+                     first, lambda folder, stem: folder / f"{stem}.md")
     if adopted is not None:
         return concepts_dir / f"{adopted}.md"
     for stem in _candidates(planned, concept.id):
@@ -339,8 +364,8 @@ def topic_folder(session: Session, vault: Path, topic: Topic) -> tuple[Path, str
     with _WRITE_LOCK:
         # A folder this topic was exported to under the previous slug rules is kept.
         root = safe_child(vault, EXPORT_FOLDER)
-        adopted = _adopt(vault, root, [planned, legacy_slugify(topic.title)], "topic_id",
-                         topic.id, topic.title,
+        adopted = _adopt(vault, root, planned, topic.title, "topic_id", topic.id,
+                         _first_of_title(topics, topic.id, topic.title),
                          lambda folder, stem: folder / stem / f"{stem}.md")
         if adopted is not None:
             return safe_child(vault, EXPORT_FOLDER, adopted), adopted
@@ -400,9 +425,10 @@ def write_concept_note(session: Session, vault: Path, topic: Topic, concept: Con
             folder, hub_stem = topic_folder(session, vault, topic)
             concepts_dir = safe_child(folder, "Concepts")
             concepts_dir.mkdir(parents=True, exist_ok=True)
-            planned = planned_concept_stems(topic_concepts(session, topic.id))
+            siblings = topic_concepts(session, topic.id)
+            planned = planned_concept_stems(siblings)
             path = concept_note_path(vault, concepts_dir, concept,
-                                     planned.get(concept.id, f"concept-{concept.id}"))
+                                     planned.get(concept.id, f"concept-{concept.id}"), siblings)
         verdict, summary = _concept_verdict_summary(session, concept)
         section = render_notebook_section(build_notebook(session, concept), verdict, summary)
         try:

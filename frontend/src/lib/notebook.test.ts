@@ -6,6 +6,7 @@ import {
   clearedSyncText,
   syncTargetText,
   draftRestore,
+  showDiscard,
   draftStore,
   settledSave,
   trackSave,
@@ -214,6 +215,21 @@ describe('drafts kept in this tab', () => {
     const s = memory();
     s.setItem('aa.note-draft.5', 'an old draft');
     expect(draftStore(s).get(5)).toEqual({ body: 'an old draft', base: undefined });
+  });
+});
+
+describe('Discard draft', () => {
+  const base = { offer: true, changed: true, conflict: false, saving: false };
+
+  it('is offered for a restored draft, or one left after a refused save', () => {
+    expect(showDiscard(base)).toBe(true);
+  });
+
+  it('is never offered for ordinary typing, while a conflict asks, while saving, or with nothing to discard', () => {
+    expect(showDiscard({ ...base, offer: false })).toBe(false);
+    expect(showDiscard({ ...base, conflict: true })).toBe(false);
+    expect(showDiscard({ ...base, saving: true })).toBe(false);
+    expect(showDiscard({ ...base, changed: false })).toBe(false);
   });
 });
 

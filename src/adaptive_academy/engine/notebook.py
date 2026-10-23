@@ -21,8 +21,11 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import Session, col, select
 
 from adaptive_academy.models import (
@@ -65,6 +68,26 @@ class NoteTooLong(ValueError):
             f"Your notes are too long to save: {length:,} characters. The limit is "
             f"{NOTE_MAX_CHARS:,} characters.")
         self.length = length
+
+
+class NoteConflict(Exception):
+    """The saved note changed after the editor loaded it (another tab or window saved it).
+    `note` is what is saved now (None: there is no note any more)."""
+
+    def __init__(self, note: ConceptNote | None):
+        super().__init__("the saved note changed after it was loaded")
+        self.note = note
+
+
+# save_note's "no precondition" (absent base_updated_at): distinct from None (no note yet).
+ANY_VERSION = object()
+
+
+def _as_utc_naive(when: datetime) -> datetime:
+    """SQLite keeps datetimes without an offset (the app writes UTC): compare them that way."""
+    if when.tzinfo is not None:
+        when = when.astimezone(timezone.utc).replace(tzinfo=None)
+    return when
 
 
 class MarkerError(ValueError):
@@ -180,15 +203,58 @@ def build_notebook(session: Session, concept: Concept) -> Notebook:
         items=items)
 
 
-def save_note(session: Session, concept_id: int, body: str) -> ConceptNote:
-    """Save the learner's notes on a concept (one row per concept). Commits."""
+def _current_note(session: Session, concept_id: int) -> ConceptNote | None:
+    return session.exec(select(ConceptNote).where(ConceptNote.concept_id == concept_id)
+                        .execution_options(populate_existing=True)).first()
+
+
+def save_note(session: Session, concept_id: int, body: str, *,
+              base_updated_at: object = ANY_VERSION) -> ConceptNote:
+    """Save the learner's notes on a concept (one row per concept). Commits.
+
+    `base_updated_at` is the saved note the editor was showing: its updated_at, or None when
+    there was no note yet. When given, the save happens only if that is still the saved note
+    (a conditional UPDATE, or an INSERT the unique concept_id guards), else NoteConflict with
+    the note saved now, and nothing changes. Left out, the save always happens."""
     if len(body) > NOTE_MAX_CHARS:
         raise NoteTooLong(len(body))
-    note = session.exec(select(ConceptNote).where(ConceptNote.concept_id == concept_id)).first()
-    if note is None:
-        note = ConceptNote(concept_id=concept_id)
-    note.body = body
-    note.updated_at = now_utc()
+    if base_updated_at is ANY_VERSION:
+        note = _current_note(session, concept_id)
+        if note is None:
+            note = ConceptNote(concept_id=concept_id)
+        note.body = body
+        note.updated_at = now_utc()
+        session.add(note)
+        session.commit()
+        session.refresh(note)
+        return note
+    if base_updated_at is None:
+        if _current_note(session, concept_id) is not None:
+            raise NoteConflict(_current_note(session, concept_id))
+        note = ConceptNote(concept_id=concept_id, body=body, updated_at=now_utc())
+        session.add(note)
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()  # another save created it first
+            raise NoteConflict(_current_note(session, concept_id)) from None
+        session.refresh(note)
+        return note
+    if not isinstance(base_updated_at, datetime):
+        raise TypeError("base_updated_at must be a datetime, None, or left out")
+    # Check and write in one statement, so two saves can't both pass the check.
+    result = session.execute(
+        update(ConceptNote)
+        .where(col(ConceptNote.concept_id) == concept_id,
+               col(ConceptNote.updated_at) == _as_utc_naive(base_updated_at))
+        .values(body=body, updated_at=_as_utc_naive(now_utc())))
+    if result.rowcount != 1:
+        session.rollback()
+        raise NoteConflict(_current_note(session, concept_id))
+    note = _current_note(session, concept_id)
+    # The UPDATE above is Core SQL, which the vault sync's session hooks don't see: mark the
+    # row changed so the commit queues the concept like any other save.
+    flag_modified(note, "body")
     session.add(note)
     session.commit()
     session.refresh(note)
@@ -442,6 +508,25 @@ def frontmatter_block(text: str) -> tuple[list[str], int] | None:
     return None
 
 
+def _closes(text: str, quote: str) -> bool:
+    """Whether `text` (inside a quoted YAML value) holds the closing `quote`. Escapes are
+    read left to right: in double quotes a backslash escapes the next character (so `\\\\`
+    is one backslash, and the quote after it closes); in single quotes `''` is a quote."""
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if quote == '"' and c == "\\":
+            i += 2
+            continue
+        if c == quote:
+            if quote == "'" and text[i + 1:i + 2] == "'":
+                i += 2
+                continue
+            return True
+        i += 1
+    return False
+
+
 def _top_level_keys(lines: list[str], end: int):
     """(index, key, value) for each top-level key line inside the block, skipping the
     continuation lines of a quoted value that spans lines and of indented values."""
@@ -449,9 +534,8 @@ def _top_level_keys(lines: list[str], end: int):
     for i in range(1, end):
         bare = lines[i].rstrip("\r\n")
         if quote:
-            # Inside a multi-line quoted value: find its closing quote ('' is an escaped ').
-            scan = bare.replace("''", "") if quote == "'" else bare.replace('\\"', "")
-            if quote in scan:
+            # Inside a multi-line quoted value: look for its closing quote.
+            if _closes(bare, quote):
                 quote = ""
             continue
         m = _FRONTMATTER_KEY.match(bare)
@@ -459,11 +543,8 @@ def _top_level_keys(lines: list[str], end: int):
             continue
         yield i, m.group("key"), m.group("value")
         value = m.group("value").strip()
-        if value[:1] in ("'", '"'):
-            q = value[0]
-            rest = value[1:].replace("''", "") if q == "'" else value[1:].replace('\\"', "")
-            if q not in rest:
-                quote = q
+        if value[:1] in ("'", '"') and not _closes(value[1:], value[0]):
+            quote = value[0]
 
 
 def frontmatter_values(text: str) -> dict[str, str]:
@@ -472,7 +553,24 @@ def frontmatter_values(text: str) -> dict[str, str]:
     if found is None:
         return {}
     lines, end = found
-    return {key: unquote(value) for _, key, value in _top_level_keys(lines, end)}
+    keys = list(_top_level_keys(lines, end))
+    out: dict[str, str] = {}
+    for n, (i, key, value) in enumerate(keys):
+        if value.strip():
+            out[key] = unquote(value)
+            continue
+        # A block list (Obsidian's Properties editor writes tags this way):
+        #   tags:
+        #     - adaptive-academy
+        # read as the inline form, "[adaptive-academy, concept]".
+        stop = keys[n + 1][0] if n + 1 < len(keys) else end
+        items = [unquote(m.group(1)) for line in lines[i + 1:stop]
+                 if (m := _LIST_ITEM.match(line.rstrip("\r\n")))]
+        out[key] = f"[{', '.join(items)}]" if items else ""
+    return out
+
+
+_LIST_ITEM = re.compile(r"^\s*-\s+(.*\S)\s*$")
 
 
 def unquote(value: str) -> str:
