@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -286,14 +287,54 @@ def test_review_sources_retries_an_accepted_source_that_was_never_indexed(sessio
     body = {"accepted_ids": [doc.id, indexed.id], "pruned_ids": []}
 
     first = client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body)
+    # Saved again right away: the failed fetch is too recent to try again.
+    too_soon = client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body)
+    assert calls == [doc.url]
+    _age_fetch_skipped_events(session, minutes=11)
     second = client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body)
     third = client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body)
 
-    assert first.status_code == second.status_code == third.status_code == 200
-    # Empty the first time (fetch_skipped), retried and indexed on the second save, then left.
+    assert all(r.status_code == 200 for r in (first, too_soon, second, third))
+    # Empty the first time (fetch_skipped), retried and indexed once the failure is ten minutes
+    # old, then left.
     assert calls == [doc.url, doc.url]
     [chunk] = session.exec(select(Chunk).where(Chunk.source_ref == f"sourcedoc:{doc.id}")).all()
     assert chunk.text == "Fetched on the retry."
+    assert len(session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:fetch_skipped")).all()) == 1
+
+
+def _age_fetch_skipped_events(session, *, minutes: int) -> None:
+    for event in session.exec(
+            select(AgentEvent).where(AgentEvent.kind == "memory:fetch_skipped")).all():
+        event.created_at = event.created_at - timedelta(minutes=minutes)
+        session.add(event)
+    session.commit()
+
+
+def test_review_sources_does_not_refetch_a_source_whose_fetch_just_failed(session):
+    """A paywalled page is not fetched on every save, and the event feed doesn't fill up: a
+    source whose last fetch_skipped is under ten minutes old is not queued."""
+    doc = _source_doc(session)
+    calls: list[str] = []
+
+    def fetch(url: str) -> str | None:
+        calls.append(url)
+        return None  # a paywall: nothing readable
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_fetcher] = lambda: fetch
+    client = TestClient(app)
+    body = {"accepted_ids": [doc.id], "pruned_ids": []}
+
+    for _ in range(4):
+        assert client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body).status_code \
+            == 200
+    _age_fetch_skipped_events(session, minutes=9)
+    assert client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body).status_code == 200
+
+    assert calls == [doc.url]
     assert len(session.exec(
         select(AgentEvent).where(AgentEvent.kind == "memory:fetch_skipped")).all()) == 1
 

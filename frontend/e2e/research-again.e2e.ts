@@ -91,17 +91,46 @@ test('opening Sources while research runs says so, then reloads when it finishes
 
 test('Research again refused as already running says so in plain words', async ({ page }) => {
   const id = await topicWithoutResearch(page, 'conflict');
-  await page.route(`**/api/topics/${id}/research`, (route) =>
-    route.fulfill({ status: 409, json: { detail: `topic:${id}:research is already running; wait for it to finish` } })
+  let refused = false;
+  await page.route(`**/api/topics/${id}/research`, (route) => {
+    refused = true;
+    return route.fulfill({ status: 409, json: { detail: `topic:${id}:research is already running; wait for it to finish` } });
+  });
+  // The other run is still going when the page checks after the refusal.
+  await page.route(`**/api/topics/${id}`, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const res = await route.fetch();
+    await route.fulfill({ response: res, json: { ...(await res.json()), research_running: refused } });
+  });
+
+  await page.goto(`/topics/${id}/review`);
+  await page.getByRole('button', { name: 'Research again' }).click();
+  await expect(page.getByTestId('research-running')).toHaveText(RUNNING);
+  await expect(page.getByTestId('research-status')).not.toContainText('Something went wrong');
+  await expect(page.getByRole('button', { name: 'Research again' })).toHaveCount(0);
+});
+
+test('Research again refused, but the other run finished meanwhile, shows the reading list', async ({ page }) => {
+  const id = await topicWithoutResearch(page, 'conflict-done');
+  let refused = false;
+  await page.route(`**/api/topics/${id}/research`, (route) => {
+    refused = true;
+    return route.fulfill({ status: 409, json: { detail: `topic:${id}:research is already running; wait for it to finish` } });
+  });
+  // By the time the page asks, the other run has saved its sources and research_running is
+  // false (the real API's answer for this topic), so nothing would update the page later.
+  await page.route(`**/api/topics/${id}/sources?status=proposed`, (route) =>
+    refused ? route.fulfill({ json: [SOURCE] }) : route.fallback()
   );
 
   await page.goto(`/topics/${id}/review`);
-  const again = page.getByRole('button', { name: 'Research again' });
-  await again.click();
-  const status = page.getByTestId('research-status');
-  await expect(status).toHaveText(RUNNING);
-  await expect(status).not.toContainText('Something went wrong');
-  await expect(again).toBeEnabled();
+  await page.getByRole('button', { name: 'Research again' }).click();
+
+  await expect(page.getByText('A found source')).toBeVisible();
+  await expect(page.getByTestId('research-status')).toHaveText('');
+  await expect(page.getByTestId('research-running')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save reading list' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Research again' })).toHaveCount(0);
 });
 
 test('a topic with a foundation but no sources offers Research again, not an empty list', async ({ page }) => {

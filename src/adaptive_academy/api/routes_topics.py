@@ -35,7 +35,11 @@ from adaptive_academy.api.schemas import (
 from adaptive_academy.engine.aliases import apply_program_aliases
 from adaptive_academy.engine.curriculum import generate_curriculum
 from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone_gate
-from adaptive_academy.engine.memory import index_accepted_sources, remove_source
+from adaptive_academy.engine.memory import (
+    index_accepted_sources,
+    remove_source,
+    sources_to_index,
+)
 from adaptive_academy.engine.research import (
     ResearchAlreadyDone,
     research_can_rerun,
@@ -59,7 +63,6 @@ from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
-    Chunk,
     Concept,
     Deliverable,
     Item,
@@ -280,7 +283,9 @@ def review_sources(
 
     Every accepted source with no chunks is queued, not only the ones accepted now: one whose
     earlier indexing never ran or failed (a crash, a fetch error, an empty page) is retried on
-    the next save. A source already indexed costs nothing; the task skips vault-backed ones."""
+    the next save, unless its fetch failed in the last ten minutes. So is one with chunks the
+    embedder never reached. A source a background task is already working on is not queued
+    again (memory.sources_to_index). The task skips vault-backed ones."""
     rows = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
     by_id = {s.id: s for s in rows}
     for sid in body.accepted_ids:
@@ -293,11 +298,11 @@ def review_sources(
         if source.status != "accepted" and source.id is not None:
             remove_source(session, f"sourcedoc:{source.id}")
     session.commit()
-    indexed_refs = set(session.exec(
-        select(Chunk.source_ref).where(Chunk.topic_id == topic_id,
-                                       Chunk.kind == "source_doc")).all())
-    to_index = [s.id for s in rows if s.status == "accepted" and s.id is not None
-                and f"sourcedoc:{s.id}" not in indexed_refs]
+    to_index = sources_to_index(
+        session, topic_id,
+        [s.id for s in rows if s.status == "accepted" and s.id is not None],
+        retriever=retriever,
+    )
     if to_index:
         background.add_task(
             index_accepted_sources, session.get_bind(), to_index,

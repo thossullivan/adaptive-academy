@@ -10,14 +10,23 @@ from __future__ import annotations
 
 import importlib.util
 import sqlite3
+import threading
 import time
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import event, text
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, col, create_engine, select
 
 from adaptive_academy import db
-from adaptive_academy.engine.memory import index_accepted_sources
+from adaptive_academy.api.app import create_app
+from adaptive_academy.api.deps import get_fetcher, get_retriever, get_session
+from adaptive_academy.engine.memory import (
+    SOURCES_IN_FLIGHT,
+    index_accepted_sources,
+    index_text,
+    reindex_topic,
+)
 from adaptive_academy.llm.fts_retriever import FtsRetriever
 from adaptive_academy.llm.hybrid_retriever import HybridRetriever
 from adaptive_academy.llm.scripted_embedder import ScriptedEmbedder
@@ -172,3 +181,147 @@ def test_an_opaque_on_index_hook_starts_with_no_write_held(file_db):
                            retriever=SlowHook())
 
     assert seen and all(result == "written" for result in seen), seen
+
+
+def _more_sources(engine, topic_id: int, n: int) -> list[int]:
+    with Session(engine) as session:
+        docs = [SourceDoc(topic_id=topic_id, title=f"S{i}", url=f"https://e.com/s{i}",
+                          status="accepted") for i in range(n)]
+        session.add_all(docs)
+        session.commit()
+        return [doc.id for doc in docs]
+
+
+def test_two_tasks_over_the_same_sources_fetch_each_once(file_db):
+    """The reviewer's dupprobe: two background tasks for the same three sources (two quick
+    saves) fetched each source twice. A source one task is working on is skipped by the
+    other, and one already indexed is not fetched again."""
+    engine, _path, topic_id, _doc_id = file_db
+    ids = _more_sources(engine, topic_id, 3)
+    fetches: list[str] = []
+
+    def fetch(url: str) -> str:
+        fetches.append(url)
+        time.sleep(0.05)
+        return SOURCE_TEXT
+
+    retriever = _retriever(SlowEmbedder(lambda _call: None))
+    threads = [threading.Thread(target=index_accepted_sources, args=(engine, ids),
+                                kwargs={"fetch": fetch, "retriever": retriever})
+               for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(fetches) == sorted(f"https://e.com/s{i}" for i in range(3))
+    assert not [source_id for source_id in ids if source_id in SOURCES_IN_FLIGHT]
+    with Session(engine) as session:
+        chunks = session.exec(select(Chunk)).all()
+        assert chunks and {chunk.embedding_model for chunk in chunks} == {"scripted"}
+        assert session.execute(text("SELECT count(*) FROM chunk_vec")).scalar_one() == len(chunks)
+
+
+def _client(engine, *, fetch, retriever) -> TestClient:
+    def session_dep():
+        with Session(engine) as session:
+            yield session
+
+    app = create_app()
+    app.dependency_overrides[get_session] = session_dep
+    app.dependency_overrides[get_fetcher] = lambda: fetch
+    app.dependency_overrides[get_retriever] = lambda: retriever
+    return TestClient(app)
+
+
+def test_a_second_save_while_the_first_is_indexing_fetches_each_source_once(file_db):
+    engine, _path, topic_id, doc_id = file_db
+    ids = [doc_id, *_more_sources(engine, topic_id, 2)]
+    fetches: list[str] = []
+    first_fetch_started = threading.Event()
+    second_save_done = threading.Event()
+
+    def fetch(url: str) -> str:
+        fetches.append(url)
+        if len(fetches) == 1:  # the first save's task, on its first source
+            first_fetch_started.set()
+            assert second_save_done.wait(10)
+        return SOURCE_TEXT
+
+    client = _client(engine, fetch=fetch, retriever=_retriever(ScriptedEmbedder()))
+    body = {"accepted_ids": ids, "pruned_ids": []}
+    url = f"/api/topics/{topic_id}/sources/review"
+    first: dict = {}
+    saver = threading.Thread(target=lambda: first.setdefault("resp", client.post(url, json=body)))
+    saver.start()
+    assert first_fetch_started.wait(10)
+    second = client.post(url, json=body)
+    second_save_done.set()
+    saver.join(10)
+
+    assert second.status_code == first["resp"].status_code == 200
+    assert sorted(fetches) == sorted(["https://e.com/x", "https://e.com/s0", "https://e.com/s1"])
+    with Session(engine) as session:
+        refs = set(session.exec(select(Chunk.source_ref)).all())
+        assert refs == {f"sourcedoc:{source_id}" for source_id in ids}
+        assert not session.exec(
+            select(Chunk).where(col(Chunk.embedding_model).is_(None))).all()
+
+
+def test_a_save_embeds_chunks_left_without_a_vector(file_db):
+    """Chunks whose embedding failed or was cut short (embedding_model NULL) are embedded on
+    the next save, without fetching the source again."""
+    engine, _path, topic_id, doc_id = file_db
+    with Session(engine) as session:
+        index_text(session, kind="source_doc", text=SOURCE_TEXT, source_ref=f"sourcedoc:{doc_id}",
+                   topic_id=topic_id, defer_embedding=True)
+        session.commit()
+        assert session.exec(select(Chunk)).all()
+    fetches: list[str] = []
+    client = _client(engine, fetch=lambda u: fetches.append(u) or SOURCE_TEXT,
+                     retriever=_retriever(ScriptedEmbedder()))
+
+    resp = client.post(f"/api/topics/{topic_id}/sources/review",
+                       json={"accepted_ids": [doc_id], "pruned_ids": []})
+
+    assert resp.status_code == 200
+    assert fetches == []
+    with Session(engine) as session:
+        chunks = session.exec(select(Chunk)).all()
+        assert {chunk.embedding_model for chunk in chunks} == {"scripted"}
+        assert session.execute(text("SELECT count(*) FROM chunk_vec")).scalar_one() == len(chunks)
+
+
+def test_a_save_skips_a_source_another_task_is_indexing(file_db):
+    engine, _path, topic_id, doc_id = file_db
+    fetches: list[str] = []
+    client = _client(engine, fetch=lambda u: fetches.append(u) or SOURCE_TEXT,
+                     retriever=_retriever(ScriptedEmbedder()))
+    assert SOURCES_IN_FLIGHT.claim(doc_id)
+    try:
+        resp = client.post(f"/api/topics/{topic_id}/sources/review",
+                           json={"accepted_ids": [doc_id], "pruned_ids": []})
+    finally:
+        SOURCES_IN_FLIGHT.release(doc_id)
+
+    assert resp.status_code == 200
+    assert fetches == []
+
+
+def test_reindex_holds_no_write_lock_while_a_source_is_embedded(file_db, tmp_path):
+    engine, path, topic_id, doc_id = file_db
+    seen: list[str] = []
+    embedder = SlowEmbedder(lambda _call: seen.append(_write_from_second_connection(
+        path, "INSERT INTO topic(title, created_at, is_demo) VALUES ('other', '2026-01-01', 0)")))
+
+    with Session(engine) as session:
+        result = reindex_topic(session, topic_id, vault_path=str(tmp_path),
+                               fetch=lambda _url: SOURCE_TEXT, kinds=("source_doc",),
+                               retriever=_retriever(embedder))
+
+    assert result.indexed > 0
+    assert seen and all(outcome == "written" for outcome in seen), seen
+    with Session(engine) as session:
+        chunks = session.exec(select(Chunk).where(Chunk.source_ref == f"sourcedoc:{doc_id}")).all()
+        assert chunks and {chunk.embedding_model for chunk in chunks} == {"scripted"}
+        assert session.execute(text("SELECT count(*) FROM chunk_vec")).scalar_one() == len(chunks)

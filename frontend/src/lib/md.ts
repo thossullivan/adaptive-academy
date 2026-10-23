@@ -81,44 +81,20 @@ const RULE = /^[ *_-]+$/;
 // A ``` line that withFences left alone has no closing fence. As in CommonMark, it runs to
 // the end of the text, so nothing after it becomes a list.
 const OPEN_FENCE = /^ {0,3}```/;
-// A `code span`, matched the way inlineMd matches it (it may cross line breaks).
-const CODE_SPAN = /`[^`]+`/g;
-
-/** The offsets of the lines of `src` that start inside a code span. */
-function linesInCodeSpans(src: string): Set<number> {
-  const inside = new Set<number>();
-  for (const m of src.matchAll(CODE_SPAN)) {
-    const from = m.index ?? 0;
-    const to = from + m[0].length;
-    for (let nl = src.indexOf('\n', from); nl !== -1 && nl < to; nl = src.indexOf('\n', nl + 1)) {
-      inside.add(nl + 1);
-    }
-  }
-  return inside;
-}
 
 /** Runs of list lines as <ul>/<ol>, everything else as inline markdown with its line
  *  breaks kept. Each item goes through inlineMd (escaped, then formatted); the markers and
  *  the line break on either side of a list are dropped, as for a fenced block, and so is one
  *  blank line on either side (the list's margin). No whitespace sits between the tags, since
- *  the result is shown pre-wrap. A line that starts inside a code span carries on the line
- *  before it, so the span stays whole. */
+ *  the result is shown pre-wrap. As in CommonMark, a list marker wins over a code span that
+ *  crosses lines: the line is a list item, and the span's backticks stay literal. */
 function withLists(src: string): string {
   // Consecutive lines of one kind (text, ul or ol) make one block.
   type Block = { tag: 'text' | 'ul' | 'ol'; start: number; lines: string[] };
   const blocks: Block[] = [];
-  const inSpan = linesInCodeSpans(src);
-  let offset = 0;
   let fenced = false;
   for (const line of src.split('\n')) {
-    const at = offset;
-    offset += line.length + 1;
     const last = blocks.at(-1);
-    if (last && inSpan.has(at)) {
-      // Carry on the line (or list item) the code span started in.
-      last.lines[last.lines.length - 1] += `\n${line}`;
-      continue;
-    }
     if (OPEN_FENCE.test(line)) fenced = true;
     const listy = !fenced && !RULE.test(line);
     const bullet = listy ? line.match(BULLET) : null;

@@ -110,10 +110,16 @@
         researchStatus = '';
         await reload();
       } else if (outcome === 'running') {
-        // Running already: wait for it when the topic can say when it ends.
+        // Running already: wait for it. If it finished between the refusal and this check,
+        // nothing will update the page later, so show its result now. If the check failed,
+        // keep asking (waitForResearch retries) rather than promise an update that never comes.
         const fresh = await api.getTopic(topicId).catch(() => null);
-        if (fresh?.research_running) {
+        if (fresh && !fresh.research_running) {
           topic = fresh;
+          researchStatus = '';
+          await reload();
+        } else {
+          if (fresh) topic = fresh;
           researchStatus = '';
           waitForResearch();
         }

@@ -1,3 +1,5 @@
+import pytest
+
 from adaptive_academy.engine.research import canonicalize_url, dedupe_by_url
 from adaptive_academy.llm.researcher_types import RawSource
 
@@ -84,30 +86,53 @@ def test_dedupe_by_title_keeps_first_on_equal_tier_and_ignores_generic_titles():
         "https://a.org", "https://c.org", "https://d.org"]
 
 
-def test_title_key_keeps_part_and_chapter_titles_apart():
-    from adaptive_academy.engine.research import dedupe_by_title, title_key
+_APART = [
+    ("Stanford CS229 Lecture Notes (Kernels)",
+     "Stanford CS229 Lecture Notes (Support Vector Machines)"),
+    ("Stanford CS229 Lecture Notes (Part V: Kernels)",
+     "Stanford CS229 Lecture Notes (Part VI: SVMs)"),
+    ("Stanford CS229 Lecture Notes (Part V, 2018)", "Stanford CS229 Lecture Notes (Part VI, 2018)"),
+    ("World Development Report (2019)", "World Development Report (2020)"),
+    ("Convex Optimization (Boyd) - Chapter 2", "Convex Optimization (Boyd) - Chapter 5"),
+    ("Deep Learning Specialization (Course 1)", "Deep Learning Specialization (Course 2)"),
+    ("Neural Networks and Deep Learning (Chapter Two)",
+     "Neural Networks and Deep Learning (Chapter Three)"),
+    # One side has no parenthetical: not enough to call them the same work.
+    ("Mathematics for Machine Learning (Deisenroth, Faisal, and Ong)",
+     "Mathematics for Machine Learning"),
+]
+_SAME = [
+    ("Continuous Monitoring of A/B Tests without Pain: Optional Stopping in Bayesian Testing "
+     "(Deng, Liu, Chen)",
+     "Continuous Monitoring of A/B Tests without Pain: Optional Stopping in Bayesian Testing "
+     "(Deng, Lu, Chen, 2016)"),
+    ("Visualizing Data using t-SNE (van der Maaten & Hinton)",
+     "Visualizing Data using t-SNE (van der Maaten and Hinton, 2008)"),
+    ("Bayesian A/B Testing Explained", "bayesian a-b testing, explained"),
+    ("Stanford CS229 Lecture Notes (Kernels)", "stanford cs229 lecture notes: kernels"),
+]
 
-    kernels = "Stanford CS229 Lecture Notes (Part V: Kernels)"
-    svms = "Stanford CS229 Lecture Notes (Part VI: SVMs)"
-    ch2 = "Convex Optimization (Boyd) - Chapter 2"
-    ch5 = "Convex Optimization (Boyd) - Chapter 5"
-    assert len({title_key(t) for t in (kernels, svms, ch2, ch5)}) == 4
-    src = [RawSource(title=t, url=f"https://e.org/{i}", tier=1)
-           for i, t in enumerate((kernels, svms, ch2, ch5))]
+
+@pytest.mark.parametrize(("a", "b"), _APART)
+def test_dedupe_by_title_keeps_different_works_apart(a, b):
+    from adaptive_academy.engine.research import dedupe_by_title, same_work
+
+    assert not same_work(a, b)
+    src = [RawSource(title=a, url="https://e.org/1", tier=1),
+           RawSource(title=b, url="https://e.org/2", tier=1)]
     dropped: list = []
     assert dedupe_by_title(src, on_drop=lambda d, k: dropped.append(d)) == src
     assert dropped == []
 
 
-def test_title_key_drops_only_a_trailing_byline():
-    from adaptive_academy.engine.research import title_key
+@pytest.mark.parametrize(("a", "b"), _SAME)
+def test_dedupe_by_title_merges_the_same_work(a, b):
+    from adaptive_academy.engine.research import dedupe_by_title, same_work
 
-    base = "Convex Optimization"
-    assert title_key(f"{base} (Boyd)") == title_key(f"{base} (Boyd and Vandenberghe, 2004)") \
-        == title_key(base) == "convex optimization"
-    assert title_key("Lecture Notes (Part V)") != title_key("Lecture Notes (Part VI)")
-    assert title_key("A Survey (Smith et al.)") == "a survey"
-    assert title_key("A Survey (draft)") == "a survey draft"
+    assert same_work(a, b)
+    src = [RawSource(title=a, url="https://e.org/1", tier=2),
+           RawSource(title=b, url="https://e.org/2", tier=2)]
+    assert [s.url for s in dedupe_by_title(src)] == ["https://e.org/1"]
 
 
 def test_dedupe_by_title_reports_each_dropped_copy():
@@ -116,7 +141,7 @@ def test_dedupe_by_title_reports_each_dropped_copy():
     title = "Continuous Monitoring of A/B Tests without Pain"
     first = RawSource(title=f"{title} (Deng, Liu, Chen)", url="https://a.org", tier=2)
     better = RawSource(title=f"{title} (Deng, Lu, Chen, 2016)", url="https://b.org", tier=1)
-    later = RawSource(title=title, url="https://c.org", tier=3)
+    later = RawSource(title=f"{title} (Deng et al.)", url="https://c.org", tier=3)
     drops: list[tuple[str, str]] = []
 
     out = dedupe_by_title([first, better, later], on_drop=lambda d, k: drops.append((d.url, k.url)))

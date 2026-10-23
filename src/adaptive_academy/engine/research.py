@@ -134,44 +134,59 @@ def clean_source(s: RawSource) -> RawSource:
 
 
 _TRAILING_PARENTHETICAL = re.compile(r"\s*\(([^()]*)\)\s*$")
-_YEAR = re.compile(r"\b(?:1[5-9]|20)\d\d\b")
-# Words that make a parenthetical part of the work's name ("(Part V: Kernels)", "(Lecture 3)").
-_PART_WORDS = frozenset({
-    "part", "chapter", "ch", "vol", "volume", "lecture", "lesson", "section", "edition", "ed",
-    "appendix", "unit", "module", "week", "episode", "book", "notes",
+# Words that say nothing about which work a parenthetical names: two "(Part V, 2018)" and
+# "(Part VI, 2018)" share "part" but are different parts.
+_GENERIC_PAREN_WORDS = frozenset({
+    "part", "chapter", "lecture", "notes", "edition", "vol", "volume", "the", "and", "et", "al",
+    "ed", "eds", "arxiv", "pdf", "slides", "video", "course",
+    "book", "lesson", "section", "unit", "module", "week", "episode", "appendix",
 })
-_ROMAN = re.compile(r"^[ivxlcdm]+$")
-
-
-def _is_byline(inner: str) -> bool:
-    """True for an author/year parenthetical ("Deng, Lu, Chen, 2016", "Boyd", "Smith et al.")."""
-    s = inner.strip()
-    if not s or _YEAR.search(s) or re.search(r"\bet al\b", s, re.IGNORECASE):
-        return True
-    if any(ch.isdigit() for ch in s) or ":" in s:
-        return False
-    for name in re.split(r"\s*(?:,|;|&|\band\b)\s*", s):
-        words = name.replace(".", " ").split()
-        if not words:
-            continue
-        if len(words) > 3 or not all(w[0].isupper() for w in words):
-            return False
-        if any(w.casefold() in _PART_WORDS or _ROMAN.match(w.casefold()) for w in words):
-            return False
-    return True
-
-
-def title_key(title: str) -> str:
-    """Normalize a title for dedup: case-folded, punctuation collapsed to single spaces, with
-    a trailing author/year parenthetical dropped ("Paper (Deng, Lu, Chen, 2016)"). Everything
-    else counts, so "Notes (Part V: Kernels)" and "Notes (Part VI: SVMs)" stay different."""
-    match = _TRAILING_PARENTHETICAL.search(title)
-    head = title[:match.start()] if match and _is_byline(match.group(1)) else title
-    return " ".join(re.sub(r"[^\w]+", " ", head.casefold()).split())
-
-
 # A shorter key ("introduction", "documentation") is too generic to call two pages the same.
 _MIN_TITLE_KEY = 16
+
+
+def _norm_title(text: str) -> str:
+    """Case-folded, with punctuation and whitespace collapsed to single spaces."""
+    return " ".join(re.sub(r"[^\w]+", " ", text.casefold()).split())
+
+
+@dataclass(frozen=True)
+class _TitleKey:
+    full: str  # the whole title, parenthetical included
+    head: str  # the title before a trailing parenthetical (the whole title if there is none)
+    paren_words: frozenset[str] | None  # distinctive words in that parenthetical, None if none
+
+
+def _title_key(title: str) -> _TitleKey:
+    match = _TRAILING_PARENTHETICAL.search(title)
+    if match is None:
+        return _TitleKey(_norm_title(title), _norm_title(title), None)
+    words = frozenset(
+        w for w in re.findall(r"[^\W\d_]+", match.group(1).casefold())
+        if len(w) >= 3 and w not in _GENERIC_PAREN_WORDS
+    )
+    return _TitleKey(_norm_title(title), _norm_title(title[:match.start()]), words)
+
+
+def _same_work(a: _TitleKey, b: _TitleKey) -> bool:
+    """Two titles name the same work when they match in full, or when the part before a
+    trailing parenthetical matches and both parentheticals share a distinctive word (an author:
+    "(Deng, Liu, Chen)" and "(Deng, Lu, Chen, 2016)"). "(Kernels)" and "(Support Vector
+    Machines)", "(Part V, 2018)" and "(Part VI, 2018)", "(2019)" and "(2020)" stay apart."""
+    if len(a.full) >= _MIN_TITLE_KEY and a.full == b.full:
+        return True
+    return (
+        len(a.head) >= _MIN_TITLE_KEY
+        and a.head == b.head
+        and a.paren_words is not None
+        and b.paren_words is not None
+        and not a.paren_words.isdisjoint(b.paren_words)
+    )
+
+
+def same_work(a: str, b: str) -> bool:
+    """True when two source titles name the same work (see ``_same_work``)."""
+    return _same_work(_title_key(a), _title_key(b))
 
 
 def dedupe_by_title(
@@ -182,20 +197,19 @@ def dedupe_by_title(
     "Paper (Deng, Lu, Chen, 2016)"). Keeps the better tier, else the first; order is kept.
     ``on_drop(dropped, kept)`` is called for every source dropped as a copy."""
     kept: list[RawSource] = []
-    slot: dict[str, int] = {}
+    keys: list[_TitleKey] = []
     for s in sources:
-        key = title_key(s.title)
-        if len(key) < _MIN_TITLE_KEY:
+        key = _title_key(s.title)
+        j = next((i for i, k in enumerate(keys) if _same_work(k, key)), None)
+        if j is None:
             kept.append(s)
-        elif key not in slot:
-            slot[key] = len(kept)
-            kept.append(s)
-        elif s.tier < kept[slot[key]].tier:
+            keys.append(key)
+        elif s.tier < kept[j].tier:
             if on_drop is not None:
-                on_drop(kept[slot[key]], s)
-            kept[slot[key]] = s
+                on_drop(kept[j], s)
+            kept[j], keys[j] = s, key
         elif on_drop is not None:
-            on_drop(s, kept[slot[key]])
+            on_drop(s, kept[j])
     return kept
 
 

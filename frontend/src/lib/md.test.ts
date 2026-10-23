@@ -133,14 +133,24 @@ describe('preMd', () => {
     );
   });
 
-  it('keeps a code span whole when it crosses a line that looks like a list item', () => {
-    expect(preMd('Use `a\n- b` here')).toBe('Use <code>a\n- b</code> here');
+  it('lets a list marker win over a code span that crosses lines, as CommonMark does', () => {
+    expect(preMd('Use `a\n- b` here')).toBe('Use `a<ul class="md-list"><li>b` here</li></ul>');
     expect(preMd('- Use `x\n1. y` now\n- next')).toBe(
-      '<ul class="md-list"><li>Use <code>x\n1. y</code> now</li><li>next</li></ul>'
+      '<ul class="md-list"><li>Use `x</li></ul><ol class="md-list"><li>y` now</li></ol>' +
+        '<ul class="md-list"><li>next</li></ul>'
     );
-    // A lone backtick opens nothing, so the list after it still forms.
+    // Still escaped when the backticks stay literal.
+    expect(preMd('`<b>\n- x</b>`')).toBe('`&lt;b&gt;<ul class="md-list"><li>x&lt;/b&gt;`</li></ul>');
+    // A span across an ordinary line break stays whole.
+    expect(preMd('a `b\nc` d')).toBe('a <code>b\nc</code> d');
+  });
+
+  it('keeps a list after a lone backtick', () => {
     expect(preMd('a ` b\n- c')).toBe('a ` b<ul class="md-list"><li>c</li></ul>');
-    expect(preMd('`<b>\n- x</b>`')).toBe('<code>&lt;b&gt;\n- x&lt;/b&gt;</code>');
+    expect(preMd('Press the ` key to open it.\n\n1. First\n2. Second\n\nThen run `ls`.')).toBe(
+      'Press the ` key to open it.<ol class="md-list"><li>First</li><li>Second</li></ol>' +
+        'Then run <code>ls</code>.'
+    );
   });
 
   it('makes no lists inside an unclosed fence, which runs to the end of the text', () => {
