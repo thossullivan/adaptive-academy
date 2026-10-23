@@ -167,17 +167,17 @@ test('Submit attempt sends the message as an attempt and the header turns to att
   await expect(submit).toHaveAttribute('data-ready', 'false');
 });
 
-test('the reply that shows the worked solution is labelled, and messages render as markdown', async ({ page }) => {
+test('the reply that shows the worked solution is labelled, and tutor replies render as markdown', async ({ page }) => {
   const topic = await seededTopic(page);
   await mockTutor(page, (b) =>
     b.attempt
       ? {
-          reply: 'Right. Mask with `-inf` before the softmax:\n```python\nscores = scores.masked_fill(mask == 0, float("-inf"))\n```\n<img src=x onerror="window.__pwned=1">',
+          reply: 'Right. Mask with `-inf` before the softmax:\n```python\nscores = scores.masked_fill(mask == 0, float("-inf"))\n```\nThen check:\n    assert w.sum(-1) == 1\n<img src=x onerror="window.__pwned=1">',
           attempt_logged: true,
           attempt_outcome: 'accepted',
           reveals_solution: true
         }
-      : { reply: 'What does **each row** of the weights sum to?' }
+      : { reply: 'What does **each row** of the weights sum to? Compare x**2 + y**2 with 2*3*4.' }
   );
   await page.goto(`/topics/${topic.id}/tutor`);
   await settle(page);
@@ -187,17 +187,29 @@ test('the reply that shows the worked solution is labelled, and messages render 
   await input.fill('Why mask before the softmax?');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(log.locator('strong', { hasText: 'each row' })).toBeVisible();
+  // Maths is not mistaken for emphasis.
+  await expect(log.getByText('Compare x**2 + y**2 with 2*3*4.')).toBeVisible();
+  await expect(log.locator('strong')).toHaveCount(1);
+  await expect(log.locator('em')).toHaveCount(0);
   // An ordinary reply is not marked as the solution.
   await expect(page.getByTestId('worked-solution')).toHaveCount(0);
 
-  await input.fill('Set the masked logits to `-inf` so exp gives zero.');
+  // The learner's own words show exactly as typed: no markdown, line breaks and indentation kept.
+  const attempt = 'Set the masked logits to `-inf`, so x**2 stays x**2:\n    w = softmax(s)';
+  await input.fill(attempt);
   await page.getByRole('button', { name: 'Submit attempt' }).click();
   const solution = page.getByTestId('worked-solution');
   await expect(solution).toHaveCount(1);
   await expect(solution).toContainText('Worked solution, unlocked by your attempt');
-  // Code renders as code, in both the learner's attempt and the tutor's reply.
-  await expect(page.getByTestId('attempt-message').locator('code', { hasText: '-inf' })).toBeVisible();
+  const learner = page.getByTestId('attempt-message').getByTestId('learner-text');
+  expect(await learner.textContent()).toBe(attempt);
+  await expect(learner).toHaveCSS('white-space', 'pre-wrap');
+  await expect(page.getByTestId('attempt-message').locator('code, strong, em')).toHaveCount(0);
+  // Tutor code renders as code, and its indented lines keep their indentation.
+  await expect(solution.locator('code', { hasText: '-inf' }).first()).toBeVisible();
   await expect(solution.locator('code.md-pre')).toHaveText('scores = scores.masked_fill(mask == 0, float("-inf"))');
+  await expect(solution.locator('.md')).toHaveCSS('white-space', 'pre-wrap');
+  expect(await solution.locator('.md').textContent()).toContain('Then check:\n    assert w.sum(-1) == 1');
   // Model text never becomes HTML.
   await expect(solution.locator('img')).toHaveCount(0);
   await expect(solution).toContainText('<img src=x onerror="window.__pwned=1">');
@@ -230,6 +242,14 @@ test('the empty Tutor explains the gate and its starter prompts fill the message
   await expect(input).toBeFocused();
   await page.waitForLoadState('networkidle');
   expect(sends).toHaveLength(0);
+
+  // With text in the box the starters step aside, so they can never replace a draft.
+  await expect(starters).toHaveCount(0);
+  await input.fill('');
+  await expect(starters).toHaveCount(2);
+  await input.fill('My own question about the chain rule');
+  await expect(starters).toHaveCount(0);
+  await expect(input).toHaveValue('My own question about the chain rule');
 });
 
 test('an attempt that is not logged gets a kind note and the gate stays shut', async ({ page }) => {

@@ -57,8 +57,12 @@
             {#if item.prompt}
               <p class="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">Prompt: {item.prompt}</p>
             {/if}
+            <!-- A worked solution is the tutor's markdown; attempts and explanations are the
+                 learner's own words, shown exactly as typed. -->
             <p class="md-wrap mt-1.5 text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]">
-              {#if item.text}<Markdown text={item.text} block />{:else}(empty){/if}
+              {#if !item.text}(empty){:else if item.kind === 'solution'}<Markdown text={item.text} pre />{:else}<span
+                  class="whitespace-pre-wrap">{item.text}</span
+                >{/if}
             </p>
             {#if item.verdict}
               <p class="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">{item.verdict}</p>

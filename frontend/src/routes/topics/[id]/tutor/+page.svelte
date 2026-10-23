@@ -37,13 +37,22 @@
   // focus so it can be scrolled from the keyboard too.
   let chipRow = $state<HTMLDivElement | null>(null);
   let chipsOverflow = $state(false);
+  // More chips past the left or right edge: a fade marks that edge.
+  let chipsLeft = $state(false);
+  let chipsRight = $state(false);
+  function measureChips() {
+    const row = chipRow;
+    if (!row) return;
+    chipsOverflow = row.scrollWidth > row.clientWidth + 1;
+    chipsLeft = chipsOverflow && row.scrollLeft > 1;
+    chipsRight = chipsOverflow && row.scrollLeft + row.clientWidth < row.scrollWidth - 1;
+  }
   $effect(() => {
     const row = chipRow;
     if (!row) return;
     void [levels.assistance, levels.challenge, levels.attempt];
-    const measure = () => (chipsOverflow = row.scrollWidth > row.clientWidth + 1);
-    measure();
-    const ro = new ResizeObserver(measure);
+    measureChips();
+    const ro = new ResizeObserver(measureChips);
     ro.observe(row);
     return () => ro.disconnect();
   });
@@ -181,6 +190,7 @@
 
   /** A starter prompt fills the composer for the learner to edit or send; it is never sent. */
   async function useStarter(text: string) {
+    if (input.trim()) return; // never over a draft (the starters hide once there is one)
     input = text;
     await tick();
     composer?.focus();
@@ -229,21 +239,35 @@
         ><path d="M4 2.5h6l2.5 2.5v8.5h-8.5z M6.5 7.5h4 M6.5 10h4" stroke-linejoin="round" /></svg
       >Notes</Button
     >
-    <!-- Scrolls sideways on a phone when the chips don't fit; focusable then, so it scrolls from the keyboard. -->
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <div
-      bind:this={chipRow}
-      role="group"
-      aria-label="This session"
-      tabindex={chipsOverflow ? 0 : undefined}
-      class="flex items-center gap-2 max-md:-mx-6 max-md:w-[calc(100%+3rem)] max-md:overflow-x-auto max-md:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      data-testid="tutor-chips"
-    >
-      <Badge tone="info" dot class="shrink-0 whitespace-nowrap">assistance · {levels.assistance}</Badge>
-      <Badge tone="accent" dot class="shrink-0 whitespace-nowrap">challenge · {levels.challenge}</Badge>
-      <Badge tone={levels.attempt ? 'success' : 'neutral'} dot class="shrink-0 whitespace-nowrap"
-        >{levels.attempt ? 'attempt logged' : 'no attempt yet'}</Badge
+    <!-- Scrolls sideways on a phone when the chips don't fit; focusable then, so it scrolls from
+         the keyboard, and a fade at a cut edge says there is more. The gate chip comes first. -->
+    <div class="relative min-w-0 max-md:-mx-6 max-md:w-[calc(100%+3rem)]">
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        bind:this={chipRow}
+        role="group"
+        aria-label="This session"
+        tabindex={chipsOverflow ? 0 : undefined}
+        onscroll={measureChips}
+        class="flex items-center gap-2 max-md:overflow-x-auto max-md:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        data-testid="tutor-chips"
       >
+        <Badge tone={levels.attempt ? 'success' : 'neutral'} dot class="shrink-0 whitespace-nowrap"
+          >{levels.attempt ? 'attempt logged' : 'no attempt yet'}</Badge
+        >
+        <Badge tone="info" dot class="shrink-0 whitespace-nowrap">assistance · {levels.assistance}</Badge>
+        <Badge tone="accent" dot class="shrink-0 whitespace-nowrap">challenge · {levels.challenge}</Badge>
+      </div>
+      <div
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-bg to-transparent transition-opacity duration-150 md:hidden {chipsLeft ? 'opacity-100' : 'opacity-0'}"
+        data-testid="chips-fade-left"
+      ></div>
+      <div
+        aria-hidden="true"
+        class="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-bg to-transparent transition-opacity duration-150 md:hidden {chipsRight ? 'opacity-100' : 'opacity-0'}"
+        data-testid="chips-fade-right"
+      ></div>
     </div>
   </header>
 
@@ -284,7 +308,7 @@
               </li>
             {/each}
           </ol>
-          {#if starters.length}
+          {#if starters.length && !input.trim()}
             <div class="mt-5" role="group" aria-labelledby="tutor-starters-label">
               <p id="tutor-starters-label" class="text-xs text-muted">Not sure where to start? Pick one to put it in the message box.</p>
               <div class="mt-2 grid gap-2 md:grid-cols-2">
@@ -334,7 +358,13 @@
               {:else}
                 <span class="sr-only">You: </span>
               {/if}
-              <Markdown text={m.content} block />
+              {#if m.role === 'tutor'}
+                <!-- Tutor replies: markdown, with line breaks and indentation kept. -->
+                <Markdown text={m.content} pre />
+              {:else}
+                <!-- The learner's own words exactly as typed: maths like x**2 and pasted code stay literal. -->
+                <span class="whitespace-pre-wrap" data-testid="learner-text">{m.content}</span>
+              {/if}
             </div>
             {#if note}
               <p class="mt-1.5 text-right text-xs leading-relaxed text-muted" data-testid="attempt-note">{note}</p>

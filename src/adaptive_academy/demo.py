@@ -493,9 +493,10 @@ TUTOR_MESSAGES = [
     ("tutor", "Exactly, you've found the problem. Renormalizing afterwards is equivalent to "
               "something you can do in one step. What value could you put in the logits so "
               "that the softmax itself gives those positions zero weight?", 7),
-    ("attempt", "Set the masked logits to `-inf` before the softmax. Since `exp(-inf)` is 0, they get "
-                "zero weight and the rest still sum to 1. In code: "
-                "`scores.masked_fill(mask == 0, float('-inf'))`", 12),
+    # The learner's words show exactly as typed (no markdown), so the code goes on its own line.
+    ("attempt", "Set the masked logits to -inf before the softmax. Since exp(-inf) is 0, they get "
+                "zero weight and the rest still sum to 1. In code:\n"
+                "    scores = scores.masked_fill(mask == 0, float('-inf'))", 12),
     ("tutor", "That's the mechanism. Since you've submitted a real attempt, here's the full "
               "picture: masking with −∞ before the softmax is the same as renormalizing over "
               "the allowed positions, but it's one fused, numerically clean step. One thing to "

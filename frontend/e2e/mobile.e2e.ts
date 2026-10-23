@@ -242,6 +242,24 @@ test.describe('phone', () => {
     const overflows = await chips.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
     if (overflows) await expect(chips).toHaveAttribute('tabindex', '0');
     else await expect(chips).not.toHaveAttribute('tabindex', /.*/);
+
+    // The gate chip comes first, so it is never the one cut off.
+    const first = chips.locator(':scope > span').first();
+    await expect(first).toHaveText('attempt logged');
+    const firstBox = (await first.boundingBox())!;
+    expect(firstBox.x + firstBox.width).toBeLessThanOrEqual(vp.width);
+    // A fade marks the edge with more chips past it, and moves as the row scrolls.
+    const right = page.getByTestId('chips-fade-right');
+    const left = page.getByTestId('chips-fade-left');
+    await expect(right).toHaveClass(overflows ? /opacity-100/ : /opacity-0/);
+    await expect(left).toHaveClass(/opacity-0/);
+    if (overflows) {
+      await chips.focus();
+      await page.keyboard.press('End');
+      await chips.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+      await expect(left).toHaveClass(/opacity-100/);
+      await expect(right).toHaveClass(/opacity-0/);
+    }
   });
 });
 
