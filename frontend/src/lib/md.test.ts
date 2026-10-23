@@ -108,6 +108,50 @@ describe('preMd', () => {
   it('never makes lists inside fenced code', () => {
     expect(preMd('```\n- a\n1. b\n```')).toBe('<code class="md-pre">- a\n1. b</code>');
   });
+
+  it('reads Windows and old Mac line endings as line breaks', () => {
+    const want = 'Check:<ul class="md-list"><li>a</li><li>b</li></ul>done';
+    expect(preMd('Check:\r\n- a\r\n- b\r\ndone')).toBe(want);
+    expect(preMd('Check:\r- a\r- b\rdone')).toBe(want);
+    expect(preMd('Mask:\r\n```\r\nx = 1\r\n```\r\nok')).toBe('Mask:<code class="md-pre">x = 1</code>ok');
+    expect(blockMd('one\r\ntwo')).toBe('one<br>two');
+  });
+
+  it('only takes one to three digits as a list number', () => {
+    expect(preMd('1905. That year he wrote four papers.')).toBe('1905. That year he wrote four papers.');
+    expect(preMd('In 1905. Then 1906.\n2024. Again')).toBe('In 1905. Then 1906.\n2024. Again');
+    expect(preMd('999. last')).toBe('<ol class="md-list" start="999"><li>last</li></ol>');
+  });
+
+  it('leaves a thematic break as text, not a bullet', () => {
+    for (const text of ['* * *', '- - -', '***', '_ _ _', '  * * *  ', '*  -  *']) {
+      expect(preMd(text), text).toBe(inlineMd(text));
+    }
+    expect(preMd('above\n* * *\nbelow')).toBe('above\n* * *\nbelow');
+    expect(preMd('- a\n- - -\n- b')).toBe(
+      '<ul class="md-list"><li>a</li></ul>- - -<ul class="md-list"><li>b</li></ul>'
+    );
+  });
+
+  it('keeps a code span whole when it crosses a line that looks like a list item', () => {
+    expect(preMd('Use `a\n- b` here')).toBe('Use <code>a\n- b</code> here');
+    expect(preMd('- Use `x\n1. y` now\n- next')).toBe(
+      '<ul class="md-list"><li>Use <code>x\n1. y</code> now</li><li>next</li></ul>'
+    );
+    // A lone backtick opens nothing, so the list after it still forms.
+    expect(preMd('a ` b\n- c')).toBe('a ` b<ul class="md-list"><li>c</li></ul>');
+    expect(preMd('`<b>\n- x</b>`')).toBe('<code>&lt;b&gt;\n- x&lt;/b&gt;</code>');
+  });
+
+  it('makes no lists inside an unclosed fence, which runs to the end of the text', () => {
+    expect(preMd('Try:\n```\n- a\n1. b')).toBe('Try:\n```\n- a\n1. b');
+    expect(preMd('- before\n```py\n* x\n2. y')).toBe('<ul class="md-list"><li>before</li></ul>```py\n* x\n2. y');
+    // A closed fence, then an unclosed one: lists between them still form.
+    expect(preMd('```\nx\n```\n- a\n```\n- b')).toBe(
+      '<code class="md-pre">x</code><ul class="md-list"><li>a</li></ul>```\n- b'
+    );
+    expect(preMd('```\n- <img src=x onerror=alert(1)>')).toBe('```\n- &lt;img src=x onerror=alert(1)&gt;');
+  });
 });
 
 describe('blockMd', () => {

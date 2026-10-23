@@ -491,6 +491,8 @@ def test_research_rerun_is_refused_before_any_paid_work(file_session):
     intent = TopicIntent(topic_id=topic.id, goal="build graph memory systems")
     session.add(intent)
     session.add(TopicFoundation(topic_id=topic.id, overview="done", key_concepts=[], prerequisite_map={}))
+    # With no sources a rerun is allowed (test_api_research.py); with a reading list it isn't.
+    session.add(SourceDoc(topic_id=topic.id, title="Paper", url="https://e.com/p"))
     session.commit()
 
     from adaptive_academy.engine.research import ResearchAlreadyDone
@@ -537,6 +539,7 @@ def test_research_route_keeps_502_for_malformed_model_json_and_409_for_rerun(fil
     session.rollback()
 
     session.add(TopicFoundation(topic_id=topic.id, overview="done", key_concepts=[], prerequisite_map={}))
+    session.add(SourceDoc(topic_id=topic.id, title="Paper", url="https://e.com/p"))
     session.commit()
     app, client = _research_client(session, bad_llm, ProbingResearcher(probe))
     try:

@@ -42,3 +42,10 @@ def exclusive_run(key: str) -> Iterator[None]:
         yield
     finally:
         lock.release()
+
+
+def is_running(key: str) -> bool:
+    """Whether the run guard for `key` is held right now (a status read, never a wait)."""
+    with _REGISTRY:
+        lock = _LOCKS.get(key)
+    return lock is not None and lock.locked()

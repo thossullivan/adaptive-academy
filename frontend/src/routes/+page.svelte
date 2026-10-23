@@ -202,9 +202,7 @@
     removing = true;
     demoError = '';
     try {
-      await api.deleteDemo(id);
-      topics.forget(id);
-      await topics.refresh();
+      await topics.remove(id, api.deleteDemo);
       await focusHeading();
     } catch (e) {
       demoError = `Couldn't remove the demo: ${e instanceof Error ? e.message : String(e)}`;

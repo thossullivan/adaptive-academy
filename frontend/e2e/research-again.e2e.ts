@@ -60,3 +60,78 @@ test('a successful Research again reloads the page with the reading list', async
   await expect(page.getByRole('button', { name: 'Save reading list' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Research again' })).toHaveCount(0);
 });
+
+const RUNNING = 'Research is still running for this topic. This page updates when it finishes.';
+const SOURCE = { id: 1, title: 'A found source', url: 'https://example.com/a', tier: 1, summary: 'Summary.', why: 'Why.', rank: 0, angle: 'foundational_papers', status: 'proposed' };
+
+test('opening Sources while research runs says so, then reloads when it finishes', async ({ page }) => {
+  const id = await topicWithoutResearch(page, 'running');
+  let running = true;
+  await page.route(`**/api/topics/${id}`, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const res = await route.fetch();
+    await route.fulfill({ response: res, json: { ...(await res.json()), research_running: running } });
+  });
+  await page.route(`**/api/topics/${id}/sources?status=proposed`, (route) =>
+    running ? route.fallback() : route.fulfill({ json: [SOURCE] })
+  );
+
+  await page.goto(`/topics/${id}/review`);
+  await expect(page.getByTestId('research-running')).toHaveText(RUNNING);
+  await expect(page.getByText("Research didn't finish for this topic.")).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Research again' })).toHaveCount(0);
+  await expect(page.getByText(/0 of 0 kept/i)).toHaveCount(0);
+
+  // Research finishes: the next check reloads the page with the reading list.
+  running = false;
+  await expect(page.getByText('A found source')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('research-running')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save reading list' })).toBeEnabled();
+});
+
+test('Research again refused as already running says so in plain words', async ({ page }) => {
+  const id = await topicWithoutResearch(page, 'conflict');
+  await page.route(`**/api/topics/${id}/research`, (route) =>
+    route.fulfill({ status: 409, json: { detail: `topic:${id}:research is already running; wait for it to finish` } })
+  );
+
+  await page.goto(`/topics/${id}/review`);
+  const again = page.getByRole('button', { name: 'Research again' });
+  await again.click();
+  const status = page.getByTestId('research-status');
+  await expect(status).toHaveText(RUNNING);
+  await expect(status).not.toContainText('Something went wrong');
+  await expect(again).toBeEnabled();
+});
+
+test('a topic with a foundation but no sources offers Research again, not an empty list', async ({ page }) => {
+  const id = await topicWithoutResearch(page, 'foundation');
+  await page.route(`**/api/topics/${id}/foundation`, (route) =>
+    route.fulfill({ json: { overview: 'How the pieces fit.', key_concepts: ['Priors'], prerequisite_map: {} } })
+  );
+
+  await page.goto(`/topics/${id}/review`);
+  await expect(page.getByText('How the pieces fit.')).toBeVisible();
+  await expect(page.getByText("Research didn't finish for this topic.")).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Research again' })).toBeEnabled();
+  await expect(page.getByText(/0 of 0 kept/i)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save reading list' })).toHaveCount(0);
+});
+
+test('Research again never stays stuck when the reload after it fails', async ({ page }) => {
+  const id = await topicWithoutResearch(page, 'reload');
+  let researched = false;
+  await page.route(`**/api/topics/${id}/research`, async (route) => {
+    researched = true;
+    await route.fulfill({ json: { foundation: { overview: '', key_concepts: [], prerequisite_map: {} }, sources: [], events: [] } });
+  });
+  await page.route(`**/api/topics/${id}/sources?status=proposed`, (route) =>
+    researched ? route.fulfill({ status: 500, json: { detail: 'boom' } }) : route.fallback()
+  );
+
+  await page.goto(`/topics/${id}/review`);
+  await page.getByRole('button', { name: 'Research again' }).click();
+  await expect(page.getByTestId('research-status')).toContainText("couldn't load the reading list");
+  await expect(page.getByRole('button', { name: 'Research again' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Researching…' })).toHaveCount(0);
+});

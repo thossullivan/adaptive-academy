@@ -21,7 +21,14 @@ from adaptive_academy.llm.retriever_types import Hit, Retriever
 from adaptive_academy.jsonout import extract_json, require_object, text_items
 from adaptive_academy.llm.types import LLMClient, StructuredOutputError
 from adaptive_academy.prompts import CONCEPT_NAME_CORRECTION, RESEARCH_FOUNDATION
-from adaptive_academy.models import AgentEvent, SourceDoc, Topic, TopicFoundation, TopicIntent
+from adaptive_academy.models import (
+    AgentEvent,
+    SourceDoc,
+    Topic,
+    TopicFoundation,
+    TopicIntent,
+    Track,
+)
 
 # (angle_key, query_template) — {topic} is filled in. Order is the fan-out order.
 ANGLES: list[tuple[str, str]] = [
@@ -82,16 +89,40 @@ def dedupe_by_url(sources: list[RawSource]) -> list[RawSource]:
     return [best[k] for k in sorted(best)]
 
 
-_CITE_TAG = re.compile(r"</?cite\b[^>]*>", re.IGNORECASE)
+# The web-search citation form only: `<cite index='20-11'>` or `<cite index="1-1">` (seen
+# leaked as `(cite index=...>` too). A plain `<cite>` is real HTML and is left alone.
+_SEARCH_CITE_OPEN = r"""[<(]cite\s+index\s*=\s*(?:'[^'<>]*'|"[^"<>]*")\s*>"""
+_CITE_TOKEN = re.compile(
+    rf"(?P<search>{_SEARCH_CITE_OPEN})|(?P<open><cite\b[^>]*>)|(?P<close></cite\s*>)",
+    re.IGNORECASE,
+)
 
 
 def strip_cite_tags(text: str) -> str:
     """Drop web-search citation tags (`<cite index='20-11'>…</cite>`), keeping the text inside.
 
     The search tool's citations sometimes leak into the model's JSON strings; they are markup
-    for the API, not words for the learner.
+    for the API, not words for the learner. Only the `index=` form is removed, with the
+    `</cite>` that closes it; any other `<cite>` and its closing tag stay as written.
     """
-    return _CITE_TAG.sub("", text) if "<" in text else text
+    if "cite" not in text.casefold():
+        return text
+    out: list[str] = []
+    # One entry per open <cite>: True when it was a search citation (its </cite> goes too).
+    stack: list[bool] = []
+    last = 0
+    for match in _CITE_TOKEN.finditer(text):
+        out.append(text[last:match.start()])
+        last = match.end()
+        if match.group("search"):
+            stack.append(True)
+        elif match.group("open"):
+            stack.append(False)
+            out.append(match.group(0))
+        elif not (stack and stack.pop()):
+            out.append(match.group(0))
+    out.append(text[last:])
+    return "".join(out)
 
 
 def clean_source(s: RawSource) -> RawSource:
@@ -102,10 +133,40 @@ def clean_source(s: RawSource) -> RawSource:
     return s
 
 
+_TRAILING_PARENTHETICAL = re.compile(r"\s*\(([^()]*)\)\s*$")
+_YEAR = re.compile(r"\b(?:1[5-9]|20)\d\d\b")
+# Words that make a parenthetical part of the work's name ("(Part V: Kernels)", "(Lecture 3)").
+_PART_WORDS = frozenset({
+    "part", "chapter", "ch", "vol", "volume", "lecture", "lesson", "section", "edition", "ed",
+    "appendix", "unit", "module", "week", "episode", "book", "notes",
+})
+_ROMAN = re.compile(r"^[ivxlcdm]+$")
+
+
+def _is_byline(inner: str) -> bool:
+    """True for an author/year parenthetical ("Deng, Lu, Chen, 2016", "Boyd", "Smith et al.")."""
+    s = inner.strip()
+    if not s or _YEAR.search(s) or re.search(r"\bet al\b", s, re.IGNORECASE):
+        return True
+    if any(ch.isdigit() for ch in s) or ":" in s:
+        return False
+    for name in re.split(r"\s*(?:,|;|&|\band\b)\s*", s):
+        words = name.replace(".", " ").split()
+        if not words:
+            continue
+        if len(words) > 3 or not all(w[0].isupper() for w in words):
+            return False
+        if any(w.casefold() in _PART_WORDS or _ROMAN.match(w.casefold()) for w in words):
+            return False
+    return True
+
+
 def title_key(title: str) -> str:
-    """Normalize a title for dedup: the part before the first "(" (authors, year), case-folded,
-    punctuation collapsed to single spaces."""
-    head = title.split("(", 1)[0]
+    """Normalize a title for dedup: case-folded, punctuation collapsed to single spaces, with
+    a trailing author/year parenthetical dropped ("Paper (Deng, Lu, Chen, 2016)"). Everything
+    else counts, so "Notes (Part V: Kernels)" and "Notes (Part VI: SVMs)" stay different."""
+    match = _TRAILING_PARENTHETICAL.search(title)
+    head = title[:match.start()] if match and _is_byline(match.group(1)) else title
     return " ".join(re.sub(r"[^\w]+", " ", head.casefold()).split())
 
 
@@ -113,9 +174,13 @@ def title_key(title: str) -> str:
 _MIN_TITLE_KEY = 16
 
 
-def dedupe_by_title(sources: list[RawSource]) -> list[RawSource]:
+def dedupe_by_title(
+    sources: list[RawSource],
+    on_drop: Callable[[RawSource, RawSource], None] | None = None,
+) -> list[RawSource]:
     """Collapse the same work found under different URLs (e.g. "Paper (Deng, Liu, Chen)" and
-    "Paper (Deng, Lu, Chen, 2016)"). Keeps the better tier, else the first; order is kept."""
+    "Paper (Deng, Lu, Chen, 2016)"). Keeps the better tier, else the first; order is kept.
+    ``on_drop(dropped, kept)`` is called for every source dropped as a copy."""
     kept: list[RawSource] = []
     slot: dict[str, int] = {}
     for s in sources:
@@ -126,7 +191,11 @@ def dedupe_by_title(sources: list[RawSource]) -> list[RawSource]:
             slot[key] = len(kept)
             kept.append(s)
         elif s.tier < kept[slot[key]].tier:
+            if on_drop is not None:
+                on_drop(kept[slot[key]], s)
             kept[slot[key]] = s
+        elif on_drop is not None:
+            on_drop(s, kept[slot[key]])
     return kept
 
 
@@ -273,6 +342,17 @@ class ResearchAlreadyDone(RuntimeError):
     """The topic already has a foundation; research runs once per topic."""
 
 
+def research_can_rerun(session: Session, topic_id: int) -> bool:
+    """A topic whose research saved a foundation but found no sources can be researched
+    again (the new foundation replaces the old one): there is no reading list to review, so
+    the learner is otherwise stuck. Once there are sources or a track, research is done."""
+    has_sources = session.exec(
+        select(SourceDoc.id).where(SourceDoc.topic_id == topic_id).limit(1)).first() is not None
+    has_track = session.exec(
+        select(Track.id).where(Track.topic_id == topic_id).limit(1)).first() is not None
+    return not has_sources and not has_track
+
+
 def research_topic(
     session: Session,
     topic: Topic,
@@ -311,7 +391,7 @@ def _research_topic_locked(
 ) -> ResearchResult:
     if session.exec(
         select(TopicFoundation).where(TopicFoundation.topic_id == topic.id)
-    ).first() is not None:
+    ).first() is not None and not research_can_rerun(session, topic.id):
         # TopicFoundation.topic_id is unique; a re-run used to spend the whole
         # fan-out and then fail on commit. Refuse before any paid work.
         raise ResearchAlreadyDone("topic already has a foundation; research runs once per topic")
@@ -346,7 +426,13 @@ def _research_topic_locked(
         raw.extend(found)
 
     deduped = dedupe_by_url(raw)
-    ranked = dedupe_by_title(rank_sources(deduped))
+    ranked = dedupe_by_title(
+        rank_sources(deduped),
+        on_drop=lambda dropped, kept: emit(
+            "research:title_deduped",
+            f'dropped "{dropped.title}" ({dropped.url}) as the same work as '
+            f'"{kept.title}" ({kept.url})'[:500]),
+    )
     kept, dropped = ranked[:cap], ranked[cap:]
     if dropped:
         emit("research:capped", f"dropped {len(dropped)} of {len(ranked)}")
@@ -392,6 +478,15 @@ def _research_topic_locked(
         )
         session.add(row)
         source_rows.append(row)
+
+    # A rerun after a run that found no sources replaces that run's foundation. Flushed
+    # first: topic_id is unique, and the unit of work would insert before it deletes.
+    previous = session.exec(
+        select(TopicFoundation).where(TopicFoundation.topic_id == topic.id)).first()
+    if previous is not None:
+        session.delete(previous)
+        session.flush()
+        emit("research:rerun", "replaced a foundation that came with no sources")
 
     foundation = TopicFoundation(
         topic_id=topic.id,

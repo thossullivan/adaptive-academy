@@ -202,3 +202,7 @@ def test_research_topic_stores_sources_without_cite_tags_or_title_duplicates(ses
     assert fnd.overview == "Bayesian testing"
     assert fnd.key_concepts == ["optional stopping"]
     assert fnd.prerequisite_map == {"optional stopping": []}
+    [deduped] = session.exec(select(AgentEvent).where(
+        AgentEvent.topic_id == topic.id, AgentEvent.kind == "research:title_deduped")).all()
+    assert f'dropped "{paper} (Deng, Lu, Chen, 2016)" (https://b.org/q)' in deduped.detail
+    assert "https://a.org/p" in deduped.detail

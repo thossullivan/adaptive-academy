@@ -18,6 +18,8 @@ export interface Topic {
   id: number; title: string; concepts: Concept[]; intent?: Intent | null;
   has_foundation?: boolean;
   has_track?: boolean;
+  /** Research for this topic is running now. Absent from an older API. */
+  research_running?: boolean;
   /** The one-click example topic (POST /api/demo); removable as a unit. */
   is_demo?: boolean;
 }
@@ -162,7 +164,11 @@ export interface VaultSync {
   /** The most recent note that couldn't be updated, and why; "" when none. */
   last_error: string;
   last_error_at: string | null;
+  /** Every unresolved problem, including ones that are not about a note (the vault folder,
+   *  the sync queue). */
   problems: number;
+  /** How many of `problems` are notes the sync left out. Absent from an older API. */
+  skipped_notes?: number;
   pending: number;
 }
 export interface VaultStatus {

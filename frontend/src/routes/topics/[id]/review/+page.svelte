@@ -4,7 +4,7 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import { toasts } from '$lib/toast.svelte';
-  import { runTopicResearch } from '$lib/research';
+  import { pollResearch, RESEARCH_RUNNING, researchTopic } from '$lib/research';
   import { setup } from '$lib/setup.svelte';
   import type { SourceDoc, Foundation, EventOut, Topic } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
@@ -27,10 +27,19 @@
   let justSaved = $state(false);
   let researching = $state(false);
   let researchStatus = $state('');
+  // Research for this topic is running elsewhere (the new-topic page, another tab): the page
+  // asks every few seconds and reloads when it finishes.
+  let researchRunning = $state(false);
+  let stopPolling: (() => void) | null = null;
+  let destroyed = false;
 
   onMount(() => {
     setup.refresh();
     load();
+    return () => {
+      destroyed = true;
+      stopPolling?.();
+    };
   });
 
   async function load() {
@@ -42,32 +51,78 @@
     }
     // Show proposed sources; once they've been saved (accepted), show those instead so the
     // curated list persists on a revisit — otherwise the page reads an empty "0 of 0 kept".
+    // A saved list that kept none shows its dropped sources, unticked.
     sources = await api.listSources(topicId, 'proposed');
     if (!sources.length) {
       sources = await api.listSources(topicId, 'accepted');
       saved = sources.length > 0;
     }
-    for (const s of sources) keep[s.id] = true;
+    let dropped = false;
+    if (!sources.length) {
+      sources = await api.listSources(topicId, 'pruned').catch(() => []);
+      dropped = saved = sources.length > 0;
+    }
+    for (const s of sources) keep[s.id] = !dropped;
     events = await api.listEvents(topicId);
+    if (topic?.research_running) waitForResearch();
     loaded = true;
   }
 
+  /** Show that research is running and reload once it has finished. */
+  function waitForResearch() {
+    researchRunning = true;
+    if (stopPolling || destroyed) return;
+    stopPolling = pollResearch(
+      () => api.getTopic(topicId),
+      async () => {
+        stopPolling = null;
+        if (destroyed) return;
+        researchRunning = false;
+        researchStatus = '';
+        await reload();
+      }
+    );
+  }
+
+  /** load(), saying so when it fails instead of leaving the page half updated. */
+  async function reload() {
+    try {
+      await load();
+    } catch {
+      researchStatus = "Research finished, but the page couldn't load the reading list. Reload the page to see it.";
+    }
+  }
+
   const keptCount = $derived(sources.filter((s) => keep[s.id]).length);
-  // Research failed before it saved anything (e.g. a rejected API key): nothing to review, so
-  // offer to run it again instead of an empty list. A topic with a track has moved on.
-  const needsResearch = $derived(
-    loaded && !foundation && !sources.length && !!topic?.intent && !topic?.has_track
-  );
+  // Nothing to review and no track yet (research failed before it saved a source, e.g. a
+  // rejected API key, or it found none): offer to run it again instead of an empty
+  // "0 of 0 kept" list. A foundation without sources counts, since research can run again
+  // then. A topic with a track (imported, or built) has moved on.
+  const noReadingList = $derived(loaded && !sources.length && !topic?.has_track);
+  const needsResearch = $derived(noReadingList && !researchRunning && !!topic?.intent);
+  const showList = $derived(!needsResearch && !(researchRunning && !sources.length));
 
   async function researchAgain() {
     researching = true;
-    if (await runTopicResearch(topicId, (s) => (researchStatus = s))) {
-      researchStatus = '';
-      await load();
-    } else {
-      events = await api.listEvents(topicId).catch(() => events);
+    try {
+      const outcome = await researchTopic(topicId, (s) => (researchStatus = s));
+      if (outcome === 'done') {
+        researchStatus = '';
+        await reload();
+      } else if (outcome === 'running') {
+        // Running already: wait for it when the topic can say when it ends.
+        const fresh = await api.getTopic(topicId).catch(() => null);
+        if (fresh?.research_running) {
+          topic = fresh;
+          researchStatus = '';
+          waitForResearch();
+        }
+      } else {
+        events = await api.listEvents(topicId).catch(() => events);
+      }
+    } finally {
+      researching = false;
     }
-    researching = false;
   }
 
   async function save() {
@@ -118,7 +173,7 @@
 
 <Page eyebrow="Sources" title="Your reading list" lead="The sources research found for this topic. Keep the ones worth your time, save the list, then build your track from it." width="normal">
   {#snippet actions()}
-    {#if !needsResearch}
+    {#if showList}
       <Button variant="outline" onclick={generateAnchors} disabled={generatingAnchors}>
         {generatingAnchors ? 'Generating…' : 'Generate quizzes'}
       </Button>
@@ -153,10 +208,15 @@
         </div>
       </Card>
     {/if}
+    {#if researchRunning}
+      <Card pad class="rise" eyebrow="Research running">
+        <p class="text-sm text-fg-dim" role="status" data-testid="research-running">{RESEARCH_RUNNING}</p>
+      </Card>
+    {/if}
     <!-- Always mounted so each status change is announced. -->
     <p class="text-xs text-muted empty:hidden" role="status" data-testid="research-status">{researchStatus}</p>
 
-    {#if !needsResearch}
+    {#if showList}
       <div class="flex items-center justify-between">
         <span class="eyebrow">{keptCount} of {sources.length} kept</span>
         <span role="status">{#if saved}<Badge tone="success" dot>saved</Badge>{/if}</span>

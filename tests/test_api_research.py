@@ -69,3 +69,42 @@ def test_research_review_roundtrip(session: Session):
 def test_research_404_for_missing_topic(session: Session):
     client = _client(session)
     assert client.post("/api/topics/999/research").status_code == 404
+
+
+def test_research_can_run_again_when_the_first_run_found_no_sources(session: Session):
+    from sqlmodel import select
+
+    from adaptive_academy.models import TopicFoundation
+
+    client = _client(session)
+    tid = client.post("/api/topics", json={"title": "LLMs", "goal": "learn"}).json()["id"]
+    # A first run that saved a foundation but no sources (every search came back empty).
+    session.add(TopicFoundation(topic_id=tid, overview="empty run", key_concepts=["x"],
+                                prerequisite_map={}))
+    session.commit()
+    topic = client.get(f"/api/topics/{tid}").json()
+    assert topic["has_foundation"] is True
+    assert topic["can_research"] is True
+
+    r = client.post(f"/api/topics/{tid}/research")
+
+    assert r.status_code == 200
+    assert len(r.json()["sources"]) == 2
+    [fnd] = session.exec(select(TopicFoundation).where(TopicFoundation.topic_id == tid)).all()
+    assert fnd.overview == "o"
+    assert any(e["kind"] == "research:rerun" for e in r.json()["events"])
+    # Now there is a reading list: research is done for this topic.
+    assert client.get(f"/api/topics/{tid}").json()["can_research"] is False
+    assert client.post(f"/api/topics/{tid}/research").status_code == 409
+
+
+def test_topic_says_whether_research_is_running_now(session: Session):
+    from adaptive_academy.engine.runlock import exclusive_run
+
+    client = _client(session)
+    tid = client.post("/api/topics", json={"title": "LLMs", "goal": "learn"}).json()["id"]
+    assert client.get(f"/api/topics/{tid}").json()["research_running"] is False
+    with exclusive_run(f"research:{tid}"):
+        assert client.get(f"/api/topics/{tid}").json()["research_running"] is True
+        assert client.get("/api/topics").json()[0]["research_running"] is True
+    assert client.get(f"/api/topics/{tid}").json()["research_running"] is False

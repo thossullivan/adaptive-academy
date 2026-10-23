@@ -261,6 +261,43 @@ def test_review_sources_commits_statuses_when_the_fetcher_raises(session):
     assert "RuntimeError: offline" in event.detail
 
 
+def test_review_sources_retries_an_accepted_source_that_was_never_indexed(session):
+    """An accepted source with no chunks (its indexing failed or never ran) is queued again on
+    the next save; one already indexed is not fetched again."""
+    doc = _source_doc(session)  # accepted, never indexed (e.g. the server stopped mid-task)
+    indexed = SourceDoc(topic_id=doc.topic_id, title="Indexed", url="https://e.com/i",
+                        status="accepted")
+    session.add(indexed)
+    session.commit()
+    index_text(session, kind="source_doc", text="Already indexed text.",
+               topic_id=doc.topic_id, source_ref=f"sourcedoc:{indexed.id}")
+    session.commit()
+    answers = {doc.url: [None, "Fetched on the retry."]}
+    calls: list[str] = []
+
+    def fetch(url: str) -> str | None:
+        calls.append(url)
+        return answers[url].pop(0)
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_fetcher] = lambda: fetch
+    client = TestClient(app)
+    body = {"accepted_ids": [doc.id, indexed.id], "pruned_ids": []}
+
+    first = client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body)
+    second = client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body)
+    third = client.post(f"/api/topics/{doc.topic_id}/sources/review", json=body)
+
+    assert first.status_code == second.status_code == third.status_code == 200
+    # Empty the first time (fetch_skipped), retried and indexed on the second save, then left.
+    assert calls == [doc.url, doc.url]
+    [chunk] = session.exec(select(Chunk).where(Chunk.source_ref == f"sourcedoc:{doc.id}")).all()
+    assert chunk.text == "Fetched on the retry."
+    assert len(session.exec(
+        select(AgentEvent).where(AgentEvent.kind == "memory:fetch_skipped")).all()) == 1
+
+
 def test_index_accepted_sources_logs_an_index_failure_and_keeps_the_status(
     session, monkeypatch
 ):

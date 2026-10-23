@@ -554,6 +554,9 @@ class NotebookSync:
                 "last_error": latest[0] if latest else "",
                 "last_error_at": latest[1] if latest else None,
                 "problems": len(self._problems),
+                # Problems keyed by a concept id are one note each; "vault_path" and "queue"
+                # are about the sync as a whole, so "N notes skipped" counts only these.
+                "skipped_notes": sum(1 for key in self._problems if isinstance(key, int)),
                 "pending": len(self._pending) + self._busy,
                 "dropped": self._dropped,
             }
@@ -583,6 +586,12 @@ class NotebookSync:
     def clear_problem(self, key: object) -> None:
         with self._lock:
             self._problems.pop(key, None)
+
+    def clear_problems(self, keys: set[int]) -> None:
+        """Forget the problems of notes that no longer exist (a deleted topic's concepts)."""
+        with self._lock:
+            for key in keys:
+                self._problems.pop(key, None)
 
     # queue ---------------------------------------------------------------------------------
 

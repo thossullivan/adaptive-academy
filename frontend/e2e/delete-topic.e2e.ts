@@ -100,6 +100,41 @@ test('the delete confirm moves focus to Cancel and back, and Escape cancels', as
   }
 });
 
+test("deleting a topic clears its concepts' note drafts, and keeps other drafts", async ({ page }) => {
+  // Concept ids come back after a delete, so a draft left behind would restore into a new
+  // topic's concept. The topic is mocked to own concept 987001; 987002 belongs elsewhere.
+  const doomed = await makeTopic(page.request, 'drafts');
+  try {
+    await page.route(`**/api/topics/${doomed.id}`, async (route) => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const res = await route.fetch();
+      await route.fulfill({
+        response: res,
+        json: { ...(await res.json()), concepts: [{ id: 987001, name: 'Gone', is_load_bearing: false }] }
+      });
+    });
+    await selectTopic(page, doomed.id);
+    await page.goto('/');
+    await settle(page);
+    await page.evaluate(() => {
+      sessionStorage.setItem('aa.note-draft.987001', JSON.stringify({ v: 1, body: 'old draft', base: null }));
+      sessionStorage.setItem('aa.note-draft.987002', 'keep me');
+    });
+
+    await page.getByRole('button', { name: 'Delete topic' }).click();
+    await page.getByRole('button', { name: 'Yes, delete it' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: doomed.title })).toHaveCount(0);
+
+    const drafts = await page.evaluate(() => ({
+      gone: sessionStorage.getItem('aa.note-draft.987001'),
+      kept: sessionStorage.getItem('aa.note-draft.987002')
+    }));
+    expect(drafts).toEqual({ gone: null, kept: 'keep me' });
+  } finally {
+    await page.request.delete(`/api/topics/${doomed.id}`);
+  }
+});
+
 test('axe: the dashboard mid delete-confirm', async ({ page }) => {
   test.setTimeout(120_000);
   const topic = await makeTopic(page.request, 'axe');

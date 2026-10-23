@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Connection, Engine, or_
+from sqlalchemy import text as sql_text
 from sqlmodel import Session, col, select
 
 from adaptive_academy.engine.fetch import fetch_artifact_text
@@ -466,8 +467,15 @@ def index_text(
     source_mtime: float | None = None,
     splitter: Callable[[str], list[Piece]] | None = None,
     retriever: Retriever | None = None,
+    defer_embedding: bool = False,
 ) -> IndexResult:
-    """Insert or update chunks for one source without committing the session."""
+    """Insert or update chunks for one source without committing the session.
+
+    ``defer_embedding`` leaves every chunk whose vector is missing or stale with
+    ``embedding_model`` NULL instead of calling the retriever's ``on_index``, so the caller
+    can commit the rows and embed them afterwards with no write transaction open
+    (``embed_deferred_chunks``).
+    """
     pieces = (splitter or split_plain)(text)
     existing_chunks = session.exec(
         select(Chunk).where(Chunk.source_ref == source_ref).order_by(Chunk.ordinal)
@@ -544,7 +552,11 @@ def index_text(
         tag_chunk_concepts(session, chunk, names)
 
     on_index = getattr(retriever, "on_index", None)
-    if callable(on_index):
+    if defer_embedding:
+        for chunk in changed_chunks:
+            chunk.embedding_model = None
+            session.add(chunk)
+    elif callable(on_index):
         session.flush()
         changed_ids = [chunk.id for chunk in changed_chunks if chunk.id is not None]
         try:
@@ -563,6 +575,102 @@ def index_text(
             )
 
     return IndexResult(indexed=indexed, skipped=skipped, removed=len(orphans))
+
+
+def take_write_lock(session: Session) -> None:
+    """Start the session's write transaction now, before it reads anything it acts on.
+
+    SQLite takes the write lock at a transaction's first write, so a read-then-write can act
+    on a state another connection changes in between. A no-op UPDATE takes the lock up front
+    (waiting out the busy timeout like any write); the reads after it see every commit made
+    before and none that can come after, until this session commits or rolls back.
+    """
+    session.execute(sql_text("UPDATE topic SET id = id WHERE 0"))
+
+
+def embed_deferred_chunks(
+    bind: Engine | Connection,
+    source_ref: str,
+    retriever: Retriever | None,
+    *,
+    topic_id: int | None = None,
+) -> int:
+    """Embed one source's chunks that ``index_text(defer_embedding=True)`` left without a
+    vector, after their rows were committed. Returns how many chunks got a vector.
+
+    The local embedder takes seconds to tens of seconds on a large source, about as long as a
+    writer waits for the lock (the busy timeout is 30 s). So no write transaction is open
+    while it runs: each batch is read, embedded with no session open, then written in one
+    short transaction that takes the lock first and skips any chunk that changed or went away
+    meanwhile. A retriever without ``embedder`` and ``store_vectors`` gets its ``on_index``
+    called per batch in a fresh session, so the hook starts with no write held. A failure is
+    logged as ``memory:error`` and leaves the rest without a vector (a reindex embeds them).
+    """
+    on_index = getattr(retriever, "on_index", None)
+    if not callable(on_index):
+        return 0
+    embedder = getattr(retriever, "embedder", None)
+    store_vectors = getattr(retriever, "store_vectors", None)
+    two_phase = embedder is not None and callable(store_vectors)
+    embedded = 0
+    last_id = 0
+    while True:
+        with Session(bind) as session:
+            rows = session.exec(
+                select(Chunk.id, Chunk.context, Chunk.text)
+                .where(
+                    Chunk.source_ref == source_ref,
+                    Chunk.id > last_id,
+                    col(Chunk.embedding_model).is_(None),
+                )
+                .order_by(Chunk.id)
+                .limit(REEMBED_BATCH)
+            ).all()
+        if not rows:
+            return embedded
+        last_id = rows[-1][0]
+        ids = [row[0] for row in rows]
+        try:
+            if not two_phase:
+                with Session(bind) as session:
+                    on_index(session, ids)
+                    session.commit()
+                continue
+            vectors = embedder.embed([f"{context}\n{text}" for _, context, text in rows])
+            if len(vectors) != len(rows):
+                raise ValueError(
+                    f"embedder returned {len(vectors)} vectors for {len(rows)} texts")
+            with Session(bind) as session:
+                take_write_lock(session)
+                current = {
+                    chunk.id: chunk
+                    for chunk in session.exec(
+                        select(Chunk).where(col(Chunk.id).in_(ids))
+                    ).all()
+                }
+                pairs: list[tuple[Chunk, list[float]]] = []
+                for (chunk_id, context, text), vector in zip(rows, vectors, strict=True):
+                    chunk = current.get(chunk_id)
+                    if (chunk is not None and chunk.embedding_model is None
+                            and chunk.context == context and chunk.text == text):
+                        pairs.append((chunk, vector))
+                if pairs:
+                    store_vectors(session, pairs)
+                session.commit()
+            embedded += len(pairs)
+        except Exception as exc:
+            try:
+                with Session(bind) as session:
+                    _add_memory_event(
+                        session,
+                        kind="memory:error",
+                        detail=f"embed {source_ref}: {type(exc).__name__}: {exc}"[:400],
+                        event_target={"topic_id": topic_id},
+                    )
+                    session.commit()
+            except Exception:
+                logger.exception("could not record memory:error for %s", source_ref)
+            return embedded
 
 
 def remove_source(session: Session, source_ref: str) -> int:
@@ -809,6 +917,7 @@ def _index_fetched_source(
     problem: str | None,
     *,
     retriever: Retriever | None,
+    defer_embedding: bool = False,
 ) -> IndexResult:
     if text is None:
         _add_memory_event(
@@ -827,6 +936,7 @@ def _index_fetched_source(
         topic_id=doc.topic_id,
         heading=doc.title,
         retriever=retriever,
+        defer_embedding=defer_embedding,
     )
 
 
@@ -840,9 +950,11 @@ def index_accepted_sources(
     """Fetch and index sources the learner just accepted, after the review request returned.
 
     Each source gets its own short sessions: a read, the network fetch with no session open,
-    then one write transaction. No write lock spans a fetch, so a second save (or any other
-    writer) waits at most for one source's write. A source pruned meanwhile is left alone. A
-    failure on one source is logged as an event and never touches the saved statuses.
+    one write transaction for the chunk rows, then the embedding in committed batches with no
+    write transaction open while the embedder runs (embed_deferred_chunks). No write lock
+    spans a fetch or an embedding, so a second save (or any other writer) waits at most for
+    one short write. A source pruned meanwhile is left alone. A failure on one source is
+    logged as an event and never touches the saved statuses.
     """
     for source_id in source_ids:
         topic_id = None
@@ -854,18 +966,19 @@ def index_accepted_sources(
                 url, topic_id = doc.url, doc.topic_id
             text, problem = _fetch_source_text(url, fetch)
             with Session(bind) as session:
+                # Lock first, so the status check and index_text's read of the existing
+                # chunks can't miss a prune, a topic delete or another save of this source
+                # that commits before this write.
+                take_write_lock(session)
                 doc = session.get(SourceDoc, source_id)
                 if doc is None or doc.status != "accepted":
                     continue
-                _index_fetched_source(session, doc, text, problem, retriever=retriever)
-                # The flush took the write lock, so this re-read can't miss a prune that
-                # committed after the check above.
-                session.flush()
-                session.refresh(doc)
-                if doc.status != "accepted":
-                    session.rollback()
-                    continue
+                _index_fetched_source(session, doc, text, problem, retriever=retriever,
+                                      defer_embedding=True)
                 session.commit()
+            if text is not None:
+                embed_deferred_chunks(bind, f"sourcedoc:{source_id}", retriever,
+                                      topic_id=topic_id)
         except Exception as exc:
             try:
                 with Session(bind) as session:

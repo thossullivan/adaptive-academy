@@ -43,6 +43,19 @@ def test_strip_cite_tags_keeps_the_inner_text():
     assert strip_cite_tags("x < y and <citation> stays") == "x < y and <citation> stays"
 
 
+def test_strip_cite_tags_leaves_literal_html_cite_alone():
+    from adaptive_academy.engine.research import strip_cite_tags
+
+    literal = "Use the <cite> element; <CITE>Moby Dick</CITE>."
+    assert strip_cite_tags(literal) == literal
+    assert strip_cite_tags('<cite class="t">Title</cite>') == '<cite class="t">Title</cite>'
+    # A search citation inside literal markup: only the search tag and its own </cite> go.
+    mixed = "<cite>Moby <cite index='2-1'>Dick</cite></cite>"
+    assert strip_cite_tags(mixed) == "<cite>Moby Dick</cite>"
+    # A </cite> with no search opener to pair with stays.
+    assert strip_cite_tags("a </cite> b <cite index=\"1\">c</cite>") == "a </cite> b c"
+
+
 def test_dedupe_by_title_collapses_the_same_paper_under_two_urls():
     from adaptive_academy.engine.research import dedupe_by_title
 
@@ -51,7 +64,7 @@ def test_dedupe_by_title_collapses_the_same_paper_under_two_urls():
         RawSource(title=f"{title} (Deng, Liu, Chen)", url="https://a.org/paper", tier=2),
         RawSource(title="Other work", url="https://b.org", tier=1),
         RawSource(title=f"{title.upper()}! (Deng, Lu, Chen, 2016)", url="https://c.org/x", tier=1),
-        RawSource(title=f"{title} (again)", url="https://d.org", tier=2),
+        RawSource(title=f"{title} (Deng et al.)", url="https://d.org", tier=2),
     ]
     out = dedupe_by_title(src)
     # The tier-1 copy replaces the tier-2 one in its slot; the later tier-2 copy is dropped.
@@ -69,3 +82,44 @@ def test_dedupe_by_title_keeps_first_on_equal_tier_and_ignores_generic_titles():
     ]
     assert [s.url for s in dedupe_by_title(src)] == [
         "https://a.org", "https://c.org", "https://d.org"]
+
+
+def test_title_key_keeps_part_and_chapter_titles_apart():
+    from adaptive_academy.engine.research import dedupe_by_title, title_key
+
+    kernels = "Stanford CS229 Lecture Notes (Part V: Kernels)"
+    svms = "Stanford CS229 Lecture Notes (Part VI: SVMs)"
+    ch2 = "Convex Optimization (Boyd) - Chapter 2"
+    ch5 = "Convex Optimization (Boyd) - Chapter 5"
+    assert len({title_key(t) for t in (kernels, svms, ch2, ch5)}) == 4
+    src = [RawSource(title=t, url=f"https://e.org/{i}", tier=1)
+           for i, t in enumerate((kernels, svms, ch2, ch5))]
+    dropped: list = []
+    assert dedupe_by_title(src, on_drop=lambda d, k: dropped.append(d)) == src
+    assert dropped == []
+
+
+def test_title_key_drops_only_a_trailing_byline():
+    from adaptive_academy.engine.research import title_key
+
+    base = "Convex Optimization"
+    assert title_key(f"{base} (Boyd)") == title_key(f"{base} (Boyd and Vandenberghe, 2004)") \
+        == title_key(base) == "convex optimization"
+    assert title_key("Lecture Notes (Part V)") != title_key("Lecture Notes (Part VI)")
+    assert title_key("A Survey (Smith et al.)") == "a survey"
+    assert title_key("A Survey (draft)") == "a survey draft"
+
+
+def test_dedupe_by_title_reports_each_dropped_copy():
+    from adaptive_academy.engine.research import dedupe_by_title
+
+    title = "Continuous Monitoring of A/B Tests without Pain"
+    first = RawSource(title=f"{title} (Deng, Liu, Chen)", url="https://a.org", tier=2)
+    better = RawSource(title=f"{title} (Deng, Lu, Chen, 2016)", url="https://b.org", tier=1)
+    later = RawSource(title=title, url="https://c.org", tier=3)
+    drops: list[tuple[str, str]] = []
+
+    out = dedupe_by_title([first, better, later], on_drop=lambda d, k: drops.append((d.url, k.url)))
+
+    assert out == [better]
+    assert drops == [("https://a.org", "https://b.org"), ("https://c.org", "https://b.org")]

@@ -24,7 +24,8 @@ from sqlalchemy import Table, delete, or_, update
 from sqlalchemy import select as sa_select
 from sqlmodel import Session, SQLModel, col, select
 
-from adaptive_academy.engine.memory import remove_source
+from adaptive_academy.engine.memory import remove_source, take_write_lock
+from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC
 from adaptive_academy.engine.runlock import exclusive_run
 from adaptive_academy.engine.vault import _remove_vault_source
 from adaptive_academy.models import (
@@ -119,6 +120,11 @@ def delete_topic(session: Session, topic_id: int) -> bool:
     if topic is None:
         return False
     with exclusive_run(f"research:{topic_id}"), exclusive_run(f"curriculum:{topic_id}"):
+        # Take the write lock before scanning: a background writer (source indexing, the
+        # trace writer) that commits a row for this topic between the scan and the final
+        # delete would otherwise make delete(Topic) fail its foreign-key check. From here no
+        # other connection can write until the commit below; they wait, then see no topic.
+        take_write_lock(session)
         concept_ids = set(session.exec(
             select(Concept.id).join(Track).where(Track.topic_id == topic_id)
         ).all())
@@ -138,4 +144,7 @@ def delete_topic(session: Session, topic_id: int) -> bool:
             if ids:
                 session.execute(delete(table).where(table.c.id.in_(ids)))
         session.commit()
+    # Its notes' sync problems would keep the Vault page reporting a skipped note for a
+    # topic that is gone.
+    NOTEBOOK_SYNC.clear_problems(concept_ids)
     return True

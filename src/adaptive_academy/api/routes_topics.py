@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from typing import Optional
 
-from adaptive_academy.engine.runlock import RunInProgress
+from adaptive_academy.engine.runlock import RunInProgress, is_running
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from sqlmodel import Session, select
@@ -38,6 +38,7 @@ from adaptive_academy.engine.gates import evaluate_milestone_readonly, milestone
 from adaptive_academy.engine.memory import index_accepted_sources, remove_source
 from adaptive_academy.engine.research import (
     ResearchAlreadyDone,
+    research_can_rerun,
     research_topic,
     strip_cite_tags,
 )
@@ -58,6 +59,7 @@ from adaptive_academy.llm.types import LLMClient
 from adaptive_academy.models import (
     AgentEvent,
     Assessment,
+    Chunk,
     Concept,
     Deliverable,
     Item,
@@ -127,6 +129,8 @@ def _topic_out(session: Session, topic: Topic) -> TopicOut:
         else None,
         has_foundation=has_foundation,
         has_track=has_track,
+        research_running=is_running(f"research:{topic.id}"),
+        can_research=not has_foundation or research_can_rerun(session, topic.id),
         is_demo=topic.is_demo,
     )
 
@@ -271,15 +275,17 @@ def review_sources(
     fetch: Callable[[str], str | None] = Depends(get_fetcher),
     retriever: Retriever = Depends(get_retriever),
 ) -> list[SourceDocOut]:
-    """Save the reading list and return at once; newly accepted sources are fetched and
-    indexed afterwards (index_accepted_sources), so no write lock spans a network fetch."""
+    """Save the reading list and return at once; accepted sources not indexed yet are fetched
+    and indexed afterwards (index_accepted_sources), so no write lock spans a network fetch.
+
+    Every accepted source with no chunks is queued, not only the ones accepted now: one whose
+    earlier indexing never ran or failed (a crash, a fetch error, an empty page) is retried on
+    the next save. A source already indexed costs nothing; the task skips vault-backed ones."""
     rows = session.exec(select(SourceDoc).where(SourceDoc.topic_id == topic_id)).all()
     by_id = {s.id: s for s in rows}
-    newly_accepted: list[int] = []
     for sid in body.accepted_ids:
-        if sid in by_id and by_id[sid].status != "accepted":
+        if sid in by_id:
             by_id[sid].status = "accepted"
-            newly_accepted.append(sid)
     for sid in body.pruned_ids:
         if sid in by_id:
             by_id[sid].status = "pruned"
@@ -287,9 +293,14 @@ def review_sources(
         if source.status != "accepted" and source.id is not None:
             remove_source(session, f"sourcedoc:{source.id}")
     session.commit()
-    if newly_accepted:
+    indexed_refs = set(session.exec(
+        select(Chunk.source_ref).where(Chunk.topic_id == topic_id,
+                                       Chunk.kind == "source_doc")).all())
+    to_index = [s.id for s in rows if s.status == "accepted" and s.id is not None
+                and f"sourcedoc:{s.id}" not in indexed_refs]
+    if to_index:
         background.add_task(
-            index_accepted_sources, session.get_bind(), newly_accepted,
+            index_accepted_sources, session.get_bind(), to_index,
             fetch=fetch, retriever=retriever,
         )
     for s in rows:

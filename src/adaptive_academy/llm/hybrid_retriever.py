@@ -132,11 +132,20 @@ class HybridRetriever:
         texts = [f"{chunk.context}\n{chunk.text}" for chunk in ordered_chunks]
         vectors = self.embedder.embed(texts)
         _validate_vectors(vectors, expected=len(ordered_chunks), dim=self.embedder.dim)
+        self.store_vectors(session, list(zip(ordered_chunks, vectors, strict=True)))
+
+    def store_vectors(
+        self, session: Session, pairs: list[tuple[Chunk, list[float]]]
+    ) -> None:
+        """Write vectors computed earlier (engine/memory.py embed_deferred_chunks embeds
+        with no transaction open, then calls this inside one short write)."""
+        _validate_vectors([vector for _, vector in pairs], expected=len(pairs),
+                          dim=self.embedder.dim)
         delete_statement = text("DELETE FROM chunk_vec WHERE chunk_id = :chunk_id")
         insert_statement = text(
             "INSERT INTO chunk_vec(chunk_id, embedding) VALUES (:chunk_id, :embedding)"
         )
-        for chunk, vector in zip(ordered_chunks, vectors, strict=True):
+        for chunk, vector in pairs:
             session.execute(delete_statement, {"chunk_id": chunk.id})
             session.execute(
                 insert_statement,

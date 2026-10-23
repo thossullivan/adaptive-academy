@@ -57,6 +57,12 @@ class TopicOut(BaseModel):
     has_foundation: bool = False
     has_track: bool = False
     is_demo: bool = False
+    # Research for this topic is running now (engine/runlock.py), as opposed to a run that
+    # stopped without finishing.
+    research_running: bool = False
+    # POST /research would start a run: no foundation yet, or one that came with no sources
+    # (engine/research.py research_can_rerun).
+    can_research: bool = True
 
 
 class StartConversationIn(BaseModel):
@@ -461,6 +467,9 @@ class VaultSyncOut(BaseModel):
     last_error: str = ""
     last_error_at: Optional[datetime] = None
     problems: int = 0
+    # Notes skipped (problems tied to one concept note); `problems` also counts problems with
+    # the sync as a whole (an unusable vault path, a full queue).
+    skipped_notes: int = 0
     pending: int = 0
 
 

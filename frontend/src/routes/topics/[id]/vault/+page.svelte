@@ -5,7 +5,7 @@
   import { toasts } from '$lib/toast.svelte';
   import type { MemoryHit, MemoryStats, VaultStatus, VaultIngestResult, VaultExportResult, VaultExportAllResult, VaultSync } from '$lib/types';
   import { timeAgo } from '$lib/events';
-  import { clearedSyncText, lastSyncedText, syncTargetText, updateSyncTarget } from '$lib/notebook';
+  import { clearedSyncText, lastSyncedText, skippedNotes, syncTargetText, updateSyncTarget } from '$lib/notebook';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Input, Badge, LiveStatus } from '$lib/ui';
   import MemorySearchResults from './MemorySearchResults.svelte';
@@ -244,7 +244,7 @@
             {/if}
             {#if sync.last_error}
               <p class="mt-1 text-danger" role="status">
-                {sync.last_error}{#if sync.problems > 1} ({sync.problems} notes need attention){/if}
+                {sync.last_error}{#if skippedNotes(sync) > 1} ({skippedNotes(sync)} notes need attention){/if}
               </p>
             {/if}
           </div>

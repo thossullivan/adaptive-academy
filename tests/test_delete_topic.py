@@ -403,3 +403,99 @@ def test_delete_route_is_409_while_research_runs(client, session):
     assert r.status_code == 409
     assert "still being researched" in r.json()["detail"]
     assert client.get(f"/api/topics/{tid}").status_code == 200
+
+
+def _topic_with_concept(session: Session) -> tuple[int, int]:
+    topic = Topic(title="Sync")
+    session.add(topic)
+    session.flush()
+    track = Track(topic_id=topic.id, title="Core")
+    session.add(track)
+    session.flush()
+    concept = Concept(track_id=track.id, name="priors")
+    session.add(concept)
+    session.commit()
+    return topic.id, concept.id
+
+
+def test_delete_topic_clears_its_notes_sync_problems(session):
+    from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC
+
+    tid, cid = _topic_with_concept(session)
+    _other_tid, other_cid = _topic_with_concept(session)
+    NOTEBOOK_SYNC.reset()
+    try:
+        NOTEBOOK_SYNC.record_problem(cid, "Couldn't update priors.md: locked")
+        NOTEBOOK_SYNC.record_problem(other_cid, "Couldn't update priors.md: locked")
+        NOTEBOOK_SYNC.record_problem("vault_path", "Couldn't sync to the vault: gone")
+        before = NOTEBOOK_SYNC.status()
+        assert (before["problems"], before["skipped_notes"]) == (3, 2)
+
+        assert delete_topic(session, tid) is True
+
+        after = NOTEBOOK_SYNC.status()
+        assert (after["problems"], after["skipped_notes"]) == (2, 1)
+    finally:
+        NOTEBOOK_SYNC.reset()
+
+
+def test_vault_status_reports_skipped_notes_apart_from_other_problems(client):
+    from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC
+
+    NOTEBOOK_SYNC.reset()
+    try:
+        NOTEBOOK_SYNC.record_problem(7, "Couldn't update a.md: locked")
+        NOTEBOOK_SYNC.record_problem("queue", "The vault sync queue is full")
+        sync = client.get("/api/vault/status").json()["sync"]
+        assert sync["problems"] == 2
+        assert sync["skipped_notes"] == 1
+    finally:
+        NOTEBOOK_SYNC.reset()
+
+
+def test_delete_topic_holds_the_write_lock_from_the_scan_to_the_delete(tmp_path, monkeypatch):
+    """A background writer that commits a chunk for the topic after the scan would make the
+    final delete(Topic) fail its foreign-key check; the lock taken first keeps it out."""
+    import sqlite3
+
+    from adaptive_academy import db
+    from adaptive_academy.engine import topics
+
+    path = str(tmp_path / "delete.db")
+    engine = create_engine(f"sqlite:///{path}", connect_args=db.CONNECT_ARGS)
+
+    @event.listens_for(engine, "connect")
+    def _pragma(dbapi_connection, _):
+        dbapi_connection.execute("PRAGMA journal_mode=WAL")
+        dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+    SQLModel.metadata.create_all(engine)
+    ensure_fts(engine)
+    late_writes: list[str] = []
+    real_owned_rows = topics.owned_rows
+
+    def owned_rows_then_late_chunk(session, topic_id):
+        owned = real_owned_rows(session, topic_id)
+        conn = sqlite3.connect(path, timeout=0.2)
+        conn.execute("PRAGMA foreign_keys=ON")
+        try:
+            conn.execute(
+                "INSERT INTO chunk(kind, topic_id, source_ref, ordinal, heading, text, context, "
+                "content_hash, meta, created_at) VALUES ('source_doc', ?, 'sourcedoc:999', 0, "
+                "'', 'late', '', 'h', '{}', '2026-01-01')", (topic_id,))
+            conn.commit()
+            late_writes.append("written")
+        except sqlite3.OperationalError as exc:
+            late_writes.append(f"blocked: {exc}")
+        finally:
+            conn.close()
+        return owned
+
+    monkeypatch.setattr(topics, "owned_rows", owned_rows_then_late_chunk)
+    with Session(engine) as session:
+        tid, _cid = _topic_with_concept(session)
+        assert delete_topic(session, tid) is True
+        assert session.get(Topic, tid) is None
+        assert session.exec(select(Chunk)).all() == []
+    assert late_writes == ["blocked: database is locked"]
+    engine.dispose()

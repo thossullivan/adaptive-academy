@@ -28,7 +28,7 @@
 </script>
 
 {#if tone && comeback.move}
-  {@const eyebrow = tone === 'launch' ? 'Ready to sail' : tone === 'warm' ? 'Becalmed' : 'Catching a breeze'}
+  {@const eyebrow = uncharted ? 'Getting started' : tone === 'launch' ? 'Ready to sail' : tone === 'warm' ? 'Becalmed' : 'Catching a breeze'}
   <Card class="rise">
     <div class="eyebrow mb-1 flex items-center gap-1.5">
       <Icon name={tone === 'warm' ? 'flag' : 'ship'} class="size-3.5 shrink-0" />{eyebrow}
