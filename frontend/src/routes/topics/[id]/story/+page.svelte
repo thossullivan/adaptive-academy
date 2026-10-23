@@ -44,7 +44,7 @@
           { l: 'Progress', v: `${facts.progress_pct}%`, h: `${facts.items_done}/${facts.items_total} steps` },
           { l: 'Assessments', v: facts.assessments_count, h: facts.mean_score == null ? 'no mean yet' : `mean ${Math.round(facts.mean_score * 100)}%` },
           { l: 'Days active', v: facts.span_days, h: `${facts.phases_completed}/${facts.phases_total} phases` },
-          { l: 'Solid concepts', v: facts.concepts_solid.length, h: `${facts.concepts_untested.length} untested · ${facts.load_bearing_shaky.length} shaky load-bearing` }
+          { l: 'Solid concepts', v: facts.concepts_solid.length, h: `${facts.concepts_untested.length} untested · ${facts.load_bearing_shaky.length} shaky key concept${facts.load_bearing_shaky.length === 1 ? '' : 's'}` }
         ] as s}
           <div>
             <div class="eyebrow">{s.l}</div>
@@ -62,9 +62,12 @@
   </div>
 {/snippet}
 
-<Page eyebrow="Progress story" title="Your build-in-public chapter" lead="A generation-first narrative of how far you've come — grounded in your real numbers, honest about the gaps." width="normal">
+<Page eyebrow="Story" title="Your progress story" lead="A short write-up of how far you've come, for sharing what you're building. It's based on your real numbers and is honest about the gaps." width="normal">
+  <!-- Before the first story, the empty state's button is the one action on the page. -->
   {#snippet actions()}
-    <Button onclick={compose} disabled={busy}>{busy ? 'Composing…' : story ? 'Recompose' : 'Compose my story'}</Button>
+    {#if story}
+      <Button variant="outline" onclick={compose} disabled={busy}>{busy ? 'Writing…' : 'Write it again'}</Button>
+    {/if}
   {/snippet}
 
   <LiveStatus message={status} />
@@ -79,7 +82,7 @@
           <circle cx="16" cy="16" r="12" fill="none" stroke="var(--border)" stroke-width="2" />
           <path d="M16 4a12 12 0 0 1 12 12" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" />
         </svg>
-        <span class="eyebrow">reading your trajectory…</span>
+        <span class="eyebrow">reading your progress…</span>
       </div>
     </div>
   {:else if story}
@@ -113,8 +116,8 @@
         <div class="mx-auto mb-4 grid size-14 place-items-center rounded-full border border-border bg-surface text-2xl text-accent" aria-hidden="true">✶</div>
         <h2 class="text-xl text-fg">Compose your progress story</h2>
         <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-          An agent reads your assessments, deltas, shipped artifacts, and calibration, then writes the build-in-public
-          chapter of where you are — wins and shaky spots both.
+          An agent reads your grades, what you've shipped, and how well you judged yourself, then writes up
+          where you are. It covers the wins and the weak spots.
         </p>
         <div class="mt-6"><Button onclick={compose} size="lg" disabled={busy}>{busy ? 'Composing…' : 'Compose my story'}</Button></div>
       </div>

@@ -122,15 +122,15 @@
 
 <LiveStatus message={status} />
 
-<Page eyebrow="Generative practice" title="Practice" lead="The work that actually solidifies understanding — struggle before you're shown, and confront what you only thought you knew." width="normal">
+<Page eyebrow="Learn" title="Practice" lead="Two ways to practice a concept: try a new problem before you're shown how, or say how well you know it and then check." width="normal">
   {#snippet actions()}
-    <Select bind:value={conceptId} class="w-56" aria-label="Concept to practice">
+    <Select bind:value={conceptId} class="w-auto min-w-56 max-w-[min(24rem,calc(100vw-3rem))]" aria-label="Concept to practice" data-testid="concept-picker">
       {#each concepts as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
     </Select>
   {/snippet}
 
   {#if !concepts.length}
-    <Card pad class="text-center"><p class="py-8 text-sm text-muted">No concepts to practice yet — generate a curriculum first.</p></Card>
+    <Card pad class="text-center"><p class="py-8 text-sm text-muted">No concepts to practice yet. Make a track on the Sources page first.</p></Card>
   {:else}
     <!-- Tabs -->
     <div role="group" aria-label="Practice mode" class="mb-4 flex gap-1 rounded-[var(--radius-md)] border border-border bg-surface-2 p-1">
@@ -153,10 +153,10 @@
         <Card pad>
           <div class="flex flex-wrap items-center justify-between gap-3 md:flex-nowrap">
             <div>
-              <span class="eyebrow">grapple first</span>
-              <p class="mt-1 text-sm text-muted">Generate a novel problem on <b class="text-fg-dim">{conceptName}</b> and attempt it <i>before</i> any method is shown. Failing productively is the point.</p>
+              <span class="eyebrow">try it first</span>
+              <p class="mt-1 text-sm text-muted">Get a new problem on <b class="text-fg-dim">{conceptName}</b> and have a go <i>before</i> any method is shown. Getting it wrong is fine. It helps the method stick when you see it.</p>
             </div>
-            <Button onclick={generate} disabled={generating || conceptId == null}>{generating ? 'Generating…' : problem ? 'New challenge' : 'Generate challenge'}</Button>
+            <Button variant={problem ? 'outline' : 'primary'} onclick={generate} disabled={generating || conceptId == null}>{generating ? 'Generating…' : problem ? 'New challenge' : 'Generate challenge'}</Button>
           </div>
         </Card>
 
@@ -168,11 +168,11 @@
 
           {#if !consolidation}
             <Card pad class="rise">
-              <Field label="Your attempt — reason it out, even if you don't reach the answer">
+              <Field label="Your attempt: reason it out, even if you don't reach the answer">
                 <Textarea bind:value={attempt} rows={7} placeholder="Here's how I'd approach it…" />
               </Field>
-              <p class="mt-2 text-xs text-faint">The canonical method stays hidden until you commit an attempt.</p>
-              <Button class="mt-3" onclick={reveal} disabled={consolidating || !attempt.trim()}>{consolidating ? 'Consolidating…' : 'Commit & reveal →'}</Button>
+              <p class="mt-2 text-xs text-faint">The method stays hidden until you submit an attempt.</p>
+              <Button class="mt-3" onclick={reveal} disabled={consolidating || !attempt.trim()}>{consolidating ? 'Checking…' : 'Submit and show the method →'}</Button>
             </Card>
           {:else}
             <Card pad class="rise">
@@ -181,12 +181,12 @@
             </Card>
             <Card accent pad class="rise">
               <div class="flex items-center justify-between">
-                <span class="eyebrow text-accent">consolidation</span>
+                <span class="eyebrow text-accent">feedback</span>
                 <Badge tone={consolidation.score >= 0.6 ? 'success' : 'accent'} dot>effort {Math.round(consolidation.score * 100)}%</Badge>
               </div>
               <p class="mt-3 text-sm leading-relaxed text-fg-dim"><Markdown text={consolidation.feedback} block /></p>
               <div class="mt-4 border-t border-border pt-3">
-                <span class="eyebrow">canonical approach</span>
+                <span class="eyebrow">the method</span>
                 <p class="mt-1.5 text-sm leading-relaxed text-fg"><Markdown text={consolidation.canonical} block /></p>
               </div>
             </Card>
@@ -199,8 +199,8 @@
         <Card pad>
           <div class="flex items-center justify-between">
             <div>
-              <span class="eyebrow">metacognition</span>
-              <p class="mt-1 text-sm text-muted">Predict, then explain <b class="text-fg-dim">{conceptName}</b> — we measure the gap between how well you <i>think</i> you know it and how well you do.</p>
+              <span class="eyebrow">how sure are you?</span>
+              <p class="mt-1 text-sm text-muted">Say how well you think you know <b class="text-fg-dim">{conceptName}</b>, then explain it. You'll see how your guess compares with your grade.</p>
             </div>
             {#if calAccuracy != null}
               <div class="text-right">
@@ -216,7 +216,7 @@
             <span class="eyebrow text-accent">step 1 · predict</span>
             <p class="mt-2 text-sm text-muted">Before you explain anything: how well do you think you understand {conceptName}?</p>
             <div class="mt-4">
-              <div class="mb-1 flex justify-between text-sm"><span class="text-muted">not at all</span><span class="nums font-display text-2xl text-fg">{confidence}%</span><span class="text-muted">cold</span></div>
+              <div class="mb-1 flex justify-between text-sm"><span class="text-muted">not at all</span><span class="nums font-display text-2xl text-fg">{confidence}%</span><span class="text-muted">completely</span></div>
               <input
                 type="range"
                 min="0"
@@ -232,16 +232,16 @@
         {:else if calPhase === 'explain'}
           <Card pad class="rise">
             <div class="flex items-center justify-between">
-              <span class="eyebrow">step 2 · explicate</span>
+              <span class="eyebrow">step 2 · explain</span>
               <Badge tone="neutral" mono>predicted {confidence}%</Badge>
             </div>
-            <p class="mt-2 text-sm font-medium text-fg">Explain why {conceptName} works — the mechanism, in your own words.</p>
+            <p class="mt-2 text-sm font-medium text-fg">Explain why {conceptName} works: the mechanism, in your own words.</p>
             <Textarea class="mt-3" bind:value={explanation} rows={7} aria-label="Your explanation of {conceptName}" placeholder="It works because…" />
-            <Button class="mt-3" onclick={submitCal} disabled={submitting}>{submitting ? 'Grading…' : 'Submit & confront the gap →'}</Button>
+            <Button class="mt-3" onclick={submitCal} disabled={submitting}>{submitting ? 'Grading…' : 'Submit and compare →'}</Button>
           </Card>
         {:else if calResult}
           <Card accent pad class="rise">
-            <span class="eyebrow text-accent">the reckoning</span>
+            <span class="eyebrow text-accent">the result</span>
             <div class="mt-3 grid grid-cols-2 gap-4">
               <div class="text-center">
                 <div class="eyebrow">you predicted</div>
@@ -255,11 +255,11 @@
             {#if calGap != null}
               <div class="mt-4 rounded-[var(--radius-md)] border border-border bg-surface-2 p-3 text-center text-sm">
                 {#if Math.abs(calGap) <= 10}
-                  <span class="text-success">Well calibrated — your self-assessment matched reality.</span>
+                  <span class="text-success">Well judged. Your guess matched your grade.</span>
                 {:else if calGap > 0}
-                  <span class="text-danger">Overconfident by {calGap} points</span> <span class="text-muted">— the illusion of competence. You knew it less well than you felt.</span>
+                  <span class="text-danger">Overconfident by {calGap} points.</span> <span class="text-muted">You knew it less well than you felt.</span>
                 {:else}
-                  <span class="text-info">Underconfident by {Math.abs(calGap)} points</span> <span class="text-muted">— you know more than you give yourself credit for.</span>
+                  <span class="text-info">Underconfident by {Math.abs(calGap)} points.</span> <span class="text-muted">You know more than you think.</span>
                 {/if}
               </div>
             {/if}

@@ -4,6 +4,7 @@
   import { clipWords } from '$lib/text';
   import Card from './Card.svelte';
   import Button from './Button.svelte';
+  import Icon from '$lib/shell/Icon.svelte';
 
   let { wind, comeback }: { wind: WindState; comeback: Comeback } = $props();
   const tone = $derived(comebackTone(wind.state));
@@ -25,8 +26,11 @@
 </script>
 
 {#if tone && comeback.move}
-  {@const eyebrow = tone === 'launch' ? '⛵ Ready to sail' : tone === 'warm' ? '⚑ Becalmed' : '⛵ Catching a breeze'}
-  <Card class="rise" {eyebrow}>
+  {@const eyebrow = tone === 'launch' ? 'Ready to sail' : tone === 'warm' ? 'Becalmed' : 'Catching a breeze'}
+  <Card class="rise">
+    <div class="eyebrow mb-1 flex items-center gap-1.5">
+      <Icon name={tone === 'warm' ? 'flag' : 'ship'} class="size-3.5 shrink-0" />{eyebrow}
+    </div>
     {#if tone === 'launch'}
       <h2 class="font-display text-lg text-fg">Your voyage is charted.</h2>
       <p class="mt-1 text-sm text-muted">Take the first step and you're under way — one good move sets the sails.</p>
@@ -52,7 +56,7 @@
       </p>
     </div>
     <Button size="sm" href={comeback.move.href}>
-      {tone === 'warm' ? '⛵ Catch the wind' : '⛵ Set sail'}
+      <Icon name="ship" class="size-4 shrink-0" />{tone === 'warm' ? 'Catch the wind' : 'Set sail'}
     </Button>
   </Card>
 {/if}

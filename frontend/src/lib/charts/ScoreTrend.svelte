@@ -20,9 +20,9 @@
 </script>
 
 {#if data.length >= 2}
-  <figure class="h-44 w-full" aria-label={summary} data-testid="score-trend">
+  <figure class="w-full" aria-label={summary} data-testid="score-trend">
     <!-- The drawing is for sighted users; the table below carries the same data. -->
-    <div class="h-full w-full" aria-hidden="true">
+    <div class="h-44 w-full" aria-hidden="true">
       <Chart
         {data}
         x="i"
@@ -39,6 +39,10 @@
           <Points class="fill-accent stroke-bg" r={3} />
         </Svg>
       </Chart>
+    </div>
+    <!-- The x axis title: the ticks count probes in the order they were taken. -->
+    <div class="pl-[30px] pr-3 text-center text-[10px] text-faint" aria-hidden="true" data-testid="score-trend-axis">
+      probe #, oldest to newest
     </div>
     <table class="sr-only">
       <caption>Assessment scores, oldest first</caption>

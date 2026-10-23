@@ -27,6 +27,16 @@ const CALIBRATED_GAP = 0.15;
  *  ARTIFACT_THRESHOLD). Higher than HELD: shipping lights the signal, the gate asks for more. */
 export const MILESTONE_ARTIFACT = 0.7;
 
+/** How far the latest score moved the mean of all scores (0..1, oldest first), in percentage
+ *  points to one decimal: mean(all) − mean(all but the latest). Null with fewer than two. */
+export function meanShiftPoints(scores: number[]): number | null {
+  if (scores.length < 2) return null;
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const shift = (mean(scores) - mean(scores.slice(0, -1))) * 100;
+  const rounded = Math.round(shift * 10) / 10;
+  return rounded === 0 ? 0 : rounded; // never -0
+}
+
 export function artifactOutcome(score: number): { shipped: boolean; meetsGate: boolean; label: string } {
   const shipped = score >= HELD;
   return { shipped, meetsGate: score >= MILESTONE_ARTIFACT, label: shipped ? 'shipped ✓' : 'shipped ✗' };
@@ -67,17 +77,37 @@ export function conceptVerdict(s: ConceptSignals): Verdict {
   return 'unverified'; // a grade, but nothing yet corroborates it
 }
 
+/** Verdict colours for marks (dots, stars, legend swatches). "verified" has its own teal
+ *  (--verdict-verified), never the brand accent that primary buttons use. */
 export const VERDICT_COLOR: Record<Verdict, string> = {
   solid: 'var(--success)',
-  verified: 'var(--accent)',
+  verified: 'var(--verdict-verified)',
   unverified: 'var(--muted)',
   shaky: 'var(--danger)',
   untested: 'var(--verdict-untested)'
 };
 
+/** The shape of each verdict's mark, so neighbours that are close in colour also differ in
+ *  shape: "untested" (no evidence at all) is an empty ring, unlike the filled grey of
+ *  "unverified"; "verified" is a diamond, unlike the round green of "solid". */
+export type VerdictShape = 'dot' | 'ring' | 'diamond';
+export const VERDICT_SHAPE: Record<Verdict, VerdictShape> = {
+  solid: 'dot',
+  verified: 'diamond',
+  unverified: 'dot',
+  shaky: 'dot',
+  untested: 'ring'
+};
+
+/** Verdicts drawn hollow (see VERDICT_SHAPE). */
+export const VERDICT_HOLLOW = Object.fromEntries(
+  Object.entries(VERDICT_SHAPE).map(([v, shape]) => [v, shape === 'ring'])
+) as Record<Verdict, boolean>;
+
 /** Verdict colours for TEXT (the verdict word itself): every one at least 4.5:1. The word
  *  carries the meaning, so "untested" can use the faint text tone; VERDICT_COLOR's
- *  --verdict-untested is a fill, tuned to stand apart from "unverified" in the graph. */
+ *  --verdict-untested is a ring stroke (3:1, a graphic). Every other verdict shares its mark
+ *  colour, all of which pass 4.5:1 as text. */
 export const VERDICT_TEXT_COLOR: Record<Verdict, string> = {
   ...VERDICT_COLOR,
   untested: 'var(--faint)'

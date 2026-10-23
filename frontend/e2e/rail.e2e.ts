@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 // The left rail has to fit a laptop screen without scrolling once a topic is selected, with
 // every destination on it, and it must say where the daily loop starts. The phone drawer
-// renders the same rail with roomier, touch-sized rows.
+// renders the same rail with roomier, touch-sized rows, and fades its edge where it scrolls.
 
 const isPhone = () => test.info().project.name === 'phone';
 
@@ -135,6 +135,31 @@ test.describe('phone drawer', () => {
       await expect(link, `${name} is in the drawer`).toBeVisible();
       const box = (await link.boundingBox())!;
       expect(box.height, `${name} is at least 40px tall`).toBeGreaterThanOrEqual(40);
+    }
+  });
+
+  test('fades where the nav is cut, and every link scrolls clear of the footer', async ({ page }) => {
+    const id = await seededTopicId(page);
+    await page.goto(`/topics/${id}/today`);
+    await settle(page);
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    const drawer = page.locator('#mobile-nav-drawer');
+    const nav = drawer.getByRole('navigation', { name: 'Main' });
+    const fade = drawer.getByTestId('rail-fade-below');
+
+    const scrolls = await nav.evaluate((n) => n.scrollHeight > n.clientHeight + 1);
+    test.skip(!scrolls, 'the whole nav fits this screen');
+    await expect(nav).toHaveAttribute('data-more-below', 'true');
+    await expect(fade).toHaveCSS('opacity', '1');
+
+    await nav.evaluate((n) => n.scrollTo(0, n.scrollHeight));
+    await expect(nav).not.toHaveAttribute('data-more-below', 'true');
+    await expect(fade).toHaveCSS('opacity', '0');
+    // Scrolled to the end, the last links sit fully above the pinned footer.
+    const footerTop = (await drawer.getByRole('navigation', { name: 'Usage and data' }).boundingBox())!.y;
+    for (const name of ['Story', 'Fleet', 'Programs']) {
+      const box = (await nav.getByRole('link', { name, exact: true }).boundingBox())!;
+      expect(box.y + box.height, `${name} clears the footer`).toBeLessThanOrEqual(footerTop);
     }
   });
 });

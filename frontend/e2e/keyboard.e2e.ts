@@ -194,6 +194,8 @@ test('charts carry a text alternative', async ({ page }) => {
 
   await page.goto('/fleet');
   await settle(page);
+  // A small fleet opens on tiles; the harbor is one press away.
+  await page.getByRole('group', { name: 'Fleet view' }).getByRole('button', { name: 'Harbor' }).click();
   await expect(page.getByTestId('fleet-panorama')).toHaveAttribute('aria-label', /voyage/);
   const ship = page.getByTestId('fleet-panorama').getByRole('link').first();
   await expect(ship).toHaveAttribute('aria-label', /: .+, \d+% toward the North Star$/);

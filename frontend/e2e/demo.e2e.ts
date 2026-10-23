@@ -91,6 +91,10 @@ test('a keyless user explores the demo topic in one click and removes it', async
     await settle(page);
     await expect(page.getByText('Phase 1 — Autograd from first principles')).toBeVisible();
     await expect(page.getByText('Phase 4 — Train a tiny GPT')).toBeVisible();
+    // Side notes name their kind in words ("Math refresher"), never as raw `math_refresh`.
+    const kinds = page.getByTestId('sidebar-kind');
+    expect(await kinds.count()).toBeGreaterThan(0);
+    for (const kind of await kinds.allTextContents()) expect(kind).toMatch(/^[A-Z][a-z]+( [a-z]+)*$/);
     await expectNoSideScroll(page);
 
     await page.goto(`/topics/${demo.id}/map`);
@@ -105,6 +109,10 @@ test('a keyless user explores the demo topic in one click and removes it', async
     await expect(page.getByText(/Decay checks · \d+/)).toBeVisible();
     await expect(page.getByText(/Due now · \d+/)).toBeVisible();
     await expect(page.getByText('No cards yet', { exact: false })).toHaveCount(0);
+    // Prompts are rendered as markdown: "*why*" shows in italics, not with its asterisks.
+    const prompt = page.locator('[id^="decay-prompt-"]').first();
+    await expect(prompt.locator('em', { hasText: 'why' })).toBeVisible();
+    await expect(page.locator('main').getByText('*why*')).toHaveCount(0);
     await expectNoSideScroll(page);
 
     await page.goto(`/topics/${demo.id}/story`);
@@ -114,6 +122,8 @@ test('a keyless user explores the demo topic in one click and removes it', async
     // Only graded concepts count as solid; the six the demo never probed are untested (their
     // stored estimate is a prior, not a grade).
     await expect(page.getByTestId('story-facts')).toContainText('6 untested');
+    // One way to compose the story, not one in the header and another in the card.
+    await expect(page.getByRole('button', { name: 'Compose my story' })).toHaveCount(1);
     await expectNoSideScroll(page);
 
     collecting = false;

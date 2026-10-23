@@ -7,10 +7,21 @@
   import { STATE_LABEL, STATE_COLOR, seaIntensity } from '$lib/wind';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button } from '$lib/ui';
+  import Icon from '$lib/shell/Icon.svelte';
 
   let fleet = $state<WindState[]>([]);
   let loading = $state(true);
-  let panorama = $state(true); // hero panorama vs. collapsed sea-tiles
+  // Harbor (one shared sea) or tiles (a list). With only a ship or two the harbor is mostly
+  // empty water, so tiles are the default until the fleet has three voyages; a view the
+  // learner picks wins either way.
+  const MIN_HARBOR = 3;
+  const VIEWS = [
+    { value: 'harbor', label: 'Harbor' },
+    { value: 'tiles', label: 'Tiles' }
+  ] as const;
+  let chosenView = $state<'harbor' | 'tiles' | null>(null);
+  const view = $derived(chosenView ?? (fleet.length >= MIN_HARBOR ? 'harbor' : 'tiles'));
+  const panorama = $derived(view === 'harbor');
 
   // Never-sailed voyages sort last (API attention order); mark where that bucket begins.
   const firstUnsailed = $derived(fleet.findIndex((w) => w.state === 'unsailed'));
@@ -45,14 +56,28 @@
 <Page
   eyebrow="All topics"
   title="The Fleet"
-  lead="Your whole learning life at a glance. Becalmed voyages need wind; cruising ones just hum along."
+  lead="All your topics in one place. The ones you haven't worked on lately come first."
 >
   {#snippet actions()}
     <!-- Nothing to collapse until there is a fleet. -->
     {#if !loading && fleet.length}
-      <button type="button" class="eyebrow transition-colors hover:text-fg" onclick={() => (panorama = !panorama)}>
-        {panorama ? 'Collapse to tiles' : 'Show harbor'}
-      </button>
+      <div
+        role="group"
+        aria-label="Fleet view"
+        class="flex h-9 items-center gap-0.5 rounded-[var(--radius-sm)] border border-border bg-surface-2 p-0.5"
+        data-testid="fleet-view"
+      >
+        {#each VIEWS as v (v.value)}
+          <button
+            type="button"
+            aria-pressed={view === v.value}
+            onclick={() => (chosenView = v.value)}
+            class="flex h-full items-center rounded-[var(--radius-xs)] px-3 text-xs transition-colors {view === v.value
+              ? 'bg-surface text-fg ring-1 ring-control-border'
+              : 'text-muted hover:text-fg'}"
+          >{v.label}</button>
+        {/each}
+      </div>
     {/if}
   {/snippet}
 
@@ -82,8 +107,8 @@
       aria-label="The fleet: {fleet.length} voyage{fleet.length === 1 ? '' : 's'}. A ship sits higher the closer it is to its North Star, and brighter the more momentum it has."
       data-testid="fleet-panorama"
     >
-      <div class="absolute left-1/2 top-3 -translate-x-1/2 text-center" aria-hidden="true">
-        <div class="text-2xl">⭐</div>
+      <div class="absolute left-1/2 top-3 flex -translate-x-1/2 flex-col items-center gap-1 text-center" aria-hidden="true">
+        <Icon name="wayfinder" class="size-6 text-accent" />
         <div class="eyebrow">North Star</div>
       </div>
       {#each fleet as w, i (w.topic_id)}
@@ -97,10 +122,12 @@
           class="group absolute flex -translate-x-1/2 flex-col items-center transition-transform hover:z-10 hover:scale-110 focus-visible:z-10 focus-visible:!opacity-100 motion-reduce:transition-none motion-reduce:hover:scale-100"
           style={`left:${8 + ((i + 0.5) / fleet.length) * 84}%; bottom:${8 + w.progress * 64 + ((i % 3) - 1) * 3}%; opacity:${0.4 + seaIntensity(w.state) * 0.6}`}
         >
-          <span class="text-xl" aria-hidden="true">⛵</span>
+          <span style:color={STATE_COLOR[w.state]}><Icon name="ship" class="size-6" /></span>
+          <!-- The name in sentence case, wrapped to two lines at most (the title has all of it). -->
           <span
-            class="eyebrow max-w-[120px] truncate transition-opacity {w.state === 'unsailed' ? 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100' : ''}"
-            style:color={STATE_COLOR[w.state]}>{w.topic_title}</span>
+            class="mt-0.5 line-clamp-2 w-max max-w-[10rem] break-words text-center text-xs font-medium leading-snug transition-opacity {w.state === 'unsailed' ? 'opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100' : ''}"
+            style:color={STATE_COLOR[w.state]}
+            data-testid="fleet-ship-name">{w.topic_title}</span>
         </a>
       {/each}
       <div
@@ -122,8 +149,8 @@
         <a href={`/topics/${w.topic_id}/wayfinder`} class="block">
           <Card pad class="transition-colors hover:border-accent">
             <div class="flex items-center gap-3">
-              <span class="text-lg" style:opacity={0.4 + seaIntensity(w.state) * 0.6} aria-hidden="true">⛵</span>
-              <span class="flex-1 truncate text-sm text-fg-dim">{w.topic_title}</span>
+              <span class="shrink-0" style:color={STATE_COLOR[w.state]} style:opacity={0.4 + seaIntensity(w.state) * 0.6}><Icon name="ship" class="size-5" /></span>
+              <span class="min-w-0 flex-1 break-words text-sm text-fg-dim">{w.topic_title}</span>
               {#if w.progress > 0}
                 <div class="hidden items-center gap-1.5 sm:flex" title="{Math.round(w.progress * 100)}% toward the North Star">
                   <span class="h-1 w-14 overflow-hidden rounded-full bg-border">

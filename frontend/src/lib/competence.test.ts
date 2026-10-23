@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { artifactOutcome, conceptSignals, conceptVerdict, verdictRationale } from './competence';
+import { artifactOutcome, conceptSignals, conceptVerdict, meanShiftPoints, verdictRationale } from './competence';
 import type { Assessment } from './types';
 
 // Minimal assessment factory (the signal logic only reads these fields).
@@ -159,5 +159,23 @@ describe('artifactOutcome', () => {
     // stays in lockstep with conceptSignals
     expect(conceptSignals([a({ kind: 'artifact_review', score: 0.45 })]).shipped).toBe('lit');
     expect(conceptSignals([a({ kind: 'artifact_review', score: 0.44 })]).shipped).toBe('bad');
+  });
+});
+
+describe('meanShiftPoints', () => {
+  it('is how far the latest score moved the mean, in points', () => {
+    // mean of [0.5, 0.7] is 60; adding 0.9 makes it 70: +10 points.
+    expect(meanShiftPoints([0.5, 0.7, 0.9])).toBe(10);
+    // Not the latest-vs-previous jump (0.9 - 0.7 = 20 points).
+    expect(meanShiftPoints([0.5, 0.7, 0.9])).not.toBe(20);
+  });
+  it('rounds to one decimal and signs a drop', () => {
+    expect(meanShiftPoints([0.8, 0.8, 0.8, 0.7])).toBe(-2.5);
+    expect(meanShiftPoints([0.6, 0.62, 0.61])).toBe(0);
+    expect(Object.is(meanShiftPoints([0.6, 0.6]), 0)).toBe(true);
+  });
+  it('needs two scores', () => {
+    expect(meanShiftPoints([])).toBeNull();
+    expect(meanShiftPoints([0.4])).toBeNull();
   });
 });

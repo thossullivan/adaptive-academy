@@ -12,8 +12,8 @@ The demo is one example topic, "Build LLMs from scratch (demo)", with about thre
 made-up activity: a reading list, a four-phase track, 15 concepts, graded assessments, tutor
 conversations, and the agent log. It's built in code, so it costs nothing and needs no key.
 
-1. Open the app. On a fresh install the home page shows **Start a program**,
-   **Start a topic**, and below them **Explore a demo topic →**.
+1. Open the app. On a fresh install the home page shows **Explore a demo topic →** first,
+   then **Start a program** and **Start a topic**.
 2. Click **Explore a demo topic →**. The demo's dashboard opens. It has a blue **Demo** badge,
    and so does its entry in the topic switcher at the top of the sidebar.
 
@@ -58,7 +58,7 @@ comes from your activity, not your grades.
 **Track.** The phases and their items. Tick items off as you go (no key needed). Each phase
 ends with something to build, with criteria for when it's done. **⚒ Ship it for review** sends
 a link or some text to be reviewed. Steps the Assessor added to fill gaps are marked
-**remediation**. **Export .md** downloads the track.
+**fills a gap**. **Export .md** downloads the track.
 
 **Tutor.** A tutor that works through one concept with you by asking questions. Pick the
 concept at the top. The header shows how much help it's giving (**assistance**), how hard it's
@@ -75,7 +75,7 @@ concept's ◆ grade. An artifact review lights the ⚒ shipped signal but doesn'
 so one review can't count twice.
 
 **Practice.** Two kinds of practice. **Productive Failure**: try a new problem before you're
-shown how, then **Commit & reveal →**. **Calibration**: lock in how sure you are, explain, then
+shown how, then **Submit and show the method →**. **Calibration**: lock in how sure you are, explain, then
 see how far off you were.
 
 **Retention.** **Decay checks** (explain a concept from memory, graded), **Due now**
@@ -120,7 +120,7 @@ demo has no program, so those pages are mostly empty for now.
    found, and writes a short summary. This is the slowest and most expensive step. The form
    shows progress and takes you to **Sources** when it's done.
 4. **Curate.** On **Sources**, untick anything you don't want, click **Save reading list**, then
-   **Generate curriculum →**. You can also click **Generate quizzes** to make questions from
+   **Build my track →**. You can also click **Generate quizzes** to make questions from
    the sources (these feed the **Source quiz**).
 5. **Curriculum.** The CurriculumDirector builds a track toward your goal in phases, each
    ending with something to build, plus the concept graph. You land on **Track**.
@@ -132,7 +132,7 @@ Open **Today** and work from top to bottom:
 1. **Warm up**: answer the due decay checks from memory and rate the due cards.
 2. **Build**: do the next track item and tick it off.
 3. **Probe**: test the concept Today names (**Assess →**). If the grade shows gaps,
-   **Remediate these gaps** adds steps to your track to fill them.
+   **Add steps to fill these gaps** adds steps to your track for them.
 4. **Teach back**: work through that concept with the tutor (**Open tutor →**), or explain it
    on **Teach**.
 

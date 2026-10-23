@@ -21,24 +21,29 @@
     children: Snippet;
   } = $props();
 
-  const max = $derived({ narrow: 'max-w-2xl', normal: 'max-w-4xl', wide: 'max-w-6xl' }[width]);
+  // Every page shares one frame (the wide width, centred in the main column), and the page's
+  // own width is left-aligned inside it. So the content's left edge sits at the same x on every
+  // page, and only how far it reaches to the right changes. (e2e/layout.e2e.ts checks it.)
+  const max = $derived({ narrow: 'max-w-2xl', normal: 'max-w-4xl', wide: 'max-w-none' }[width]);
 </script>
 
-<div class={cn('mx-auto w-full px-6 py-8 md:px-10 md:py-10', max)}>
-  {#if eyebrow || title || actions}
-    <header class="mb-7 flex flex-wrap items-end justify-between gap-4 rise">
-      <div class="min-w-0">
-        {#if eyebrow}<div class="eyebrow mb-2">{eyebrow}</div>{/if}
-        {#if title && titleAside}
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <h1 class="min-w-0 text-3xl text-fg [overflow-wrap:anywhere] md:text-[2.1rem]">{title}</h1>
-            {@render titleAside()}
-          </div>
-        {:else if title}<h1 class="text-3xl text-fg md:text-[2.1rem]">{title}</h1>{/if}
-        {#if lead}<p class="mt-2 max-w-prose text-sm leading-relaxed text-muted">{lead}</p>{/if}
-      </div>
-      {#if actions}<div class="flex shrink-0 items-center gap-2">{@render actions()}</div>{/if}
-    </header>
-  {/if}
-  {@render children()}
+<div class="mx-auto w-full max-w-6xl px-6 py-8 md:px-10 md:py-10" data-page-frame>
+  <div class={cn('w-full', max)} data-page-width={width}>
+    {#if eyebrow || title || actions}
+      <header class="mb-7 flex flex-wrap items-end justify-between gap-4 rise">
+        <div class="min-w-0">
+          {#if eyebrow}<div class="eyebrow mb-2">{eyebrow}</div>{/if}
+          {#if title && titleAside}
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <h1 class="min-w-0 text-3xl text-fg [overflow-wrap:anywhere] md:text-[2.1rem]">{title}</h1>
+              {@render titleAside()}
+            </div>
+          {:else if title}<h1 class="text-3xl text-fg md:text-[2.1rem]">{title}</h1>{/if}
+          {#if lead}<p class="mt-2 max-w-prose text-sm leading-relaxed text-muted">{lead}</p>{/if}
+        </div>
+        {#if actions}<div class="flex shrink-0 items-center gap-2">{@render actions()}</div>{/if}
+      </header>
+    {/if}
+    {@render children()}
+  </div>
 </div>

@@ -127,7 +127,7 @@
         <div class="mt-12 text-center">
           <h2 class="text-2xl text-fg">The examiner is waiting</h2>
           <p class="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted">
-            Open with your first move — the persona above will stay in character and probe your understanding.
+            Make the first move. The persona above stays in character and asks questions to test what you know.
           </p>
         </div>
       {/if}

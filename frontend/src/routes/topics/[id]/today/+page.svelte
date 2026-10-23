@@ -5,6 +5,7 @@
   import type { Concept, Item, WindState, Comeback, ProgramContext } from '$lib/types';
   import { LEVEL_FILL, LEVEL_LABEL, levelColor } from '$lib/utils';
   import { gateBadge } from '$lib/programs';
+  import { comebackTone } from '$lib/wind';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Markdown, ComebackCard } from '$lib/ui';
 
@@ -67,11 +68,28 @@
   });
 
   const typeGlyph: Record<string, string> = { read: '▢', watch: '▷', build: '◈', write: '✎', do: '◆' };
+
+  // One filled button per page: the first step that has something to do. When the comeback
+  // card is showing, its own button is the next step, so every step stays outlined.
+  // (The same test ComebackCard uses to decide whether it shows at all.)
+  const comebackShown = $derived(!!(wind && comeback?.move && comebackTone(wind.state)));
+  const primaryStep = $derived(
+    comebackShown
+      ? null
+      : dueCount || decayCount
+        ? 'warm'
+        : nextItems.length
+          ? 'build'
+          : weakest
+            ? 'probe'
+            : 'teach'
+  );
+  const stepVariant = (step: string): 'primary' | 'outline' => (primaryStep === step ? 'primary' : 'outline');
 </script>
 
 <svelte:head><title>Today · Adaptive Academy</title></svelte:head>
 
-<Page eyebrow="Today's session" title="What to do right now" lead="A focused loop assembled from where you actually are — warm up, build, probe, teach back." width="normal">
+<Page eyebrow="Today's session" title="What to do right now" lead="A short plan for today, based on where you are: warm up, build, test yourself, then teach it back." width="normal">
   {#if programCtx}
     <Card class="mb-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
@@ -84,17 +102,16 @@
       </div>
       {#if programCtx.unverified.length > 0}
         <p class="mt-2 text-sm text-muted">
-          Gate needs cold verification of:
-          <span class="text-fg">{programCtx.unverified.slice(0, 3).join(', ')}</span>
-          {#if programCtx.unverified.length > 3}&nbsp;+{programCtx.unverified.length - 3} more{/if}
-          — run a Decay Check or ship an artifact.
+          To pass this milestone, show you still remember
+          <span class="text-fg">{programCtx.unverified.slice(0, 3).join(', ')}</span>{#if programCtx.unverified.length > 3}&nbsp;and {programCtx.unverified.length - 3} more{/if}.
+          Do a decay check, or ship your work for review.
         </p>
       {/if}
       {#if programCtx.revision_suggested}
         <p class="mt-2 text-sm text-muted">
-          Leg verified —
+          This milestone is done. Want to
           <a class="text-accent hover:underline" href={`/programs/${programCtx.program_id}`}>
-            revise the map</a> with what you've learned?
+            update the plan</a> with what you've learned?
         </p>
       {/if}
     </Card>
@@ -111,16 +128,17 @@
         <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
           <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent" aria-hidden="true">1</span>
           <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
-            <div class="flex items-center gap-2">
-              <h2 class="text-lg text-fg">Warm up</h2>
-              {#if decayCount}<Badge tone="accent" dot>{decayCount} decay check{decayCount > 1 ? 's' : ''}</Badge>{/if}
-              <Badge tone={dueCount ? 'accent' : 'success'} dot>{dueCount ? `${dueCount} card${dueCount > 1 ? 's' : ''} due` : 'cards clear'}</Badge>
+            <!-- The badges wrap below the heading as a group on a narrow screen, never around it. -->
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5" data-testid="warmup-heading">
+              <h2 class="shrink-0 text-lg text-fg">Warm up</h2>
+              {#if decayCount}<Badge tone="accent" dot class="whitespace-nowrap">{decayCount} decay check{decayCount > 1 ? 's' : ''}</Badge>{/if}
+              <Badge tone={dueCount ? 'accent' : 'success'} dot class="whitespace-nowrap">{dueCount ? `${dueCount} card${dueCount > 1 ? 's' : ''} due` : 'cards clear'}</Badge>
             </div>
             <p class="mt-1 text-sm text-muted">
-              {#if decayCount}Unassisted recall checks are due — prove it still holds without the tutor.{:else if dueCount}Retrieval practice on cards due today — fast, before you build.{:else}No reviews due. Nice and clear.{/if}
+              {#if decayCount}Some decay checks are due. Answer them from memory, without the tutor.{:else if dueCount}Some flashcards are due. Run through them before you build.{:else}Nothing to review today.{/if}
             </p>
           </div>
-          {#if dueCount || decayCount}<Button href="/topics/{topicId}/retention" class="ml-12 md:ml-0">Review →</Button>{/if}
+          {#if dueCount || decayCount}<Button variant={stepVariant('warm')} href="/topics/{topicId}/retention" class="ml-12 md:ml-0">Review →</Button>{/if}
         </div>
       </Card>
 
@@ -129,9 +147,9 @@
         <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
           <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent" aria-hidden="true">2</span>
           <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
-            <div class="flex items-center gap-2">
-              <h2 class="text-lg text-fg">Build</h2>
-              {#if allDone}<Badge tone="success" dot>track complete</Badge>{/if}
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h2 class="shrink-0 text-lg text-fg">Build</h2>
+              {#if allDone}<Badge tone="success" dot class="whitespace-nowrap">track complete</Badge>{/if}
             </div>
             {#if nextItems.length}
               <p class="mt-1 text-sm text-muted">Your next steps on the track:</p>
@@ -147,12 +165,12 @@
                 {/each}
               </ul>
             {:else if allDone}
-              <p class="mt-1 text-sm text-muted">Every step is done — time to ship and assess.</p>
+              <p class="mt-1 text-sm text-muted">Every step is done. Time to ship your work and test yourself.</p>
             {:else}
-              <p class="mt-1 text-sm text-muted">No track yet. Generate a curriculum to get build steps.</p>
+              <p class="mt-1 text-sm text-muted">No track yet. Make one from your reading list on the Sources page.</p>
             {/if}
           </div>
-          <Button variant="outline" href="/topics/{topicId}/track" class="ml-12 md:ml-0">Open track →</Button>
+          <Button variant={stepVariant('build')} href="/topics/{topicId}/track" class="ml-12 md:ml-0">Open track →</Button>
         </div>
       </Card>
 
@@ -161,20 +179,20 @@
         <div class="flex flex-wrap items-start gap-4 md:flex-nowrap">
           <span class="grid size-8 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-sm text-accent" aria-hidden="true">3</span>
           <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
-            <div class="flex items-center gap-2">
-              <h2 class="text-lg text-fg">Probe</h2>
-              {#if weakest}<Badge tone={weakestLevel === 'low' ? 'danger' : weakestLevel === 'unknown' ? 'neutral' : 'accent'} dot>{LEVEL_LABEL[weakestLevel]}</Badge>{/if}
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <h2 class="shrink-0 text-lg text-fg">Probe</h2>
+              {#if weakest}<Badge tone={weakestLevel === 'low' ? 'danger' : weakestLevel === 'unknown' ? 'neutral' : 'accent'} dot class="whitespace-nowrap">{LEVEL_LABEL[weakestLevel]}</Badge>{/if}
             </div>
             {#if weakest}
               <p class="mt-1 text-sm text-muted">
-                Test your shakiest load-bearing concept —
-                <span class="font-medium" style:color={levelColor(weakestLevel)}>{weakest.name}</span>. Desirable difficulty: explain it cold.
+                Test yourself on the key concept you're least sure of:
+                <span class="font-medium" style:color={levelColor(weakestLevel)}>{weakest.name}</span>. Explain it without notes.
               </p>
             {:else}
-              <p class="mt-1 text-sm text-muted">No concepts to probe yet.</p>
+              <p class="mt-1 text-sm text-muted">No concepts to test yet.</p>
             {/if}
           </div>
-          {#if weakest}<Button href="/topics/{topicId}/assess" class="ml-12 md:ml-0">Assess →</Button>{/if}
+          {#if weakest}<Button variant={stepVariant('probe')} href="/topics/{topicId}/assess" class="ml-12 md:ml-0">Assess →</Button>{/if}
         </div>
       </Card>
 
@@ -185,10 +203,10 @@
           <div class="min-w-0 grow basis-[calc(100%-3rem)] md:basis-0">
             <h2 class="text-lg text-fg">Teach back</h2>
             <p class="mt-1 text-sm text-muted">
-              {weakest ? `Work through ${weakest.name} with the tutor — it won't hand you the answer.` : 'Open the tutor to work a concept Socratically.'}
+              {weakest ? `Work through ${weakest.name} with the tutor. It asks questions and won't hand you the answer.` : 'Open the tutor and work through a concept with it.'}
             </p>
           </div>
-          <Button variant="outline" href={weakest ? `/topics/${topicId}/tutor?concept=${weakest.id}` : `/topics/${topicId}/tutor`} class="ml-12 md:ml-0">Open tutor →</Button>
+          <Button variant={stepVariant('teach')} href={weakest ? `/topics/${topicId}/tutor?concept=${weakest.id}` : `/topics/${topicId}/tutor`} class="ml-12 md:ml-0">Open tutor →</Button>
         </div>
       </Card>
     </div>

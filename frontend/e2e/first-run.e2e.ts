@@ -118,6 +118,32 @@ test.describe('empty home (no topics yet)', () => {
     await expect(notice(page)).toBeVisible();
   });
 
+  test('puts the demo first, then the entry points, then the setup notice', async ({ page }) => {
+    await page.goto('/');
+    const demo = page.getByRole('button', { name: /Explore a demo topic/ });
+    const program = page.getByRole('link', { name: /Start a program/ });
+    await expect(demo).toBeVisible();
+    await expect(notice(page)).toBeVisible();
+    // A filled (primary) button, not a small text link.
+    await expect(demo).toHaveClass(/\bbg-accent\b/);
+    const top = async (l: Locator) => (await l.boundingBox())!.y;
+    expect(await top(demo)).toBeLessThan(await top(program));
+    expect(await top(program)).toBeLessThan(await top(notice(page)));
+    // In the first screen at both sizes, not below a tall setup card.
+    const box = (await demo.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+  });
+
+  test('folds the other backends away and keeps the key steps in view', async ({ page }) => {
+    await page.goto('/');
+    await expect(notice(page).getByText('cp .env.example .env')).toBeVisible();
+    const more = notice(page).getByTestId('setup-alternatives');
+    await expect(more).not.toHaveAttribute('open', '');
+    await expect(more.locator('code', { hasText: 'AA_LLM_BACKEND=agent_sdk' })).toBeHidden();
+    await more.getByText('Use a Claude subscription or OpenRouter instead').click();
+    await expect(more.locator('code', { hasText: 'AA_LLM_BACKEND=agent_sdk' })).toBeVisible();
+  });
+
   test('"Start a program" goes to /programs/new', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('link', { name: /Start a program/ }).click();

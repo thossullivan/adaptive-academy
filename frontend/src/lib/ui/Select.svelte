@@ -23,9 +23,10 @@
     {disabled}
     {...rest}
     class={cn(
-      'h-10 w-full appearance-none rounded-[var(--radius-sm)] border border-control-border bg-surface-2 pl-3 pr-9 text-sm text-fg',
+      // A choice longer than the box ends in "…" rather than being cut mid-letter.
+      'h-10 w-full appearance-none truncate rounded-[var(--radius-sm)] border border-control-border bg-surface-2 pl-3 pr-9 text-sm text-fg',
       'transition-colors hover:border-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]',
-      'disabled:opacity-50'
+      'disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-faint disabled:hover:border-control-border'
     )}
   >
     {@render children()}

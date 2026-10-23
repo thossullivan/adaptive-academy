@@ -27,7 +27,7 @@
     'h-10 w-full rounded-[var(--radius-sm)] border border-control-border bg-surface-2 px-3 text-sm text-fg',
     'placeholder:text-faint transition-colors',
     'hover:border-muted focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]',
-    'disabled:opacity-50',
+    'disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-faint disabled:hover:border-control-border',
     klass
   )}
   {...rest}

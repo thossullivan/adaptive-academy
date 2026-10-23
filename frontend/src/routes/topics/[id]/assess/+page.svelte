@@ -23,9 +23,9 @@
 
   const PROBES: { value: string; label: string; blurb: string }[] = [
     { value: 'self_explanation', label: 'Self-explanation', blurb: 'Explain the concept in your own words.' },
-    { value: 'calibration', label: 'Calibration', blurb: 'Predict your confidence, then get graded against reality.' },
+    { value: 'calibration', label: 'Calibration', blurb: 'Say how sure you are, then see how your grade compares.' },
     { value: 'artifact_review', label: 'Artifact review', blurb: 'Submit something you built for critique.' },
-    { value: 'source_quiz', label: 'Source quiz', blurb: 'Answer a source-grounded question.' }
+    { value: 'source_quiz', label: 'Source quiz', blurb: 'Answer a question written from one of your sources.' }
   ];
 
   onMount(async () => {
@@ -106,13 +106,13 @@
 
 <svelte:head><title>Assess · Adaptive Academy</title></svelte:head>
 
-<Page eyebrow="Assessor" title="Assess understanding" lead="Probes that demand you generate, not recognize — the kind that actually moves the needle." width="normal">
+<Page eyebrow="Learn" title="Assess understanding" lead="Answer a question about a concept in your own words and get it graded. Writing the answer yourself shows what you really know." width="normal">
   <LiveStatus message={status} />
   {#if !cur}
     <Card accent pad class="text-center">
       <div class="py-10">
         <h2 class="text-xl text-fg">No curriculum yet</h2>
-        <p class="mx-auto mt-2 max-w-sm text-sm text-muted">Generate a track before assessing.</p>
+        <p class="mx-auto mt-2 max-w-sm text-sm text-muted">Make a track from your reading list first.</p>
         <div class="mt-6"><Button href="/topics/{topicId}/review">Go to Sources →</Button></div>
       </div>
     </Card>
@@ -123,12 +123,15 @@
       <!-- Form -->
       <Card class="lg:col-span-3" pad>
         <div class="flex flex-col gap-4">
+          <!-- Concept names run long, so the concept picker gets a row to itself. -->
           <div class="grid gap-4 sm:grid-cols-2">
-            <Field label="Concept">
-              <Select bind:value={conceptId}>
-                {#each cur.concepts as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
-              </Select>
-            </Field>
+            <div class="sm:col-span-2">
+              <Field label="Concept">
+                <Select bind:value={conceptId} data-testid="concept-picker">
+                  {#each cur.concepts as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
+                </Select>
+              </Field>
+            </div>
             <Field label="Probe">
               <Select bind:value={kind}>
                 {#each PROBES as p}
@@ -142,7 +145,7 @@
           <p class="-mt-1 text-xs text-faint">{activeProbe.blurb}</p>
 
           {#if kind === 'calibration'}
-            <Field label="Predicted confidence — {confidence}%">
+            <Field label="How sure are you? {confidence}%">
               <input type="range" min="0" max="100" bind:value={confidence} aria-valuetext="{confidence}%" class="w-full accent-[var(--accent)]" />
             </Field>
           {/if}
@@ -155,10 +158,10 @@
           {/if}
 
           <Field label="Your response">
-            <Textarea bind:value={response} rows={7} placeholder="Explain in your own words — reasoning, mechanisms, edge cases…" />
+            <Textarea bind:value={response} rows={7} placeholder="Explain in your own words: the reasoning, how it works, the edge cases…" />
           </Field>
 
-          <Button onclick={run} disabled={busy || conceptId == null} size="lg" class="self-start">
+          <Button onclick={run} disabled={busy || conceptId == null} class="self-start">
             {busy ? 'Grading…' : 'Submit for assessment'}
           </Button>
         </div>
@@ -212,11 +215,11 @@
                   {#each result.gaps as g}<li class="flex items-start gap-2 text-sm text-muted"><span class="shrink-0 text-danger" aria-hidden="true">▸</span><Markdown text={g} class="min-w-0" /></li>{/each}
                 </ul>
                 <Button variant="outline" size="sm" class="mt-3" onclick={remediate} disabled={remediating}>
-                  {remediating ? 'Remediating…' : 'Remediate these gaps'}
+                  {remediating ? 'Adding steps…' : 'Add steps to fill these gaps'}
                 </Button>
                 {#if remediatedCount != null}
                   <p class="mt-2 text-xs text-muted" role="status">
-                    {remediatedCount > 0 ? `Injected ${remediatedCount} step(s).` : 'Already covered by an open remediation step.'}
+                    {remediatedCount > 0 ? `Added ${remediatedCount} step${remediatedCount === 1 ? '' : 's'} to your track.` : 'A step already on your track covers these.'}
                     <a class="text-accent underline" href="/topics/{topicId}/track">Open track →</a>
                   </p>
                 {/if}

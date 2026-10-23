@@ -6,7 +6,7 @@
   import { api } from '$lib/api';
   import type { Retention, DecayItem, DecayGrade } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
-  import { Card, Button, Badge, Textarea, LiveStatus } from '$lib/ui';
+  import { Card, Button, Badge, Markdown, Textarea, LiveStatus } from '$lib/ui';
 
   const topicId = Number($page.params.id);
   let data = $state<Retention | null>(null);
@@ -65,7 +65,7 @@
 
 <svelte:head><title>Retention · Adaptive Academy</title></svelte:head>
 
-<Page eyebrow="Retention" title="Spaced recall" lead="Retrieval practice woven into the build — revisit before you forget, not after." width="normal">
+<Page eyebrow="Retention" title="Review before you forget" lead="Flashcards and recall checks, spaced out so you go back to each idea just before you'd forget it." width="normal">
   <LiveStatus message={status} />
   {#if loading}
     <div class="grid place-items-center py-24" role="status"><span class="eyebrow animate-pulse">loading cards…</span></div>
@@ -77,7 +77,7 @@
             <span class="text-accent" aria-hidden="true">↺</span>
             <h2 class="eyebrow !text-accent">Decay checks · {decay.length}</h2>
           </div>
-          <p class="mb-3 text-sm text-muted">Delayed, unassisted recall — does it still hold without the tutor? Answer from memory.</p>
+          <p class="mb-3 text-sm text-muted">Some time has passed since you learned these. Answer from memory, with no notes and no tutor, to see what has stuck.</p>
           <div class="flex flex-col gap-3">
             {#each decay as d (d.prompt_id)}
               <div class="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3.5" role="group" aria-labelledby="decay-prompt-{d.prompt_id}">
@@ -85,7 +85,7 @@
                   <Badge tone="neutral" mono>{d.concept_name}</Badge>
                   {#if d.last_result}<span class="eyebrow !text-[0.55rem]">last: {d.last_result}</span>{/if}
                 </div>
-                <p class="mt-2 text-sm text-fg-dim" id="decay-prompt-{d.prompt_id}">{d.prompt}</p>
+                <p class="mt-2 text-sm text-fg-dim" id="decay-prompt-{d.prompt_id}"><Markdown text={d.prompt} /></p>
                 {#if decayResults[d.prompt_id]}
                   {@const r = decayResults[d.prompt_id]}
                   <div class="mt-3 rounded-[var(--radius-sm)] border border-border p-3 text-sm">
@@ -93,10 +93,10 @@
                       <Badge tone={r.held ? 'success' : 'danger'} dot>{r.held ? 'held' : 'decayed'}</Badge>
                       <span class="nums text-muted">recall {Math.round(r.recall_score * 100)}%{#if r.baseline_score != null} · was {Math.round(r.baseline_score * 100)}%{/if}{#if r.decay_delta != null} · Δ {r.decay_delta > 0 ? '+' : ''}{r.decay_delta.toFixed(2)}{/if}</span>
                     </div>
-                    <p class="mt-2 text-fg-dim">{r.verdict}</p>
+                    <p class="mt-2 text-fg-dim"><Markdown text={r.verdict} block /></p>
                   </div>
                 {:else}
-                  <Textarea class="mt-2" bind:value={responses[d.prompt_id]} rows={4} aria-label="Your answer, from memory" placeholder="From memory — no looking…" />
+                  <Textarea class="mt-2" bind:value={responses[d.prompt_id]} rows={4} aria-label="Your answer, from memory" placeholder="From memory, no looking…" />
                   <Button size="sm" class="mt-2" onclick={() => gradeDecayItem(d.prompt_id)} disabled={gradingDecay === d.prompt_id || !responses[d.prompt_id]?.trim()}>
                     {gradingDecay === d.prompt_id ? 'Checking…' : 'Check recall'}
                   </Button>
@@ -116,8 +116,8 @@
           <div class="flex flex-col gap-3">
             {#each due.cards as c (c.id)}
               <div class="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3.5" role="group" aria-labelledby="due-front-{c.id}">
-                <p class="text-sm font-medium text-fg" id="due-front-{c.id}">{c.front}</p>
-                <p class="mt-1 text-sm text-muted">{c.back}</p>
+                <p class="text-sm font-medium text-fg" id="due-front-{c.id}"><Markdown text={c.front} /></p>
+                <p class="mt-1 text-sm text-muted"><Markdown text={c.back} /></p>
                 <div class="mt-3 flex gap-1.5">
                   {#each ['again', 'hard', 'good', 'easy'] as r}
                     <button
@@ -141,8 +141,8 @@
             <div class="grid gap-2.5 md:grid-cols-2">
               {#each data.cards as c (c.id)}
                 <div class="flex flex-col gap-2 rounded-[var(--radius-md)] border border-border bg-surface-2 p-3" role="group" aria-labelledby="deck-front-{c.id}">
-                  <p class="text-sm font-medium text-fg" id="deck-front-{c.id}">{c.front}</p>
-                  <p class="text-sm text-muted">{c.back}</p>
+                  <p class="text-sm font-medium text-fg" id="deck-front-{c.id}"><Markdown text={c.front} /></p>
+                  <p class="text-sm text-muted"><Markdown text={c.back} /></p>
                   <div class="flex items-center gap-1.5">
                     <Badge mono tone={c.status === 'active' ? 'success' : c.status === 'proposed' ? 'accent' : 'neutral'}>{c.status}</Badge>
                     <span class="eyebrow !text-[0.55rem]">{c.reps} reps · {c.interval}d</span>
@@ -161,7 +161,7 @@
               {/each}
             </div>
           {:else}
-            <p class="py-6 text-center text-sm text-faint">No cards yet — propose some from an assessment.</p>
+            <p class="py-6 text-center text-sm text-faint">No cards yet. They are suggested after you're assessed on a concept.</p>
           {/if}
         </Card>
 
@@ -170,7 +170,7 @@
             <ul class="flex flex-col gap-1.5">
               {#each data.prompts as p (p.id)}
                 <li class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-border bg-surface-2 px-3 py-2 text-sm text-fg-dim">
-                  <span class="text-accent" aria-hidden="true">?</span>{p.prompt}
+                  <span class="text-accent" aria-hidden="true">?</span><Markdown text={p.prompt} class="min-w-0" />
                   <Badge mono tone="neutral" class="ml-auto">{p.status}</Badge>
                 </li>
               {/each}

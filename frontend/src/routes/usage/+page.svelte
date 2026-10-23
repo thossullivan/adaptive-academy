@@ -71,12 +71,12 @@
 <svelte:head><title>Usage · Adaptive Academy</title></svelte:head>
 
 <Page
-  eyebrow="Ledger"
+  eyebrow="Account"
   title="Usage & cost"
-  lead="Every model call the agents make, counted on this machine: tokens, web searches, and what they cost."
+  lead="What the agents have spent on model calls, by day, feature, and model. Every call is counted on this machine: tokens, web searches, and cost."
 >
   {#if loading}
-    <p class="py-10 text-center text-sm text-faint" role="status">Tallying the ledger…</p>
+    <p class="py-10 text-center text-sm text-faint" role="status">Loading usage…</p>
   {:else if error || !report}
     <p class="py-10 text-center text-sm text-danger" role="alert">Couldn't load usage: {error ?? 'no data'}</p>
   {:else}

@@ -296,8 +296,8 @@
   {:else if detail.milestones.length === 0}
     <Card>
       <p class="mb-4 text-sm text-muted">
-        No milestone map yet. Research surveys real PhD curricula, quals syllabi, canonical
-        courses, and reading lists, then drafts milestones + topic candidates for your review.
+        No plan yet. Research looks at real PhD programs, exam syllabi, well-known courses, and
+        reading lists, then drafts milestones and topics for you to review.
       </p>
       <Button onclick={runResearch} disabled={busy}>{busy ? 'Researching…' : 'Run research'}</Button
       >
@@ -308,8 +308,8 @@
       <Card>
         <div class="flex items-center justify-between gap-3">
           <p class="text-sm text-muted">
-            Proposal under review — edit titles/criteria inline, uncheck any candidate topic to
-            prune it, then accept.
+            Review the draft: edit titles and criteria in place, untick any topic you don't want,
+            then accept.
           </p>
           <Button onclick={accept} disabled={busy}>{busy ? 'Accepting…' : 'Accept program'}</Button>
         </div>
@@ -321,7 +321,7 @@
     {#if detail.revision_suggested && !detail.has_open_revision}
       <Card class="mt-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
-          <p class="text-sm text-muted">Leg verified — revise the map with what you've learned?</p>
+          <p class="text-sm text-muted">This milestone is done. Revise the plan with what you've learned?</p>
           <Button onclick={revise} disabled={busy}>Revise map</Button>
         </div>
       </Card>
@@ -525,7 +525,7 @@
                   <table class="w-full text-sm">
                     <thead>
                       <tr class="text-left text-xs text-muted">
-                        <th class="py-1 pr-4 font-normal">Load-bearing concept</th>
+                        <th class="py-1 pr-4 font-normal">Key concept</th>
                         <th class="py-1 pr-4 font-normal">Delayed recall</th>
                         <th class="py-1 pr-4 font-normal">Artifact</th>
                         <th class="py-1 font-normal">Verdict</th>

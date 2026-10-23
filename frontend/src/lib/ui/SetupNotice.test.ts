@@ -35,6 +35,23 @@ describe('SetupNotice', () => {
     expect(body).toContain('AA_LLM_BACKEND=openrouter');
   });
 
+  it('keeps the key steps in view and folds the other backends into a closed details', () => {
+    const { body } = render(SetupNotice, {
+      props: { status: { llm_backend: 'anthropic', llm_ready: false, message: 'No key' } }
+    });
+    const details = body.slice(body.indexOf('<details'), body.indexOf('</details>'));
+    expect(details).toContain('data-testid="setup-alternatives"');
+    expect(details).not.toMatch(/<details[^>]*\sopen/);
+    expect(details).toContain('Use a Claude subscription or OpenRouter instead');
+    expect(details).toContain('AA_LLM_BACKEND=agent_sdk');
+    expect(details).toContain('OPENROUTER_API_KEY');
+    // The fix itself stays outside the fold.
+    const before = body.slice(0, body.indexOf('<details'));
+    expect(before).toContain('Add your Anthropic API key');
+    expect(before).toContain('cp .env.example .env');
+    expect(body).not.toContain('—');
+  });
+
   it('renders nothing when ready or unknown', () => {
     for (const status of [
       { llm_backend: 'anthropic' as const, llm_ready: true, message: 'ok' },
