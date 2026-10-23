@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { SOURCE_LABEL, formatWhen, itemHeading, notebookSections, sourceHref } from '$lib/notebook';
+  import { SOURCE_LABEL, formatWhen, itemHeading, itemHeadingParts, notebookSections, scoreLevel, sourceHref } from '$lib/notebook';
   import type { NotebookItem } from '$lib/types';
+  import { levelColor } from '$lib/utils';
   import Badge from './Badge.svelte';
+  import Markdown from './Markdown.svelte';
 
   // A concept's work, by part, newest first: attempts, graded explanations, worked solutions.
   // Each item says when and where it was made, and links back there.
@@ -39,7 +41,13 @@
               {#if item.kind === 'attempt' && !item.accepted}
                 <Badge tone="warn">{itemHeading(item)}</Badge>
               {:else}
-                <span class="font-medium text-fg">{itemHeading(item)}</span>
+                {@const head = itemHeadingParts(item)}
+                <!-- The score in its level's colour, as on the dashboard (utils levelColor). -->
+                <span class="font-medium text-fg"
+                  >{head.title}{#if head.score && item.score != null},
+                    <span class="nums" style:color={levelColor(scoreLevel(item.score))} data-testid="item-score">{head.score}</span
+                    >{/if}</span
+                >
               {/if}
               <time datetime={item.created_at} class="text-muted">{formatWhen(item.created_at)}</time>
               <span class="text-muted">
@@ -49,7 +57,13 @@
             {#if item.prompt}
               <p class="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">Prompt: {item.prompt}</p>
             {/if}
-            <p class="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]">{item.text || '(empty)'}</p>
+            <!-- A worked solution is the tutor's markdown; attempts and explanations are the
+                 learner's own words, shown exactly as typed. -->
+            <p class="md-wrap mt-1.5 text-sm leading-relaxed text-fg-dim [overflow-wrap:anywhere]">
+              {#if !item.text}(empty){:else if item.kind === 'solution'}<Markdown text={item.text} pre />{:else}<span
+                  class="whitespace-pre-wrap">{item.text}</span
+                >{/if}
+            </p>
             {#if item.verdict}
               <p class="mt-1.5 text-xs text-muted [overflow-wrap:anywhere]">{item.verdict}</p>
             {/if}

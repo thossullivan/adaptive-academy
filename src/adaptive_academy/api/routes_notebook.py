@@ -3,6 +3,7 @@ learner's own notes on it. Saving a note, like any new attempt or grade, queues 
 vault note for a rewrite (engine/notebook_sync.py); that never holds up or fails the save."""
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlmodel import Session
 
 from adaptive_academy.api.deps import get_session
@@ -16,7 +17,14 @@ from adaptive_academy.api.schemas import (
     NoteOut,
     TopicNotebookOut,
 )
-from adaptive_academy.engine.notebook import NoteTooLong, build_notebook, save_note, topic_notebook
+from adaptive_academy.engine.notebook import (
+    ANY_VERSION,
+    NoteConflict,
+    NoteTooLong,
+    build_notebook,
+    save_note,
+    topic_notebook,
+)
 from adaptive_academy.engine.notebook_sync import NOTEBOOK_SYNC, register_vault_path
 from adaptive_academy.models import Concept, Topic
 
@@ -45,18 +53,31 @@ def get_notebook(concept_id: int, session: Session = Depends(get_session)) -> No
     )
 
 
-@router.put("/concepts/{concept_id}/note", response_model=NoteOut)
-def put_note(concept_id: int, body: NoteIn, session: Session = Depends(get_session)) -> NoteOut:
+@router.put("/concepts/{concept_id}/note", response_model=NoteOut,
+            responses={409: {"description": "The saved note changed since base_updated_at; "
+                                             "the body has `detail` and the `note` saved now"}})
+def put_note(concept_id: int, body: NoteIn, session: Session = Depends(get_session)):
     concept = _concept(session, concept_id)
     if body.vault_path.strip():
         try:
             register_vault_path(body.vault_path)
         except ValueError as exc:
             NOTEBOOK_SYNC.record_problem("vault_path", f"Couldn't sync to the vault: {exc}")
+    base = (body.base_updated_at if "base_updated_at" in body.model_fields_set
+            else ANY_VERSION)
     try:
-        note = save_note(session, concept.id, body.body)
+        note = save_note(session, concept.id, body.body, base_updated_at=base)
     except NoteTooLong as exc:
         raise HTTPException(413, str(exc)) from exc
+    except NoteConflict as exc:
+        current = (NoteOut(concept_id=exc.note.concept_id, body=exc.note.body,
+                           updated_at=exc.note.updated_at).model_dump(mode="json")
+                   if exc.note is not None else None)
+        return JSONResponse(status_code=409, content={
+            "detail": f"Your notes on {concept.name} were saved somewhere else (another tab "
+                      "or window) after this page loaded them.",
+            "note": current,
+        })
     return NoteOut(concept_id=note.concept_id, body=note.body, updated_at=note.updated_at)
 
 

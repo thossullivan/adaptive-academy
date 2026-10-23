@@ -2,7 +2,7 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import { formatWhen, settledSave } from '$lib/notebook';
+  import { defaultNotebookConcept, formatWhen, settledSave } from '$lib/notebook';
   import type { Notebook, NotebookConcept } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, NotebookItems, NotesEditor } from '$lib/ui';
@@ -19,11 +19,15 @@
   let seq = 0;
 
   const wanted = $derived(Number($page.url.searchParams.get('concept')) || null);
-  const selectedId = $derived(wanted ?? concepts?.[0]?.concept_id ?? null);
+  // Without ?concept=, open on the most recently active concept that has notes (else work).
+  // Picked once, on load, so saving or clearing notes never moves the page to another concept.
+  let openOn = $state<number | null>(null);
+  const selectedId = $derived(wanted ?? openOn);
 
   onMount(async () => {
     try {
       concepts = (await api.getTopicNotebook(topicId)).concepts;
+      openOn = defaultNotebookConcept(concepts);
     } catch (e) {
       listError = e instanceof Error ? e.message : String(e);
       concepts = [];

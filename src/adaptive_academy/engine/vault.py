@@ -891,7 +891,7 @@ def export_vault(session: Session, topic_id: int, vault_path: str) -> ExportResu
     problems: list[str] = []
     for c in concepts:
         try:
-            paths[c.id] = concept_note_path(vault, concepts_dir, c, planned[c.id])
+            paths[c.id] = concept_note_path(vault, concepts_dir, c, planned[c.id], concepts)
         except UnsafeNote as exc:
             message = f"{planned[c.id]}.md: {problem_text(exc)}"
             problems.append(message)

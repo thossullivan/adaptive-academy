@@ -22,7 +22,7 @@
 <div class="flex items-center gap-3 py-1.5">
   <div class="flex min-w-0 flex-1 items-center gap-2">
     {#if loadBearing}
-      <span class="text-accent" title="Load-bearing concept">◆</span>
+      <span class="text-accent" title="Key concept">◆</span>
     {/if}
     <span class="truncate text-sm text-fg-dim">{name}</span>
     {#if hasAnchor}

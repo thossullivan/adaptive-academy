@@ -993,3 +993,102 @@ def test_a_linked_obsidian_folder_counts(tmp_path):
         assert notebook_sync.register_vault_path(str(vault)) == str(vault.resolve())
     finally:
         NOTEBOOK_SYNC.reset()
+
+
+# --- third review round ----------------------------------------------------------------------
+
+
+def test_two_same_named_concepts_never_share_an_older_note(session, tmp_path):
+    """A legacy limits.md (title only) is the first "Limits" concept's; the second one gets
+    its own id-suffixed note and never takes or swaps that one."""
+    topic, (first, second) = _topic_with(session, "Analysis", ["Limits", "Limits"])
+    concepts_dir = tmp_path / EXPORT_FOLDER / "analysis" / "Concepts"
+    concepts_dir.mkdir(parents=True)
+    (tmp_path / EXPORT_FOLDER / "analysis" / "analysis.md").write_text("---\ntitle: Analysis\n---\n")
+    legacy = concepts_dir / "limits.md"
+    legacy.write_text("---\ntitle: Limits\ntags: [adaptive-academy, concept]\n---\nMine.\n")
+    save_note(session, first.id, "first concept")
+    save_note(session, second.id, "second concept")
+
+    for _ in range(2):  # every sync, not just the first
+        assert sync_concept(session, first.id, str(tmp_path)) == legacy
+        assert sync_concept(session, second.id, str(tmp_path)) == (
+            concepts_dir / f"limits-{second.id}.md")
+    assert "first concept" in legacy.read_text() and "second concept" not in legacy.read_text()
+    assert "second concept" in (concepts_dir / f"limits-{second.id}.md").read_text()
+    res = export_vault(session, topic.id, str(tmp_path))
+    assert str(legacy) in res.written and "second concept" not in legacy.read_text()
+
+
+def test_two_same_named_topics_never_share_an_older_folder(session, tmp_path):
+    first, (a,) = _topic_with(session, "Calculus", ["Derivatives"])
+    second, (b,) = _topic_with(session, "Calculus", ["Integrals"])
+    old = tmp_path / EXPORT_FOLDER / "calculus"
+    old.mkdir(parents=True)
+    hub = old / "calculus.md"
+    hub.write_text("---\ntitle: Calculus\ntags: [adaptive-academy]\n---\n")
+    save_note(session, b.id, "second topic")
+    path_b = sync_concept(session, b.id, str(tmp_path))
+    assert path_b.parent.parent.name == f"calculus-{second.id}"
+    assert not (old / "Concepts").exists()  # nothing of topic 2's in topic 1's folder
+    path_a = sync_concept(session, a.id, str(tmp_path))
+    assert path_a.parent.parent == old
+
+
+def test_an_older_note_under_another_name_is_taken_on_an_id_match(session, tmp_path):
+    topic, (calc, other) = _topic_with(session, "Maths", ["Cálculo", "Cálculo"])
+    concepts_dir = tmp_path / EXPORT_FOLDER / "maths" / "Concepts"
+    concepts_dir.mkdir(parents=True)
+    (tmp_path / EXPORT_FOLDER / "maths" / "maths.md").write_text("---\ntitle: Maths\n---\n")
+    # The second Cálculo's own note under the old name (it carries its id).
+    old = concepts_dir / "c-lculo.md"
+    old.write_text(f"---\ntitle: Cálculo\nconcept_id: {other.id}\n---\n")
+    assert sync_concept(session, other.id, str(tmp_path)) == old
+    assert sync_concept(session, calc.id, str(tmp_path)) == concepts_dir / "cálculo.md"
+
+
+def test_an_escaped_backslash_does_not_hide_later_keys():
+    from adaptive_academy.engine.notebook import frontmatter_values, set_frontmatter_value
+
+    text = '---\naliases: "C:\\\\"\nconcept_id: 7\nverdict: low\n---\n'
+    assert frontmatter_values(text)["concept_id"] == "7"
+    assert "verdict: high" in set_frontmatter_value(text, "verdict", "high")
+    # An escaped quote still keeps the value open onto the next line.
+    open_value = '---\nnote: "a \\" b\nverdict: inside\n"\nverdict: low\n---\n'
+    assert set_frontmatter_value(open_value, "verdict", "high").endswith(
+        'verdict: inside\n"\nverdict: high\n---\n')
+
+
+def test_block_list_tags_count_as_ours(session, tmp_path):
+    _, concept = _nb(session)
+    path = _note_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("---\ntitle: Self-Attention\ntags:\n  - adaptive-academy\n  - concept\n"
+                    "verdict: untested\n---\n")
+    sync_concept(session, concept.id, str(tmp_path))
+    assert "\nverdict: medium\n" in path.read_text()
+
+
+def test_save_note_with_a_base_saves_only_over_that_version(session):
+    from adaptive_academy.engine.notebook import NoteConflict
+
+    _, concept, _ = _seed(session)
+    first_at = save_note(session, concept.id, "one", base_updated_at=None).updated_at
+    with pytest.raises(NoteConflict) as created:
+        save_note(session, concept.id, "two", base_updated_at=None)  # one exists now
+    assert created.value.note.body == "one"
+    second = save_note(session, concept.id, "two", base_updated_at=first_at)
+    assert second.body == "two" and second.updated_at != first_at
+    with pytest.raises(NoteConflict) as stale:
+        save_note(session, concept.id, "three", base_updated_at=first_at)
+    assert stale.value.note.body == "two"
+    assert session.exec(select(ConceptNote)).one().body == "two"
+
+
+def test_a_conditional_save_still_reaches_the_vault(session, vault_sync):
+    _, concept, _ = _seed(session)
+    first_at = save_note(session, concept.id, "first", base_updated_at=None).updated_at
+    NOTEBOOK_SYNC.drain()
+    save_note(session, concept.id, "second", base_updated_at=first_at)
+    assert NOTEBOOK_SYNC.drain() == 1
+    assert "second" in _note_path(vault_sync).read_text()

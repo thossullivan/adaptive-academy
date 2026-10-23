@@ -63,24 +63,24 @@
 
 <LiveStatus message={status} />
 
-<Page eyebrow="Learning by teaching" title="Teach it" lead="The highest-leverage move in the evidence base: explain a concept to an audience. If you can't teach it cleanly, you don't own it yet." width="normal">
+<Page eyebrow="Learn" title="Teach it" lead="Explain a concept as if you were teaching it, and get feedback on what came across and what didn't. Teaching is one of the best ways to find the gaps in what you know." width="normal">
   {#snippet actions()}
-    <Select bind:value={conceptId} class="w-56" aria-label="Concept to teach">
+    <Select bind:value={conceptId} class="w-auto min-w-56 max-w-[min(24rem,calc(100vw-3rem))]" aria-label="Concept to teach" data-testid="concept-picker">
       {#each concepts as c (c.id)}<option value={c.id}>{c.name}{taught.has(c.id) ? ' ✓' : ''}</option>{/each}
     </Select>
   {/snippet}
 
   {#if !concepts.length}
-    <Card pad class="text-center"><p class="py-8 text-sm text-muted">No concepts to teach yet — generate a curriculum first.</p></Card>
+    <Card pad class="text-center"><p class="py-8 text-sm text-muted">No concepts to teach yet. Make a track on the Sources page first.</p></Card>
   {:else}
     <div class="grid gap-4 lg:grid-cols-5">
       <Card class="lg:col-span-3" pad>
         <div class="flex items-center gap-2">
-          <span class="eyebrow">teaching expectancy</span>
+          <span class="eyebrow">your lesson</span>
           {#if conceptId != null && taught.has(conceptId)}<Badge tone="success" dot>taught</Badge>{/if}
         </div>
         <p class="mt-2 text-sm text-fg">
-          Explain <b>{conceptName}</b> as if teaching a sharp peer who's never seen it — they will ask questions, so be precise about the <i>mechanism</i>, not just the vocabulary.
+          Explain <b>{conceptName}</b> to a sharp friend who has never seen it. They will ask questions, so be clear about <i>how it works</i>, not just the terms.
         </p>
         <Textarea
           class="mt-3"
@@ -121,7 +121,7 @@
           </Card>
         {:else}
           <Card pad class="grid h-full min-h-48 place-items-center text-center">
-            <p class="text-sm text-faint">Your teaching review will appear here — what landed, and what a reader would still be confused by.</p>
+            <p class="text-sm text-faint">Your feedback will appear here: what came across, and what a reader would still find confusing.</p>
           </Card>
         {/if}
       </div>

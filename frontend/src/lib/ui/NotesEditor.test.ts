@@ -17,6 +17,12 @@ describe('NotesEditor', () => {
     expect(body).toContain('aria-keyshortcuts="Control+S Meta+S"');
   });
 
+  it('offers no Discard draft or conflict choice while nothing is unsaved', () => {
+    const { body } = render(NotesEditor, { props: { conceptId: 4, conceptName: 'Softmax', saved: 'mine', savedAt: '2026-10-22T09:00:00' } });
+    expect(body).not.toContain('Discard draft');
+    expect(body).not.toContain('Keep my draft');
+  });
+
   it('says there are no notes yet for a new concept', () => {
     const { body } = render(NotesEditor, { props: { conceptId: 4, conceptName: 'Softmax' } });
     expect(body).toContain('No notes yet');
@@ -50,7 +56,8 @@ describe('NotebookItems', () => {
     const { body } = render(NotebookItems, { props: { items, topicId: 2, conceptId: 5 } });
     expect(body).toContain('My attempts');
     expect(body).toContain('Attempt, not accepted');
-    expect(body).toContain('Teach-back, 70 of 100');
+    // The score is shown in its level's colour (0.7 is "medium": the accent, utils levelColor).
+    expect(body).toMatch(/Teach-back(<!--[^>]*-->)*, <span class="nums" data-testid="item-score" style="color: var\(--accent\);">70 of 100<\/span>/);
     expect(body).toContain('no example');
     expect(body).toContain('the worked answer');
     expect(body).toContain('href="/topics/2/teach"');

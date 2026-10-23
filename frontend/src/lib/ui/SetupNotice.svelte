@@ -118,18 +118,24 @@
       {@render warningList()}
 
       {#if !subscription}
-        <p class="mt-4 border-t border-border pt-3 text-xs leading-relaxed text-muted">
-          {#if openrouter}
-            Using OpenRouter (<code class={code}>AA_LLM_BACKEND=openrouter</code>). Each request passes through OpenRouter as
-            well as the model's provider, and providers that may train on your prompts are left out. To call Anthropic
-            directly, unset it and set <code class={code}>ANTHROPIC_API_KEY</code> instead.
-          {:else}
-            Prefer your Claude subscription? Set <code class={code}>AA_LLM_BACKEND=agent_sdk</code> in
-            <code class={cmd}>.env</code> instead — host-only, run with <code class={cmd}>just api</code> rather than the container.
-            Have an OpenRouter key? Set <code class={code}>AA_LLM_BACKEND=openrouter</code> and
-            <code class={code}>OPENROUTER_API_KEY</code>.
-          {/if}
-        </p>
+        <!-- Other ways to connect a model: useful, but secondary to the steps above. -->
+        <details class="mt-4 border-t border-border pt-3 text-xs leading-relaxed text-muted" data-testid="setup-alternatives">
+          <summary class="cursor-pointer font-medium text-fg-dim hover:text-fg">
+            {openrouter ? 'About OpenRouter' : 'Use a Claude subscription or OpenRouter instead'}
+          </summary>
+          <p class="mt-2">
+            {#if openrouter}
+              Using OpenRouter (<code class={code}>AA_LLM_BACKEND=openrouter</code>). Each request passes through OpenRouter as
+              well as the model's provider, and providers that may train on your prompts are left out. To call Anthropic
+              directly, unset it and set <code class={code}>ANTHROPIC_API_KEY</code> instead.
+            {:else}
+              To use your Claude subscription, set <code class={code}>AA_LLM_BACKEND=agent_sdk</code> in
+              <code class={cmd}>.env</code>. It only works on your own machine, so start the API with
+              <code class={cmd}>just api</code>, not the container. To use an OpenRouter key, set
+              <code class={code}>AA_LLM_BACKEND=openrouter</code> and <code class={code}>OPENROUTER_API_KEY</code>.
+            {/if}
+          </p>
+        </details>
       {/if}
     </Card>
   {:else}

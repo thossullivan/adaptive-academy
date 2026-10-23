@@ -4,11 +4,14 @@ import type { Conversation, MessageOut } from '$lib/types';
 import Composer from './Composer.svelte';
 import {
   ATTEMPT_NOTES,
+  WORKED_SOLUTION_LABEL,
+  attemptChip,
   attemptNote,
   attemptSavedMessage,
   attemptShortcutLabel,
   composerAction,
   messageNote,
+  starterPrompts,
   storedAttempt
 } from './attempt';
 
@@ -77,6 +80,45 @@ describe('attempt notes', () => {
     // The send's own outcome wins (it can say "unverified", which a reload can't).
     expect(messageNote({ ...rejected, attempt_accepted: null, attempt_outcome: 'unverified' })).toBe(ATTEMPT_NOTES.unverified);
     expect(messageNote({ role: 'tutor', content: 'hi' })).toBeNull();
+  });
+});
+
+describe('the attempt chip and the worked solution', () => {
+  const attempt: MessageOut = { role: 'user', content: 'my working', is_attempt: true };
+
+  it('says what the check made of an attempt, live or after a reload', () => {
+    expect(attemptChip({ ...attempt, attempt_outcome: 'accepted' })?.label).toBe('Attempt · logged');
+    expect(attemptChip({ ...attempt, attempt_outcome: 'rejected' })?.label).toBe('Attempt · not logged');
+    expect(attemptChip({ ...attempt, attempt_outcome: 'unverified' })?.label).toBe('Attempt · not checked');
+    expect(attemptChip({ ...attempt, attempt_outcome: 'already_logged' })?.label).toBe('Attempt · already logged');
+    // A reloaded transcript has the stored verdict instead of the send's outcome.
+    expect(attemptChip({ ...attempt, attempt_accepted: true })?.tone).toBe('success');
+    expect(attemptChip({ ...attempt, attempt_accepted: false })?.tone).toBe('warn');
+    expect(attemptChip({ ...attempt, attempt_accepted: null })?.label).toBe('Attempt · not checked');
+    // Still on its way.
+    expect(attemptChip(attempt, true)?.label).toBe('Attempt · checking');
+  });
+
+  it('marks only attempts', () => {
+    expect(attemptChip({ role: 'user', content: 'a question' })).toBeNull();
+    expect(attemptChip({ role: 'tutor', content: 'a reply', is_attempt: true })).toBeNull();
+  });
+
+  it('uses plain words', () => {
+    const words = [
+      WORKED_SOLUTION_LABEL,
+      ...starterPrompts('Causal Self-Attention'),
+      ...(['accepted', 'rejected', 'unverified', 'already_logged'] as const).map((o) => attemptChip({ ...attempt, attempt_outcome: o })!.label)
+    ];
+    for (const w of words) expect(w).not.toMatch(/[—–!]/);
+    expect(WORKED_SOLUTION_LABEL).toBe('Worked solution, unlocked by your attempt');
+  });
+
+  it('offers two starter prompts about the concept, and none without one', () => {
+    const prompts = starterPrompts('KV Cache');
+    expect(prompts).toHaveLength(2);
+    for (const p of prompts) expect(p).toContain('KV Cache');
+    expect(starterPrompts('')).toEqual([]);
   });
 });
 
@@ -151,6 +193,18 @@ describe('Composer', () => {
   it('shows the Mac shortcut on a Mac', () => {
     const { body } = render(Composer, { props: { ...props, value: 'x', isMac: true } });
     expect(body).toContain('⌘ Enter');
+  });
+
+  it('marks Submit attempt out with a draft and no attempt logged, and calms it once one is', () => {
+    const attemptButton = (body: string) => body.match(/<button[^>]*aria-keyshortcuts="Control\+Enter Meta\+Enter"[^>]*>/)![0];
+    const ready = attemptButton(render(Composer, { props: { ...props, value: 'my attempt' } }).body);
+    expect(ready).toContain('data-ready="true"');
+    expect(ready).toContain('border-accent');
+    const logged = attemptButton(render(Composer, { props: { ...props, value: 'more', attemptLogged: true } }).body);
+    expect(logged).toContain('data-ready="false"');
+    expect(logged).not.toContain('border-accent');
+    const empty = attemptButton(render(Composer, { props: { ...props, value: '' } }).body);
+    expect(empty).toContain('data-ready="false"');
   });
 
   it('disables both actions while the message is empty or the composer is busy', () => {

@@ -24,7 +24,7 @@
 <Page
   eyebrow="All topics"
   title="Programs"
-  lead="Long-horizon goals: researched milestone maps with verified-depth gates."
+  lead="Big goals that take months, split into milestones. You pass a milestone by showing you know its key concepts, not just by finishing its steps."
 >
   {#snippet actions()}
     <Button href="/programs/new">New program</Button>
@@ -36,8 +36,8 @@
   {:else if programs.length === 0}
     <Card>
       <p class="text-sm text-muted">
-        No programs yet. A program owns a substantial goal — e.g. PhD-level CS prep —
-        as a sequence of gated milestones, each spawning full topics when you start them.
+        No programs yet. A program holds a big goal, such as getting ready for a PhD in computer
+        science. It splits the goal into milestones, and each one becomes topics when you start it.
       </p>
     </Card>
   {:else}

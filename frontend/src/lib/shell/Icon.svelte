@@ -19,7 +19,13 @@
     data: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Zm0 0v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
     vault: 'M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Zm8 4v4m-2-2h4',
     fleet: 'M12 3v9M12 5l6 3-6 2-6-2 6-3ZM6 12l6 2 6-2-1.5 4H7.5L6 12ZM4 18c1.3 1.3 2.7 1.3 4 0 1.3 1.3 2.7 1.3 4 0 1.3 1.3 2.7 1.3 4 0',
-    usage: 'M4 20h16M7 16v-4M12 16V7M17 16v-6'
+    usage: 'M4 20h16M7 16v-4M12 16V7M17 16v-6',
+    // Voyage marks (Fleet, Wayfinder, comeback card, track deliverables): line glyphs in place
+    // of colour emoji, so they take the theme's colour like every other icon.
+    ship: 'M12 3v12M12 4.5 18 13h-6M11 7l-5 6h5M3.5 15.5h17l-2.3 3.5H5.8l-2.3-3.5Z',
+    target: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 4a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0 4.2a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6Z',
+    anchor: 'M12 7.5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 0V21M8.5 11h7M4.5 14a7.5 7.5 0 0 0 15 0M4.5 14l-1.5 1.5M19.5 14l1.5 1.5',
+    flag: 'M5.5 21V3.5M5.5 4h12l-2.5 4.5 2.5 4.5h-12'
   };
 
   const filled = new Set(['dashboard', 'map', 'wayfinder']);

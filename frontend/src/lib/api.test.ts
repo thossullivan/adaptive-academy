@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { api } from './api';
+import { NoteConflictError, api } from './api';
 
 describe('api.sendMessage', () => {
   it('posts content and returns the parsed result', async () => {
@@ -262,6 +262,33 @@ describe('api errors', () => {
       new Response('<html>oops</html>', { status: 500, statusText: 'Internal Server Error' })
     ) as any;
     await expect(api.listTopics()).rejects.toThrow('500 Internal Server Error');
+  });
+});
+
+describe('api.saveNote', () => {
+  const saved = { concept_id: 3, body: 'mine', updated_at: '2026-10-22T09:00:00' };
+
+  it('sends the version it was written on only when given', async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify(saved), { status: 200 })) as any;
+    await api.saveNote(3, 'mine');
+    await api.saveNote(3, 'mine', '/v', null);
+    await api.saveNote(3, 'mine', '', '2026-10-22T09:00:00');
+    const bodies = (globalThis.fetch as any).mock.calls.map((c: any[]) => JSON.parse(c[1].body));
+    expect(bodies).toEqual([
+      { body: 'mine', vault_path: '' },
+      { body: 'mine', vault_path: '/v', base_updated_at: null },
+      { body: 'mine', vault_path: '', base_updated_at: '2026-10-22T09:00:00' }
+    ]);
+  });
+
+  it('turns a 409 into NoteConflictError carrying the note saved now', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: 'Saved somewhere else.', note: { ...saved, body: 'theirs' } }), { status: 409 })
+    ) as any;
+    const err = await api.saveNote(3, 'mine', '', '2026-10-22T08:00:00').catch((e) => e);
+    expect(err).toBeInstanceOf(NoteConflictError);
+    expect(err.message).toBe('Saved somewhere else.');
+    expect(err.note.body).toBe('theirs');
   });
 });
 

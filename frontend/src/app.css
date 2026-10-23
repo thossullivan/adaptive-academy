@@ -31,9 +31,13 @@
      muted sits a step above faint so the hierarchy survives. */
   --muted: #9298a4; /* 6.1:1 on surface */
   --faint: #848a95; /* 5.1:1 on surface, 4.8:1 on surface-2 */
-  /* The "untested" verdict fill: a graphic, not text (3.3:1 on bg, 3.1:1 on surface), kept
-     visibly darker than --muted ("unverified", 2.0:1 apart) since colour tells them apart. */
+  /* The "untested" verdict ring: a graphic, not text (3.3:1 on bg, 3.1:1 on surface). Untested
+     marks are drawn hollow and "unverified" ones filled (--muted), so shape tells them apart,
+     not only this shade. */
   --verdict-untested: #60667a;
+  /* "verified": a teal of its own, so it never reads as a primary button (the accent) or as
+     "solid" (success green). 8.6:1 on bg, 7.9:1 on surface, 7.4:1 on surface-2. */
+  --verdict-verified: #3fbfc4;
 
   --accent: #e0a83e;
   --accent-bright: #f2bf5d;
@@ -69,8 +73,10 @@
   --fg-dim: #45413a;
   --muted: #5f5a4f; /* 6.5:1 on surface */
   --faint: #6f695c; /* 5.2:1 on surface, 4.8:1 on surface-2 */
-  /* "untested" fill: 3.1:1 on bg, 3.4:1 on surface, 1.9:1 apart from --muted ("unverified"). */
+  /* "untested" ring (drawn hollow): 3.1:1 on bg, 3.4:1 on surface. */
   --verdict-untested: #8f8775;
+  /* "verified" teal: 5.5:1 on bg, 6.0:1 on surface, 5.6:1 on surface-2. */
+  --verdict-verified: #0e6a70;
 
   --accent: #7d5818;
   --accent-bright: #6a4a12;
@@ -110,6 +116,8 @@
   --color-warn: var(--warn);
   --color-danger: var(--danger);
   --color-info: var(--info);
+  --color-verdict-verified: var(--verdict-verified);
+  --color-verdict-untested: var(--verdict-untested);
 
   --font-display: 'Fraunces Variable', ui-serif, Georgia, serif;
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
@@ -210,6 +218,22 @@
     padding: 0.05em 0.35em;
     border-radius: 4px;
     white-space: nowrap;
+  }
+  /* A ``` fenced block (lib/md.ts blockMd): a block of code that wraps rather than scrolls. */
+  .md code.md-pre {
+    display: block;
+    margin: 0.5em 0;
+    padding: 0.6em 0.8em;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.55;
+  }
+  /* Long text (tutor messages, notebook items): inline code wraps instead of overflowing. */
+  .md-wrap code {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   /* Hairline grid texture for chart backdrops. */

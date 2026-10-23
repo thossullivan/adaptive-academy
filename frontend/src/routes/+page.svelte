@@ -5,7 +5,7 @@
   import { setup } from '$lib/setup.svelte';
   import { api, scoutCardTitle } from '$lib/api';
   import type { Curriculum, Assessment, EventOut, Concept, TopicSuggestion } from '$lib/types';
-  import { conceptSignals, conceptVerdict, VERDICT_RANK, type ConceptSignals, type Verdict } from '$lib/competence';
+  import { conceptSignals, conceptVerdict, meanShiftPoints, VERDICT_RANK, type ConceptSignals, type Verdict } from '$lib/competence';
   import Page from '$lib/shell/Page.svelte';
   import EventFeed from '$lib/shell/EventFeed.svelte';
   import { Card, Button, Badge, Stat, SignalStrip, ProgressRing, ScoutCard, SetupNotice } from '$lib/ui';
@@ -42,10 +42,13 @@
       ? Math.round((1 - calibration.reduce((a, b) => a + Math.abs(b.predicted - b.actual), 0) / calibration.length) * 100)
       : null
   );
-  const lastDelta = $derived(
-    trend.length >= 2 ? trend[trend.length - 1].score - trend[trend.length - 2].score : null
-  );
+  // How far the latest probe moved the mean beside it, in points (same unit as the mean).
+  const meanDelta = $derived(meanShiftPoints(trend.map((t) => t.score)));
   const scoutTitle = $derived(scoutCardTitle(scoutSuggestions));
+  // Concept names for the activity feed's sentences ("Graded your recall answer on KV Cache").
+  const conceptNames = $derived(Object.fromEntries(rows.map((r) => [r.id, r.name])));
+  // The activity feed reads as sentences; the raw agent trace is one toggle away.
+  let rawTrace = $state(false);
 
   async function loadScout(topicId: number) {
     scoutSuggestions = [];
@@ -228,13 +231,13 @@
       href: '/programs/new',
       eyebrow: 'Multi-month goal',
       label: 'Start a program',
-      blurb: 'Describe a substantial goal; research drafts a milestone map you review before anything is built.'
+      blurb: 'For a big goal that takes months. Research drafts a plan of milestones, and you check it before anything is built.'
     },
     {
       href: '/topics/new',
       eyebrow: 'Single subject',
       label: 'Start a topic',
-      blurb: 'Name one subject; the Researcher assembles a foundation you curate, then a phased track.'
+      blurb: 'For one subject. You get a reading list to trim, then a track of steps to work through.'
     }
   ];
   // Rank concepts: shakiest + load-bearing first — that's where attention belongs.
@@ -260,14 +263,24 @@
         </svg>
       </div>
       <h1 class="text-3xl text-fg">Adaptive Academy</h1>
-      <p class="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-muted">
-        A private, agent-orchestrated workshop for learning hard things by building. Pick a starting point and
-        the Researcher will assemble your foundation.
+      <p class="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
+        Learn a hard subject by building things. AI agents find sources, plan the steps, tutor you, and
+        check what you've really learned. Your records stay on this computer.
       </p>
 
-      <SetupNotice status={setup.status} class="mt-7" />
+      <!-- The first step: look around a worked example before setting anything up. -->
+      <div class="mt-7 flex flex-col items-center gap-2" data-testid="demo-cta">
+        <Button size="lg" onclick={exploreDemo} disabled={demoBusy}>
+          {demoBusy ? 'Loading the demo…' : 'Explore a demo topic →'}
+        </Button>
+        <p class="max-w-sm text-xs leading-relaxed text-muted">
+          A worked example with a few weeks of activity. Needs no API key, and you can remove it later.
+        </p>
+        {#if demoError}<p class="text-xs text-danger" role="alert">{demoError}</p>{/if}
+      </div>
 
-      <div class="mt-7 grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+      <h2 class="eyebrow mt-10">Or start your own</h2>
+      <div class="mt-3 grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
         {#each entryPoints as e (e.href)}
           <a
             href={e.href}
@@ -280,25 +293,12 @@
         {/each}
       </div>
 
-      <!-- Secondary: look around a worked example before spending anything. -->
-      <div class="mt-6 flex flex-col items-center gap-1 text-sm">
-        <button
-          type="button"
-          onclick={exploreDemo}
-          disabled={demoBusy}
-          class="rounded-[var(--radius-sm)] px-2 py-1 font-medium text-accent transition-colors hover:text-accent-bright hover:underline disabled:opacity-60"
-        >
-          {demoBusy ? 'Loading the demo…' : 'Explore a demo topic →'}
-        </button>
-        <p class="max-w-sm text-xs leading-relaxed text-faint">
-          A worked example with a few weeks of activity. Needs no API key, and you can remove it later.
-        </p>
-        {#if demoError}<p class="text-xs text-danger" role="alert">{demoError}</p>{/if}
-      </div>
+      <!-- Setting up a key comes last: the demo needs none. -->
+      <SetupNotice status={setup.status} class="mt-7" />
     </div>
   </div>
 {:else}
-  <Page eyebrow="Learning command center" title={topics.current.title} width="wide" titleAside={topics.current.is_demo ? demoBadge : undefined}>
+  <Page eyebrow="Your topic" title={topics.current.title} width="wide" titleAside={topics.current.is_demo ? demoBadge : undefined}>
     {#snippet actions()}
       <Button variant="outline" href="/topics/{tid}/map">Constellation</Button>
       <Button href="/topics/{tid}/today">Start today's session →</Button>
@@ -373,66 +373,78 @@
       <!-- Stat strip -->
       <div class="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card class="rise" pad><Stat label="Track progress" value={overallPct} unit="%" hint="{itemsDone} of {itemsTotal} steps" /></Card>
-        <Card class="rise" pad style="animation-delay:60ms"><Stat label="Concepts solid" value={solidCount} unit="/ {rows.length}" hint="triangulated, not just graded" /></Card>
+        <Card class="rise" pad style="animation-delay:60ms"><Stat label="Concepts solid" value={solidCount} unit="/ {rows.length}" hint="checked several ways, not just graded" /></Card>
         <Card class="rise" pad style="animation-delay:120ms"><Stat label="Due for review" value={dueCount} hint="{cardCount} cards total" /></Card>
-        <Card class="rise" pad style="animation-delay:180ms"><Stat label="Mean score" value={meanScore == null ? '—' : Math.round(meanScore * 100)} unit={meanScore == null ? '' : '%'} delta={lastDelta == null ? null : Number(lastDelta.toFixed(2))} hint="across {trend.length} probes" /></Card>
+        <Card class="rise" pad style="animation-delay:180ms"><Stat label="Mean score" value={meanScore == null ? '—' : Math.round(meanScore * 100)} unit={meanScore == null ? '' : '%'} delta={meanDelta} deltaUnit="pts" deltaLabel="change in the mean from the latest probe" hint="across {trend.length} probes" /></Card>
       </div>
 
-      <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <!-- Knowledge map -->
-        <Card class="rise lg:col-span-2" eyebrow="Knowledge map" title="Where you stand">
-          {#snippet header()}
-            <span class="text-xs text-faint">◆ grade · ↺ held · ◷ calibrated · ◳ taught · ⚒ shipped</span>
-          {/snippet}
-          {#if rankedRows.length}
-            <p class="mb-2 text-xs text-faint">Competence is <i>triangulated</i>, not graded — a concept reads "solid" only when independent signals agree. <span class="text-fg-dim">Click any concept for why.</span></p>
-            <div class="flex flex-col">
-              {#each rankedRows as r (r.id)}
-                <SignalStrip name={r.name} signals={r.signals} verdict={r.verdict} loadBearing={r.is_load_bearing} hasAnchor={r.has_anchor} />
-              {/each}
-            </div>
-          {:else}
-            <p class="py-8 text-center text-sm text-faint">This track has no tracked concepts. Assess one to populate the map.</p>
-          {/if}
-        </Card>
-
-        <!-- Calibration -->
-        <Card class="rise" eyebrow="Metacognition" title="Calibration">
-          {#snippet header()}
-            {#if calAccuracy != null}
-              <span class="nums text-sm" style:color={calAccuracy >= 80 ? 'var(--success)' : calAccuracy >= 60 ? 'var(--accent)' : 'var(--danger)'}>{calAccuracy}% accurate</span>
+      <!-- From lg: the map on the left, the two small cards (calibration, build progress)
+           stacked on the right at their own height; the score history and activity run the
+           full width below, so no column is left empty beside a card. -->
+      <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-3">
+        <div class="flex min-w-0 flex-col gap-4 lg:col-span-2">
+          <!-- Knowledge map -->
+          <Card class="rise" eyebrow="Knowledge map" title="Where you stand">
+            {#snippet header()}
+              <span class="text-xs text-faint">◆ grade · ↺ held · ◷ calibrated · ◳ taught · ⚒ shipped</span>
+            {/snippet}
+            {#if rankedRows.length}
+              <p class="mb-2 text-xs text-faint">A concept counts as solid only when different kinds of evidence agree: grades, recall, confidence, teaching and what you built. <span class="text-fg-dim">Click any concept for why.</span></p>
+              <div class="flex flex-col" data-testid="where-you-stand">
+                {#each rankedRows as r (r.id)}
+                  <SignalStrip name={r.name} signals={r.signals} verdict={r.verdict} loadBearing={r.is_load_bearing} hasAnchor={r.has_anchor} />
+                {/each}
+              </div>
+            {:else}
+              <p class="py-8 text-center text-sm text-faint">This track has no tracked concepts. Assess one to populate the map.</p>
             {/if}
-          {/snippet}
-          <CalibrationPlot data={calibration} />
-        </Card>
+          </Card>
+        </div>
+
+        <div class="flex min-w-0 flex-col gap-4" data-testid="dashboard-side">
+          <!-- Calibration -->
+          <Card class="rise" eyebrow="Confidence" title="Calibration" data-testid="calibration-card">
+            {#snippet header()}
+              {#if calAccuracy != null}
+                <span class="nums text-sm" style:color={calAccuracy >= 80 ? 'var(--success)' : calAccuracy >= 60 ? 'var(--accent)' : 'var(--danger)'}>{calAccuracy}% accurate</span>
+              {/if}
+            {/snippet}
+            <CalibrationPlot data={calibration} />
+          </Card>
+
+          <!-- Phase progress -->
+          <Card class="rise" eyebrow="Phases" title="Build progress">
+            <div class="flex flex-col items-center gap-4">
+              <ProgressRing value={itemsTotal ? itemsDone / itemsTotal : 0} size={92} stroke={8} label="{overallPct}%" sublabel="complete" />
+              <ul class="w-full flex-col gap-1.5">
+                {#each phaseProg as p, i}
+                  <li class="flex items-baseline gap-2 py-0.5 text-xs">
+                    <span class="nums w-4 shrink-0 text-faint">{i + 1}</span>
+                    <span class="line-clamp-2 min-w-0 flex-1 break-words text-fg-dim" title={p.title}>{p.title}</span>
+                    <span class="nums text-muted">{p.done}/{p.total}</span>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          </Card>
+        </div>
 
         <!-- Score trajectory -->
-        <Card class="rise lg:col-span-2" eyebrow="Assessment history" title="Score trajectory">
+        <Card class="rise lg:col-span-3" eyebrow="Assessment history" title="Score trajectory" data-testid="score-card">
           <ScoreTrend data={trend} />
         </Card>
 
-        <!-- Phase progress -->
-        <Card class="rise" eyebrow="Phases" title="Build progress">
-          <div class="flex flex-col items-center gap-4">
-            <ProgressRing value={itemsTotal ? itemsDone / itemsTotal : 0} size={92} stroke={8} label="{overallPct}%" sublabel="complete" />
-            <ul class="w-full flex-col gap-1.5">
-              {#each phaseProg as p, i}
-                <li class="flex items-baseline gap-2 py-0.5 text-xs">
-                  <span class="nums w-4 shrink-0 text-faint">{i + 1}</span>
-                  <span class="line-clamp-2 min-w-0 flex-1 break-words text-fg-dim" title={p.title}>{p.title}</span>
-                  <span class="nums text-muted">{p.done}/{p.total}</span>
-                </li>
-              {/each}
-            </ul>
-          </div>
-        </Card>
-
         <!-- Activity -->
-        <Card class="rise lg:col-span-3" eyebrow="Observability" title="Recent agent activity">
+        <Card class="rise lg:col-span-3" eyebrow="Activity" title="Recent agent activity">
           {#snippet header()}
-            <Badge mono tone="neutral">{events.length} events</Badge>
+            <div class="flex items-center gap-2">
+              <Badge mono tone="neutral">{events.length} events</Badge>
+              <Button size="sm" variant="ghost" class="aria-pressed:bg-surface-2 aria-pressed:text-fg" aria-pressed={rawTrace} onclick={() => (rawTrace = !rawTrace)} data-testid="raw-trace-toggle">
+                Raw trace
+              </Button>
+            </div>
           {/snippet}
-          <EventFeed {events} limit={12} />
+          <EventFeed {events} limit={12} mode={rawTrace ? 'raw' : 'plain'} concepts={conceptNames} />
         </Card>
       </div>
     {/if}

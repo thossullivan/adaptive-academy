@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Badge, Markdown } from '$lib/ui';
+  import Icon from '$lib/shell/Icon.svelte';
 
   type WayPhase = {
     id: number;
@@ -130,7 +131,7 @@
 
             {#if p.deliverable}
               <div class="mt-3 flex items-start gap-2 text-xs">
-                <span class="shrink-0 text-accent">⚓ landfall</span>
+                <span class="flex shrink-0 items-center gap-1 text-accent"><Icon name="anchor" class="size-3.5 shrink-0" />landfall</span>
                 <Markdown text={p.deliverable.text} class="min-w-0 text-muted" />
               </div>
             {/if}

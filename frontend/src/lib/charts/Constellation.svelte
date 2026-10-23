@@ -1,7 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Simulation } from 'd3-force';
-  import { VERDICT_COLOR, VERDICT_LABEL, type Verdict } from '$lib/competence';
+  import { VERDICT_COLOR, VERDICT_SHAPE, VERDICT_LABEL, type Verdict } from '$lib/competence';
+  import VerdictDot from '$lib/ui/VerdictDot.svelte';
   import type { GraphLink } from '$lib/types';
   import {
     LABEL_FONT_SIZE,
@@ -9,6 +10,7 @@
     clampToBounds,
     createLayout,
     fitLabel,
+    GLOW,
     hasRealSize,
     labelMaxWidth,
     layoutLabels,
@@ -311,13 +313,15 @@
       {#each simNodes as n (n.id)}
         {@const r = n.r}
         {@const c = VERDICT_COLOR[n.verdict]}
+        {@const shape = VERDICT_SHAPE[n.verdict]}
+        {@const hollow = shape === 'ring'}
         <g
           transform="translate({n.x},{n.y})"
           class="cursor-pointer transition-opacity outline-none motion-reduce:transition-none"
           style:opacity={dimmed(n.id) ? 0.3 : 1}
           role="button"
           tabindex="0"
-          aria-label="{n.name}: {VERDICT_LABEL[n.verdict]}{n.loadBearing ? ', load-bearing' : ''}"
+          aria-label="{n.name}: {VERDICT_LABEL[n.verdict]}{n.loadBearing ? ', key concept' : ''}"
           aria-pressed={n.id === selected}
           data-node-id={n.id}
           onmouseenter={() => (hovered = n.id)}
@@ -344,16 +348,31 @@
           }}
         >
           <title>{n.name}</title>
-          <!-- glow (decorative: never steals the pointer from a neighbouring star) -->
-          <circle r={r + 8} fill={c} opacity={hovered === n.id ? 0.28 : 0.14} pointer-events="none" />
+          <!-- Glow (decorative: never steals the pointer from a neighbouring star). A key concept
+               is drawn larger with a full halo; other stars get only a faint, tight glow. No ring
+               marks a key concept, so it can never be mistaken for an untested (hollow) star. -->
+          {#if n.loadBearing}
+            <circle data-testid="constellation-halo" data-node-id={n.id} r={r + GLOW} fill={c} opacity={hovered === n.id ? 0.32 : hollow ? 0.14 : 0.22} pointer-events="none" />
+          {:else}
+            <circle r={r + 5} fill={c} opacity={hovered === n.id ? 0.28 : hollow ? 0.04 : 0.1} pointer-events="none" />
+          {/if}
           <!-- hit target: r + 4 stays clear of neighbours (collision keeps stars r + 4 apart) -->
           <circle r={r + 4} fill="transparent" />
-          <circle data-testid="constellation-node" data-node-id={n.id} {r} fill={c} stroke="var(--bg)" stroke-width="1.5" />
+          <!-- Shape backs up colour (VERDICT_SHAPE): an untested star is a hollow ring (no
+               evidence yet), a verified one a diamond (so it never reads as solid's round green),
+               every other verdict a filled disc. The diamond's corners reach 1.2r, about the
+               disc's area; the r-sized circle still marks the star's footprint. -->
+          {#if shape === 'ring'}
+            <circle data-testid="constellation-node" data-node-id={n.id} data-shape="ring" data-hollow="true" {r} fill="var(--bg)" stroke={c} stroke-width="2" />
+          {:else if shape === 'diamond'}
+            {@const d = r * 1.2}
+            <polygon points="0,{-d} {d},0 0,{d} {-d},0" fill={c} stroke="var(--bg)" stroke-width="1.5" stroke-linejoin="round" pointer-events="none" />
+            <circle data-testid="constellation-node" data-node-id={n.id} data-shape="diamond" {r} fill="transparent" />
+          {:else}
+            <circle data-testid="constellation-node" data-node-id={n.id} data-shape="dot" {r} fill={c} stroke="var(--bg)" stroke-width="1.5" />
+          {/if}
           {#if n.id === selected || highlightedSet.has(n.id)}
             <circle r={r + 6} fill="none" stroke="var(--accent)" stroke-width={n.id === selected ? 2 : 1.25} opacity="0.9" pointer-events="none" />
-          {/if}
-          {#if n.loadBearing}
-            <circle r={r + 3.5} fill="none" stroke={c} stroke-width="1" opacity="0.6" pointer-events="none" />
           {/if}
           {#if focused === n.id}
             <circle
@@ -402,10 +421,16 @@
     <div data-testid="constellation-legend" class="inline-flex flex-wrap gap-x-3 gap-y-1 rounded-[var(--radius-sm)] border border-border bg-[color-mix(in_oklab,var(--surface)_70%,transparent)] px-3 py-2 backdrop-blur">
       {#each LEGEND as v}
         <span class="flex items-center gap-1.5 text-[0.7rem] text-muted">
-          <span class="size-2 rounded-full" style:background={VERDICT_COLOR[v]}></span>{VERDICT_LABEL[v]}
+          <VerdictDot verdict={v} />{VERDICT_LABEL[v]}
         </span>
       {/each}
-      <span class="flex items-center gap-1.5 text-[0.7rem] text-faint">◯ load-bearing</span>
+      <!-- A key concept is a larger star with a halo: the swatch draws exactly that. -->
+      <span class="flex items-center gap-1.5 text-[0.7rem] text-muted" data-testid="legend-key-concept">
+        <span
+          class="inline-block size-2.5 shrink-0 rounded-full bg-[var(--muted)] shadow-[0_0_0_3px_color-mix(in_oklab,var(--muted)_30%,transparent)]"
+          aria-hidden="true"
+        ></span>key concept (larger, with a halo)
+      </span>
     </div>
   </div>
 </div>

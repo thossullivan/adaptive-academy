@@ -33,12 +33,18 @@ test('write and save notes from the Tutor, then find them in the Notebook', asyn
 
   await page.goto(`/topics/${topic.id}/tutor?concept=${concept.id}`);
   await settle(page);
+  // A toggle button: pressed while the panel is open, and an outline (never the primary fill).
   const toggle = page.getByRole('button', { name: 'Notes', exact: true });
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await toggle.click();
-  await expect(page.getByRole('button', { name: 'Hide notes' })).toHaveAttribute('aria-expanded', 'true');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle).toHaveAttribute('aria-controls', 'tutor-notes');
+  await expect(toggle).not.toHaveClass(/bg-accent(\s|$)/);
 
   const panel = page.locator('#tutor-notes');
+  await expect(page.getByRole('complementary', { name: `Notes on ${name}` })).toBeVisible();
+  // One title: the editor's label, no second heading over it.
+  await expect(panel.getByRole('heading')).toHaveCount(0);
   const box = panel.getByRole('textbox', { name: `My notes on ${name}` });
   const status = panel.getByTestId('note-status');
   await expect(box).toBeVisible();
@@ -100,6 +106,10 @@ test('the Notebook lists graded explanations with score, gaps, and where they we
   await expect(explanations.getByRole('heading', { name: /My explanations · 2/ })).toBeVisible();
   await expect(explanations).toContainText('Decay check, 60 of 100');
   await expect(explanations).toContainText('Self-explanation, 35 of 100');
+  // Each score in its level's colour, as on the dashboard: 60 is medium, 35 is low.
+  const scores = explanations.getByTestId('item-score');
+  await expect(scores.filter({ hasText: '60 of 100' })).toHaveAttribute('style', /var\(--accent\)/);
+  await expect(scores.filter({ hasText: '35 of 100' })).toHaveAttribute('style', /var\(--danger\)/);
   await expect(explanations.getByRole('link', { name: 'Retention' })).toHaveAttribute('href', `/topics/${topic.id}/retention`);
   await expect(explanations.getByRole('link', { name: 'Assess' })).toHaveAttribute('href', `/topics/${topic.id}/assess`);
 
@@ -107,6 +117,28 @@ test('the Notebook lists graded explanations with score, gaps, and where they we
   await list.getByRole('link', { name: /Scaled Dot-Product Attention/ }).click();
   await expect(page.getByRole('heading', { level: 2, name: 'Scaled Dot-Product Attention' })).toBeVisible();
   await expect(page.getByTestId('notebook-explanations')).toContainText('Self-explanation, 80 of 100');
+});
+
+test('without ?concept= the Notebook opens on the most recently active concept with notes', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const [newest, withNotes] = topic.concepts;
+  await page.route('**/api/topics/*/notebook', (r) =>
+    r.fulfill({
+      json: {
+        topic_id: topic.id,
+        concepts: [
+          // The newest has work but no notes; the one to open on has notes.
+          { concept_id: newest.id, name: newest.name, has_note: false, attempts: 0, explanations: 2, solutions: 0, last_activity_at: '2026-10-22T09:00:00' },
+          { concept_id: withNotes.id, name: withNotes.name, has_note: true, attempts: 0, explanations: 0, solutions: 0, last_activity_at: '2026-10-20T09:00:00' }
+        ]
+      }
+    })
+  );
+  await page.goto(`/topics/${topic.id}/notebook`);
+  await settle(page);
+  await expect(page.getByRole('heading', { level: 2, name: withNotes.name })).toBeVisible();
+  const list = page.getByRole('navigation', { name: 'Concepts with notes or work' });
+  await expect(list.getByRole('link', { name: withNotes.name })).toHaveAttribute('aria-current', 'page');
 });
 
 test('the rail links to the Notebook under Library', async ({ page }) => {
@@ -231,6 +263,131 @@ test('a draft over the limit cannot be saved, and leaving the page asks first', 
   expect(await savedBody(page, concept.id)).toBe('');
 });
 
+test('a quick switch away and back, before the other notebook loads, shows the text just saved', async ({ page }) => {
+  // The panel used to remount from the copy it showed before the switch, which predates the
+  // save made on the way out; editing it then overwrote the newer text.
+  const topic = await seededTopic(page);
+  const name = isPhone() ? 'Supervised Fine-Tuning' : 'Chain Rule for Vector Functions';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  const other = topic.concepts.find((c) => c.name === (isPhone() ? 'Transformer Architecture (GPT-style)' : 'Tokenization and Vocabulary Construction'))!;
+  const box = await openNotes(page, topic.id, concept.id, name);
+  await page.route(`**/api/concepts/${other.id}/notebook`, async (r) => {
+    await new Promise((res) => setTimeout(res, 2000));
+    await r.fallback();
+  });
+
+  await box.fill('Newest words, saved on the way out.');
+  const select = page.getByRole('combobox', { name: 'Concept' });
+  const saved = page.waitForResponse((r) => r.url().endsWith(`/api/concepts/${concept.id}/note`) && r.request().method() === 'PUT');
+  await select.selectOption(String(other.id));
+  await saved;
+  await select.selectOption(String(concept.id)); // back before the other notebook arrives
+
+  const back = page.locator('#tutor-notes').getByRole('textbox', { name: `My notes on ${name}` });
+  await expect(back).toHaveValue('Newest words, saved on the way out.');
+  await expect(page.getByTestId('note-status')).toContainText('Saved');
+  expect(await savedBody(page, concept.id)).toBe('Newest words, saved on the way out.');
+});
+
+/** Leave the Tutor for Today through the rail (an in-app navigation, so the editor unmounts). */
+async function leaveForToday(page: Page) {
+  if (isPhone()) await page.getByRole('button', { name: 'Open navigation' }).click();
+  await page.locator('aside:visible').getByRole('link', { name: 'Today', exact: true }).click();
+  await expect(page).toHaveURL(/\/today$/);
+  await settle(page);
+}
+
+test('a kept draft never silently overwrites a note saved after it', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const name = isPhone() ? 'Scaled Dot-Product Attention' : 'Positional Encodings (sinusoidal and RoPE)';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  page.on('dialog', (d) => d.accept()); // a reload with unsaved changes asks first
+  const puts: string[] = [];
+  page.on('request', (req) => {
+    if (req.method() === 'PUT' && req.url().endsWith(`/api/concepts/${concept.id}/note`)) puts.push(req.postDataJSON().body);
+  });
+  /** Another tab saves the note while this tab holds a draft. */
+  const saveElsewhere = async (body: string) => {
+    const res = await page.request.put(`/api/concepts/${concept.id}/note`, { data: { body, vault_path: '' } });
+    expect(res.ok()).toBeTruthy();
+  };
+
+  let box = await openNotes(page, topic.id, concept.id, name);
+  await box.fill('Draft from this tab.');
+  await saveElsewhere('Saved in another tab.');
+  await page.reload();
+  await settle(page);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const panel = page.locator('#tutor-notes');
+  box = panel.getByRole('textbox', { name: `My notes on ${name}` });
+
+  // The draft comes back, with a choice, and is described to screen readers.
+  const notice = panel.getByTestId('note-conflict');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('your saved notes changed after it');
+  await expect(box).toHaveValue('Draft from this tab.');
+  await expect(box).toHaveAttribute('aria-describedby', /-conflict /);
+  await expect(panel.getByRole('button', { name: 'Keep my draft' })).toBeVisible();
+
+  // Leaving without choosing saves nothing: the newer note stays.
+  await leaveForToday(page);
+  expect(puts).toEqual([]);
+  expect(await savedBody(page, concept.id)).toBe('Saved in another tab.');
+
+  // Back again, it asks again; Use the saved note (from the keyboard) drops the draft.
+  box = await openNotes(page, topic.id, concept.id, name);
+  await expect(box).toHaveValue('Draft from this tab.');
+  await panel.getByRole('button', { name: 'Use the saved note' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(box).toHaveValue('Saved in another tab.');
+  await expect(box).toBeFocused();
+  await expect(notice).toHaveCount(0);
+  expect(await page.evaluate((id) => sessionStorage.getItem(`aa.note-draft.${id}`), concept.id)).toBeNull();
+
+  // Keep my draft: chosen, so it is saved on the way out.
+  await box.fill('A second draft.');
+  await saveElsewhere('Newer again.');
+  await page.reload();
+  await settle(page);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  await expect(box).toHaveValue('A second draft.');
+  await panel.getByRole('button', { name: 'Keep my draft' }).click();
+  await expect(notice).toHaveCount(0);
+  await leaveForToday(page);
+  await expect.poll(() => savedBody(page, concept.id)).toBe('A second draft.');
+  expect(puts).toEqual(['A second draft.']);
+});
+
+test('a restored draft is not saved on the way out until it is edited, and Discard draft drops it', async ({ page }) => {
+  const topic = await seededTopic(page);
+  const name = isPhone() ? 'Causal (Masked) Self-Attention' : 'Transformer Architecture (GPT-style)';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  page.on('dialog', (d) => d.accept());
+
+  let box = await openNotes(page, topic.id, concept.id, name);
+  await box.fill('Half a thought.');
+  await page.reload();
+  await settle(page);
+  await page.getByRole('button', { name: 'Notes', exact: true }).click();
+  const panel = page.locator('#tutor-notes');
+  box = panel.getByRole('textbox', { name: `My notes on ${name}` });
+  // Written on the note saved now: restored quietly, no question.
+  await expect(box).toHaveValue('Half a thought.');
+  await expect(page.getByTestId('note-restored')).toBeVisible();
+  await expect(panel.getByTestId('note-conflict')).toHaveCount(0);
+
+  await leaveForToday(page);
+  expect(await savedBody(page, concept.id)).toBe('');
+
+  box = await openNotes(page, topic.id, concept.id, name);
+  await expect(box).toHaveValue('Half a thought.');
+  await panel.getByRole('button', { name: 'Discard draft' }).click();
+  await expect(box).toHaveValue('');
+  await expect(page.getByTestId('note-status')).toHaveText('No notes yet');
+  await expect(panel.getByRole('button', { name: 'Discard draft' })).toHaveCount(0);
+  expect(await page.evaluate((id) => sessionStorage.getItem(`aa.note-draft.${id}`), concept.id)).toBeNull();
+});
+
 test('clearing the vault folder stops notebooks syncing to it', async ({ page }) => {
   const topic = await seededTopic(page);
   await page.addInitScript(() => localStorage.setItem('aa_vault_path', '/no/such/vault'));
@@ -282,4 +439,68 @@ test('the vault set by AA_OBSIDIAN_VAULT_PATH shows its sync state, and clearing
   await field.blur();
   await expect(page.getByRole('status').filter({ hasText: 'set by AA_OBSIDIAN_VAULT_PATH' }).first()).toBeAttached();
   await expect(page.getByText('no longer sync')).toHaveCount(0);
+});
+
+// --- two open editors ----------------------------------------------------------------------
+
+/** The second seeded topic, whose spare concepts these tests write notes on. */
+async function spareTopic(page: Page): Promise<Topic> {
+  const res = await page.request.get('/api/topics');
+  const topics = (await res.json()) as Topic[];
+  return topics.find((t) => t.title === 'Linear Algebra Refresher')!;
+}
+
+test('two open editors never overwrite each other silently', async ({ page }) => {
+  const topic = await spareTopic(page);
+  const name = isPhone() ? 'Matrix Rank' : 'Determinants';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  const other = await page.context().newPage();
+
+  const one = await openNotes(page, topic.id, concept.id, name);
+  const two = await openNotes(other, topic.id, concept.id, name);
+  const panelOne = page.locator('#tutor-notes');
+  const panelTwo = other.locator('#tutor-notes');
+
+  await two.fill('From tab two.');
+  await two.press('Control+s');
+  await expect(panelTwo.getByTestId('note-status')).toContainText('Saved');
+
+  // Tab one still shows the note as it was when it opened: its save is refused, not applied.
+  await one.fill('From tab one.');
+  await one.press('Control+s');
+  const notice = panelOne.getByTestId('note-conflict');
+  await expect(notice).toContainText('saved in another tab or window');
+  await expect(one).toHaveValue('From tab one.');
+  expect(await savedBody(page, concept.id)).toBe('From tab two.');
+  await expect(panelOne.getByRole('button', { name: 'Discard draft' })).toHaveCount(0);
+
+  // Use the saved note: tab one now shows tab two's text, and saves on top of it cleanly.
+  await panelOne.getByRole('button', { name: 'Use the saved note' }).click();
+  await expect(one).toHaveValue('From tab two.');
+  await one.fill('From tab two, then tab one.');
+  await one.press('Control+s');
+  await expect(panelOne.getByTestId('note-status')).toContainText('Saved');
+  expect(await savedBody(page, concept.id)).toBe('From tab two, then tab one.');
+
+  // Now tab two is behind: Keep my draft sends it again, on the note saved now.
+  await two.fill('Tab two insists.');
+  await two.press('Control+s');
+  await expect(panelTwo.getByTestId('note-conflict')).toBeVisible();
+  expect(await savedBody(page, concept.id)).toBe('From tab two, then tab one.');
+  await panelTwo.getByRole('button', { name: 'Keep my draft' }).click();
+  await expect(panelTwo.getByTestId('note-status')).toContainText('Saved');
+  expect(await savedBody(page, concept.id)).toBe('Tab two insists.');
+  await other.close();
+});
+
+test('Discard draft is not offered for what you are typing now', async ({ page }) => {
+  const topic = await spareTopic(page);
+  const name = isPhone() ? 'Singular Values' : 'Orthogonality';
+  const concept = topic.concepts.find((c) => c.name === name)!;
+  const box = await openNotes(page, topic.id, concept.id, name);
+  const panel = page.locator('#tutor-notes');
+  await box.fill('Typed just now, not saved yet.');
+  await expect(page.getByTestId('note-status')).toHaveText('Unsaved changes');
+  await expect(panel.getByRole('button', { name: 'Discard draft' })).toHaveCount(0);
+  await expect(panel.getByRole('button', { name: 'Save notes' })).toBeEnabled();
 });

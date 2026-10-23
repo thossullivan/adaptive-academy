@@ -111,6 +111,27 @@
   ];
 
   const pathname = $derived($page.url.pathname);
+
+  // When the nav is taller than the space left for it (the phone drawer, a short window), it
+  // scrolls under the pinned footer. A fade at the cut edge says there is more to scroll to.
+  let navEl: HTMLElement | null = $state(null);
+  let moreAbove = $state(false);
+  let moreBelow = $state(false);
+  function measure() {
+    if (!navEl) return;
+    moreAbove = navEl.scrollTop > 1;
+    moreBelow = navEl.scrollTop + navEl.clientHeight < navEl.scrollHeight - 1;
+  }
+  $effect(() => {
+    // Re-measure when the nav's content changes (topic chosen, hint dismissed) or it resizes.
+    void [sections, primary, dayHint.dismissed];
+    if (!navEl || typeof ResizeObserver === 'undefined') return;
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(navEl);
+    for (const child of navEl.children) ro.observe(child);
+    return () => ro.disconnect();
+  });
 </script>
 
 {#snippet link(item: Nav, size: 'primary' | 'row' | 'pair')}
@@ -159,7 +180,14 @@
   <TopicSwitcher />
 
   <!-- Nav -->
-  <nav aria-label="Main" class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto md:gap-2">
+  <div class="relative flex min-h-0 flex-1 flex-col">
+  <nav
+    bind:this={navEl}
+    onscroll={measure}
+    aria-label="Main"
+    class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain pb-3 md:gap-2 md:pb-0"
+    data-more-below={moreBelow ? 'true' : undefined}
+  >
     {#if primary.length}
       <div class="flex flex-col gap-px">
         {#each primary as item (item.label)}
@@ -209,6 +237,16 @@
       </a>
     {/if}
   </nav>
+  <div
+    class="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-surface to-transparent transition-opacity duration-150 {moreAbove ? 'opacity-100' : 'opacity-0'}"
+    aria-hidden="true"
+  ></div>
+  <div
+    class="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-surface to-transparent transition-opacity duration-150 {moreBelow ? 'opacity-100' : 'opacity-0'}"
+    aria-hidden="true"
+    data-testid="rail-fade-below"
+  ></div>
+  </div>
 
   <!-- Footer -->
   <div class="flex flex-col gap-px border-t border-border pt-2">

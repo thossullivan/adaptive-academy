@@ -27,14 +27,21 @@
   const base =
     'inline-flex items-center justify-center gap-2 rounded-[var(--radius-sm)] font-medium ' +
     'transition-[background,color,border,transform,box-shadow] duration-150 active:translate-y-px ' +
-    'disabled:pointer-events-none disabled:opacity-45 select-none whitespace-nowrap';
+    'disabled:pointer-events-none select-none whitespace-nowrap';
 
+  // Disabled reads as switched off, not as a faded version of the live button: every variant
+  // drops to the same flat surface-3 / faint look, with no accent, border colour or shadow.
   const variants = {
     primary:
-      'bg-accent text-accent-fg hover:bg-accent-bright shadow-[0_1px_0_rgba(255,255,255,0.12)_inset,0_6px_16px_-8px_var(--accent)]',
-    outline: 'border border-border-strong bg-surface-2 text-fg-dim hover:text-fg hover:border-faint',
-    ghost: 'text-muted hover:text-fg hover:bg-surface-2',
-    danger: 'border border-[color-mix(in_oklab,var(--danger)_45%,transparent)] text-danger hover:bg-[color-mix(in_oklab,var(--danger)_12%,transparent)]'
+      'bg-accent text-accent-fg hover:bg-accent-bright shadow-[0_1px_0_rgba(255,255,255,0.12)_inset,0_6px_16px_-8px_var(--accent)] ' +
+      'disabled:bg-surface-3 disabled:text-faint disabled:shadow-none',
+    outline:
+      'border border-border-strong bg-surface-2 text-fg-dim hover:text-fg hover:border-faint ' +
+      'disabled:border-border disabled:bg-surface-3 disabled:text-faint',
+    ghost: 'text-muted hover:text-fg hover:bg-surface-2 disabled:bg-transparent disabled:text-faint',
+    danger:
+      'border border-[color-mix(in_oklab,var(--danger)_45%,transparent)] text-danger hover:bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] ' +
+      'disabled:border-border disabled:bg-surface-3 disabled:text-faint'
   };
 
   const sizes = {

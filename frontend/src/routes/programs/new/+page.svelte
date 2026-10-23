@@ -53,14 +53,14 @@
   eyebrow="Programs"
   title="New program"
   width="narrow"
-  lead="Describe the substantial goal. Research drafts a milestone map you review before anything is built."
+  lead="Describe your big goal. Research drafts a plan of milestones, and you check it before anything is built."
 >
   <SetupNotice status={setup.status} class="mb-4" />
 
   <Card pad class="rise">
     <div class="flex flex-col gap-4">
       <Field label="Title">
-        <Input bind:value={title} placeholder="PhD-level CS prep — custom LLMs" disabled={busy} />
+        <Input bind:value={title} placeholder="PhD-level CS prep: custom LLMs" disabled={busy} />
       </Field>
       <Field label="Goal statement" hint="Why deep, why this.">
         <Textarea
@@ -94,11 +94,11 @@
             {busy ? 'Creating…' : 'Create program'}
           </Button>
           {#if setup.blocked}
-            <span data-testid="submit-blocked" class="text-xs text-warn">Needs an Anthropic API key — see the setup note above.</span>
+            <span data-testid="submit-blocked" class="text-xs text-warn">Needs an API key. See the setup note above.</span>
           {/if}
         </div>
         <p class="text-xs text-faint">
-          Drafting the milestone map next runs several model calls (multi-agent research) on {billedTo(setup.status)}.
+          Drafting the plan next runs several model calls (research by several agents) on {billedTo(setup.status)}.
           See the cost note in the README.
         </p>
       </div>

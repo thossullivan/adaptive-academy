@@ -33,7 +33,7 @@
 <Page
   eyebrow="Account"
   title="Your data"
-  lead="Your learning record (topics, concepts, assessments, gates, conversations, and the agent trace) is one SQLite file on your machine. Take a copy any time."
+  lead="Back up, export, or restore everything you've recorded. Your topics, grades, conversations, and the agent log all live in one file on your machine."
   width="narrow"
 >
   <div class="flex flex-col gap-5">

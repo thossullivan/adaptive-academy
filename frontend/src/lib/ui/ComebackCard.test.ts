@@ -36,6 +36,17 @@ describe('ComebackCard', () => {
     expect(body).not.toContain('Show all');
   });
 
+  it('marks the voyage with line icons, not colour emoji', () => {
+    for (const state of ['unsailed', 'becalmed', 'fading'] as const) {
+      const { body } = render(ComebackCard, {
+        props: { wind: { ...wind, state, days_since: 9 }, comeback: move('derive the gradient') }
+      });
+      expect(body).toContain('derive the gradient');
+      expect(body).not.toMatch(/[⛵⭐\u{1F3AF}⚓]/u);
+      expect(body).toContain('<svg');
+    }
+  });
+
   it('keeps identifiers intact and strips only paired markdown', () => {
     const { body } = render(ComebackCard, {
       props: { wind, comeback: move('Implement `log_softmax` with **torch.no_grad** in _one_ pass') }

@@ -72,6 +72,8 @@ class MessageOut(BaseModel):
     # logged, None when there is no verdict (not an attempt, the check was unavailable, or an
     # attempt in a conversation that was already unlocked).
     attempt_accepted: Optional[bool] = None
+    # A tutor reply that is a worked solution, shown because an attempt was logged.
+    reveals_solution: bool = False
 
 
 class MemoryHitOut(BaseModel):
@@ -156,6 +158,8 @@ class SendMessageOut(BaseModel):
     attempt_logged: bool
     # What happened to a submitted attempt (engine/attempt.py); None for an ordinary message.
     attempt_outcome: Optional[AttemptOutcomeOut] = None
+    # The reply is a worked solution the attempt unlocked (Message.reveals_solution).
+    reveals_solution: bool = False
     assistance_level: str
     challenge_level: str
     events: list[EventOut]
@@ -480,6 +484,10 @@ class NoteIn(BaseModel):
     # The browser's vault path, if it has one: registered as the sync target (like
     # PUT /api/vault/sync) so the note reaches the vault. A bad path never fails the save.
     vault_path: str = ""
+    # The saved note the editor was showing: its updated_at, or null for "no note yet". When
+    # sent and the saved note has changed since (another tab saved), the save is refused
+    # with 409 and the note saved now. Left out: no check (older clients).
+    base_updated_at: Optional[datetime] = None
 
 
 class NoteOut(BaseModel):

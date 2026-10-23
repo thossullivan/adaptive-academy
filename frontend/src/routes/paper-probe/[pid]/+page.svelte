@@ -43,7 +43,8 @@
 
 <svelte:head><title>Paper probe · Adaptive Academy</title></svelte:head>
 
-<div class="mx-auto max-w-3xl px-6 py-8 md:px-10">
+<!-- The shared page frame (see shell/Page.svelte): same left edge as every other page. -->
+<div class="mx-auto w-full max-w-6xl px-6 py-8 *:max-w-3xl md:px-10 md:py-10" data-page-frame>
   {#if loading}
     <p class="text-sm text-muted">Loading…</p>
   {:else if error && !probe}
@@ -70,7 +71,7 @@
             <textarea
               bind:value={answers[q.index]}
               rows="4"
-              placeholder="Your answer — generate your own critique before submitting…"
+              placeholder="Your answer: write your own critique before you submit…"
               class="w-full resize-y rounded-[var(--radius-md)] border border-control-border bg-surface-2 px-3.5 py-3 text-sm leading-relaxed text-fg placeholder:text-faint focus:border-accent focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
             ></textarea>
           </Card>

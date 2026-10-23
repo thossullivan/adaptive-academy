@@ -234,3 +234,34 @@ def test_exporting_a_topic_whose_folder_is_taken_is_a_400(client, session, tmp_p
     assert r.status_code == 400 and "belongs to another topic" in r.json()["detail"]
     r = client.post("/api/vault/export-all", json={"vault_path": str(tmp_path)})
     assert r.status_code == 200 and len(r.json()["problems"]) == 1
+
+
+def test_a_save_over_a_newer_note_is_a_409_with_that_note(client, session):
+    _, concept = _seed(session)
+    url = f"/api/concepts/{concept.id}/note"
+    first = client.put(url, json={"body": "tab one", "base_updated_at": None})
+    assert first.status_code == 200
+    base = first.json()["updated_at"]
+    # Another tab saves over it.
+    other = client.put(url, json={"body": "tab two", "base_updated_at": base})
+    assert other.status_code == 200
+    # The first tab, still on the old version, is refused and told what is saved now.
+    stale = client.put(url, json={"body": "tab one again", "base_updated_at": base})
+    assert stale.status_code == 409
+    assert "saved somewhere else" in stale.json()["detail"]
+    assert stale.json()["note"]["body"] == "tab two"
+    assert session.exec(select(ConceptNote)).one().body == "tab two"
+    # Keep my draft: resend on the version it was told about.
+    kept = client.put(url, json={"body": "tab one again",
+                                 "base_updated_at": stale.json()["note"]["updated_at"]})
+    assert kept.status_code == 200 and kept.json()["body"] == "tab one again"
+    # "No note yet" when there is one is a conflict too.
+    assert client.put(url, json={"body": "x", "base_updated_at": None}).status_code == 409
+
+
+def test_a_save_without_a_base_is_not_checked(client, session):
+    _, concept = _seed(session)
+    url = f"/api/concepts/{concept.id}/note"
+    client.put(url, json={"body": "one"})
+    assert client.put(url, json={"body": "two"}).status_code == 200
+    assert session.exec(select(ConceptNote)).one().body == "two"

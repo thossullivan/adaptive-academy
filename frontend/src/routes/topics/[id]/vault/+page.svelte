@@ -204,7 +204,7 @@
 <Page
   eyebrow="Library"
   title="Obsidian vault"
-  lead="Hook your learning into the notes you already keep. Everything here is local file I/O — no cloud, no API, nothing leaves your machine."
+  lead="Connect the app to the Obsidian notes you already keep. It only reads and writes files on this computer."
 >
   <LiveStatus message={announce} />
   <div class="flex flex-col gap-5">
@@ -299,7 +299,7 @@
           and quizzes can be grounded in your own material. Safe to re-run — already-ingested notes
           are skipped.
         </p>
-        <Button size="sm" onclick={runIngest} disabled={!ready || ingesting}>
+        <Button variant="outline" size="sm" onclick={runIngest} disabled={!ready || ingesting}>
           {ingesting ? 'Reading…' : '↑ Ingest notes'}
         </Button>
         {#if ingestRes}
@@ -341,7 +341,7 @@
             aria-label="Maximum search results"
           />
         </label>
-        <Button type="submit" size="sm" disabled={searching || !query.trim()}>
+        <Button type="submit" variant="outline" size="sm" disabled={searching || !query.trim()}>
           {searching ? 'Searching…' : 'Search'}
         </Button>
         <Button

@@ -44,3 +44,241 @@ export function timeAgo(iso: string | null | undefined, now = Date.now()): strin
   if (h < 24) return `${h}h ago`;
   return `${Math.round(h / 24)}d ago`;
 }
+
+// --- Plain-language activity -------------------------------------------------------------
+// The dashboard shows what happened in words, not the raw trace. Only events that mean
+// something to a learner become a sentence; bookkeeping (prompt tags, plan steps, guard
+// checks) is left out here and stays on the Sources trace. A sentence only says what the
+// event itself records: a number or a concept name appears only when the event carries it.
+
+export type EventTone = 'good' | 'warn' | 'bad' | 'neutral';
+
+export interface PlainEventRow {
+  text: string;
+  tone: EventTone;
+  /** The raw events the sentence stands for ("kind detail", one per line), for hover text. */
+  raw: string;
+  count: number;
+  created_at: string | null; // the latest occurrence
+}
+
+/** What a probe kind is called in a sentence ("Graded your recall answer …"). */
+const PROBE_NOUN: Record<string, string> = {
+  self_explanation: 'explanation',
+  calibration: 'calibration probe',
+  recall: 'recall answer',
+  source_quiz: 'source quiz',
+  roleplay: 'role-play',
+  paper_probe: 'paper probe',
+  artifact_review: 'artifact'
+};
+
+/** Prompts whose run is the only trace of a learner action (no other event marks it). The
+ * prompt event says the agent ran, not how it went, so the sentence says no more than that. */
+const PROMPT_SENTENCE: Record<string, string> = {
+  'teach.grade': 'Ran the teach-back grader',
+  'practice.pf_generate': 'Ran the practice problem writer',
+  'practice.pf_consolidate': 'Ran the practice grader',
+  'retention.propose': 'Ran the review card writer'
+};
+
+/** What an event prefix is called when it reports a failure. */
+const AREA: Record<string, string> = {
+  research: 'Research',
+  program_research: 'Program research',
+  program_revision: 'Map revision',
+  curriculum: 'Track building',
+  anchors: 'Quiz writing',
+  memory: 'The memory index',
+  vault: 'The vault',
+  scout: 'Scout',
+  story: 'The story',
+  remediate: 'Catch-up planning',
+  roleplay: 'The role-play',
+  guard: 'The tutor\'s answer check'
+};
+
+const num = (detail: string, re: RegExp): number | null => {
+  const m = detail.match(re);
+  return m ? Number(m[1]) : null;
+};
+const pct = (score: number) => `${Math.round(score * 100)}%`;
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** The pass line for a score (competence.HELD; not imported, to keep this module standalone). */
+const PASS = 0.45;
+
+/** Turn the raw trace (oldest first) into plain sentences, oldest first, with back-to-back
+ * repeats folded into one row with a count. An assessment writes several events (probe,
+ * graded, estimate, done); they fold into one sentence. `concepts` maps concept id to name. */
+export function plainEvents(events: EventOut[], concepts: Record<number, string> = {}): PlainEventRow[] {
+  const out: { text: string; tone: EventTone; raw: string; created_at: string | null }[] = [];
+  const conceptName = (detail: string) => {
+    const id = num(detail, /concept (\d+)/);
+    return id != null ? concepts[id] : undefined;
+  };
+  let assess: { probe?: string; score?: number; raw: string[] } | null = null;
+
+  for (const e of events) {
+    const at = e.created_at ?? null;
+    const raw = e.detail ? `${e.kind} ${e.detail}` : e.kind;
+    const say = (text: string, tone: EventTone = 'neutral', rawText = raw) =>
+      out.push({ text, tone, raw: rawText, created_at: at });
+
+    switch (e.kind) {
+      case 'assess:probe':
+        assess = { probe: e.detail, raw: [raw] };
+        continue;
+      case 'assess:graded': {
+        const score = num(e.detail, /score=([0-9.]+)/);
+        assess = assess ?? { raw: [] };
+        assess.raw.push(raw);
+        if (score != null) assess.score = score;
+        continue;
+      }
+      case 'assess:rules':
+      case 'assess:mechanism':
+      case 'assess:estimate':
+        assess?.raw.push(raw);
+        continue;
+      case 'assess:done': {
+        const name = conceptName(e.detail);
+        const noun = (assess?.probe && PROBE_NOUN[assess.probe]) || 'answer';
+        const what = `Graded your ${noun}${name ? ` on ${name}` : ''}`;
+        const score = assess?.score;
+        const lines = [...(assess?.raw ?? []), raw].join('\n');
+        if (score != null) say(`${what}: ${pct(score)}`, score >= PASS ? 'good' : 'warn', lines);
+        else say(what, 'neutral', lines);
+        assess = null;
+        continue;
+      }
+      case 'artifact:reviewed': {
+        const score = num(e.detail, /score=([0-9.]+)/);
+        if (score != null) say(`Reviewed a shipped artifact: ${pct(score)}`, score >= PASS ? 'good' : 'warn');
+        else say('Reviewed a shipped artifact');
+        continue;
+      }
+      case 'prompt': {
+        const sentence = PROMPT_SENTENCE[e.detail.split('@')[0]];
+        if (sentence) say(sentence);
+        continue;
+      }
+      case 'research:done':
+        say(e.detail ? `Research finished: ${e.detail}` : 'Research finished', 'good');
+        continue;
+      case 'curriculum:generated':
+        say(e.detail ? `Drafted the track: ${e.detail}` : 'Drafted the track', 'good');
+        continue;
+      case 'anchors:done': {
+        const n = num(e.detail, /(\d+)/);
+        say(n != null ? `Wrote ${plural(n, 'source-grounded quiz', 'source-grounded quizzes')}` : 'Wrote source-grounded quizzes', 'good');
+        continue;
+      }
+      case 'remediate:done': {
+        const name = conceptName(e.detail);
+        if (/nothing/.test(e.detail)) say('Checked for gaps: nothing to add');
+        else say(name ? `Added a catch-up step for ${name}` : 'Added a catch-up step to the track', 'good');
+        continue;
+      }
+      case 'story:done':
+        say('Wrote your learning story', 'good');
+        continue;
+      case 'vault:export': {
+        const n = num(e.detail, /(\d+) note/);
+        const left = num(e.detail, /(\d+) left unchanged/);
+        const text = n != null ? `Exported ${plural(n, 'note')} to your vault` : 'Exported notes to your vault';
+        say(left ? `${text}, ${left} left unchanged` : text, left ? 'warn' : 'neutral');
+        continue;
+      }
+      case 'vault:ingest': {
+        const n = num(e.detail, /(\d+) note/);
+        say(n != null ? `Brought in ${plural(n, 'note')} from your vault` : 'Brought in notes from your vault');
+        continue;
+      }
+      case 'vault:sync_failed':
+        say('Notebook sync to the vault failed', 'bad');
+        continue;
+      case 'attempt:accepted':
+        say('The tutor accepted your attempt', 'good');
+        continue;
+      case 'attempt:rejected':
+        say('Attempt not recorded: no working shown yet', 'warn');
+        continue;
+      case 'attempt:unverified':
+        say('Attempt not recorded: the check was unavailable', 'warn');
+        continue;
+      case 'tool:reveal_solution:allowed':
+        say('The tutor showed a worked solution', 'good');
+        continue;
+      case 'tool:reveal_solution:blocked':
+        say('The tutor held back a solution until you try', 'warn');
+        continue;
+
+      // Warnings: the step finished, but with less than it set out to do. Amber, not red.
+      case 'curriculum:malformed':
+      case 'program_research:malformed': {
+        // "WARN 3 malformed entries skipped: …" (jsonout.dropped_summary)
+        const n = num(e.detail, /(\d+) malformed/);
+        const what = e.kind.startsWith('curriculum') ? 'track' : 'program map';
+        say(n != null ? `Left out ${plural(n, `malformed ${what} entry`, `malformed ${what} entries`)}` : `Left out malformed ${what} entries`, 'warn');
+        continue;
+      }
+      case 'research:subagent_error':
+      case 'program_research:subagent_error':
+      case 'program_revision:subagent_error':
+        // One search out of several; a retry may still recover it (…:subagent_retry).
+        say(`${AREA[e.kind.split(':')[0]]}: one search failed`, 'warn');
+        continue;
+      case 'research:subagent_retry':
+      case 'program_research:subagent_retry':
+      case 'program_revision:subagent_retry': {
+        const n = num(e.detail, /recovered (\d+)/);
+        say(n != null ? `${AREA[e.kind.split(':')[0]]}: a retry recovered ${plural(n, 'source')}` : `${AREA[e.kind.split(':')[0]]}: a retry recovered the search`);
+        continue;
+      }
+      case 'research:capped': {
+        // "dropped 4 of 16": the ranked sources past the cap.
+        const m = e.detail.match(/dropped (\d+) of (\d+)/);
+        say(m ? `Research set aside ${m[1]} of ${m[2]} sources over the limit` : 'Research set aside sources over the limit', 'warn');
+        continue;
+      }
+      case 'program_revision:aborted':
+        say('Map revision stopped: another revision was already open', 'warn');
+        continue;
+      case 'program_revision:changes_dropped': {
+        const n = num(e.detail, /(\d+)/);
+        say(n != null ? `Map revision discarded ${plural(n, 'invalid change')}` : 'Map revision discarded invalid changes', 'warn');
+        continue;
+      }
+      case 'roleplay:no_reply':
+        say(e.detail === 'refusal' ? 'The role-play persona declined to reply' : 'The role-play persona gave no usable reply', 'warn');
+        continue;
+      case 'guard:fallback':
+        // The stored reply is the guard's fallback question (engine/solution_guard.py).
+        say('The tutor\'s draft gave the answer away, so it asked a guiding question instead', 'warn');
+        continue;
+      case 'memory:reindex_partial':
+        say('The memory index covered only part of your vault this time', 'warn');
+        continue;
+    }
+    // Any other failure or warning is worth knowing about, in words; everything else is
+    // bookkeeping and stays in the raw trace.
+    const area = AREA[e.kind.split(':')[0]] ?? 'An agent step';
+    if (/error|failed/.test(e.kind)) say(`${area} hit a problem`, 'bad');
+    else if (/malformed|aborted|dropped|no_reply|fallback|partial/.test(e.kind)) say(`${area} finished with a warning`, 'warn');
+  }
+
+  const rows: PlainEventRow[] = [];
+  for (const r of out) {
+    const last = rows[rows.length - 1];
+    if (last && last.text === r.text) {
+      last.count += 1;
+      last.raw = `${last.raw}\n${r.raw}`;
+      if (r.created_at && (!last.created_at || Date.parse(utc(r.created_at)) >= Date.parse(utc(last.created_at)))) {
+        last.created_at = r.created_at;
+      }
+    } else {
+      rows.push({ ...r, count: 1 });
+    }
+  }
+  return rows;
+}

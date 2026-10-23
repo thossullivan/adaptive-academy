@@ -233,16 +233,18 @@ test('an empty fleet offers a way in and hides the collapse control', async ({ p
   await page.goto('/fleet');
   await settle(page);
   await expect(page.getByTestId('fleet-empty')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Collapse to tiles|Show harbor/ })).toHaveCount(0);
+  await expect(page.getByRole('group', { name: 'Fleet view' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: /Start a topic/ })).toHaveAttribute('href', '/topics/new');
   await expect(page.getByRole('button', { name: /Explore a demo topic/ })).toBeVisible();
   await expectNoSideScroll(page);
 });
 
-test('the fleet keeps its collapse control when there are voyages', async ({ page }) => {
+test('the fleet keeps its view control when there are voyages', async ({ page }) => {
   await page.goto('/fleet');
   await settle(page);
-  await expect(page.getByRole('button', { name: 'Collapse to tiles' })).toBeVisible();
+  const view = page.getByRole('group', { name: 'Fleet view' });
+  await expect(view.getByRole('button', { name: 'Harbor' })).toBeVisible();
+  await expect(view.getByRole('button', { name: 'Tiles' })).toBeVisible();
 });
 
 test('repeated agent events collapse into one row with a count', async ({ page }) => {
@@ -263,13 +265,24 @@ test('repeated agent events collapse into one row with a count', async ({ page }
   await page.goto('/');
   await settle(page);
   const feed = page.locator('section', { hasText: 'Recent agent activity' });
+  // The dashboard reads in plain sentences, repeats folded with a count and the latest time.
   const rows = feed.locator('li');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toHaveText(/Exported 12 notes to your vault/);
+  await expect(rows.nth(0)).not.toContainText('vault:export');
+  await expect(rows.nth(0).getByTestId('event-count')).toHaveText('×4');
+  await expect(rows.nth(0)).toContainText('5m ago'); // the latest of the run
+  await expect(rows.nth(1)).toHaveText(/Research finished: 8 sources/);
+  await expect(rows.nth(1).getByTestId('event-count')).toHaveCount(0);
+  // The raw trace is one toggle away, folded the same way.
+  const toggle = feed.getByRole('button', { name: 'Raw trace' });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText('vault:export');
   await expect(rows.nth(0).getByTestId('event-count')).toHaveText('×4');
-  await expect(rows.nth(0)).toContainText('5m ago'); // the latest of the run
   await expect(rows.nth(1)).toContainText('research:done');
-  await expect(rows.nth(1).getByTestId('event-count')).toHaveCount(0);
   await expectNoSideScroll(page);
 });
 

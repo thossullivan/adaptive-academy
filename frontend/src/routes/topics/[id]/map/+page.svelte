@@ -5,7 +5,8 @@
   import { api } from '$lib/api';
   import { EDGE_LEGEND, edgeToLink } from '$lib/graph';
   import type { Concept, GraphLink } from '$lib/types';
-  import { conceptSignalsMap, VERDICT_COLOR, VERDICT_LABEL, VERDICT_RANK, type Verdict } from '$lib/competence';
+  import { conceptSignalsMap, VERDICT_LABEL, VERDICT_RANK, type Verdict } from '$lib/competence';
+  import VerdictDot from '$lib/ui/VerdictDot.svelte';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, LiveStatus } from '$lib/ui';
   import Constellation from '$lib/charts/Constellation.svelte';
@@ -87,7 +88,7 @@
 
 <svelte:head><title>Constellation · Adaptive Academy</title></svelte:head>
 
-<Page eyebrow="Concept constellation" title="The shape of what you're learning" lead="Each star is a concept — sized by how load-bearing it is, lit by its triangulated verdict (grade + decay + calibration + teaching agreeing). Lines are prerequisites." width="wide">
+<Page eyebrow="Constellation" title="The shape of what you're learning" lead="A map of the concepts in this topic. Each star is a concept, and its colour shows how well you know it. The key concepts, the ones much else builds on, are drawn larger. A line joins a concept to one it depends on." width="wide">
   <LiveStatus message={status} />
   {#if loading}
     <div class="grid place-items-center py-24" role="status"><span class="eyebrow animate-pulse">mapping the sky…</span></div>
@@ -95,7 +96,7 @@
     <Card accent pad class="text-center">
       <div class="py-10">
         <h2 class="text-xl text-fg">No concepts to map</h2>
-        <p class="mx-auto mt-2 max-w-sm text-sm text-muted">Generate a curriculum to populate your constellation.</p>
+        <p class="mx-auto mt-2 max-w-sm text-sm text-muted">Make a track from your reading list, and its concepts will show up here.</p>
         <div class="mt-6"><Button href="/topics/{topicId}/review">Go to Sources →</Button></div>
       </div>
     </Card>
@@ -110,7 +111,7 @@
           <div class="flex flex-col gap-2">
             {#each counts as [v, n]}
               <div class="flex items-center gap-2 text-sm">
-                <span class="size-2.5 rounded-full" style:background={VERDICT_COLOR[v]}></span>
+                <VerdictDot verdict={v} class="size-2.5" />
                 <span class="flex-1 text-fg-dim">{VERDICT_LABEL[v]}</span>
                 <span class="nums text-muted">{n}</span>
               </div>
@@ -143,7 +144,7 @@
               <Badge tone={selectedVerdict === 'solid' ? 'success' : selectedVerdict === 'shaky' ? 'danger' : selectedVerdict === 'verified' ? 'accent' : 'neutral'} dot>
                 {VERDICT_LABEL[selectedVerdict]}
               </Badge>
-              {#if selectedConcept.is_load_bearing}<Badge tone="accent" mono>load-bearing</Badge>{/if}
+              {#if selectedConcept.is_load_bearing}<Badge tone="accent" mono>key concept</Badge>{/if}
               {#if selectedConcept.has_anchor}<Badge tone="info" mono>has quiz</Badge>{/if}
             </div>
             {#if ancestorIds.length}
@@ -173,9 +174,9 @@
                     class="flex w-full flex-col items-start gap-0.5 rounded-[var(--radius-sm)] px-2 py-1.5 text-left transition-colors hover:bg-surface-2 {selected === c.id ? 'bg-surface-2' : ''}"
                   >
                     <span class="flex w-full items-center gap-2 text-sm text-fg-dim">
-                      <span class="size-2 shrink-0 rounded-full" style:background={VERDICT_COLOR[c.verdict]} aria-hidden="true"></span>
+                      <VerdictDot verdict={c.verdict} />
                       <span class="min-w-0 flex-1 break-words">{c.name}</span>
-                      <span class="shrink-0 text-xs text-muted">{VERDICT_LABEL[c.verdict]}{c.loadBearing ? ' · load-bearing' : ''}</span>
+                      <span class="shrink-0 text-xs text-muted">{VERDICT_LABEL[c.verdict]}{c.loadBearing ? ' · key' : ''}</span>
                     </span>
                     {#if c.prereqs.length}
                       <span class="pl-4 text-xs text-faint">needs {c.prereqs.join(', ')}</span>

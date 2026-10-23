@@ -8,6 +8,7 @@
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button } from '$lib/ui';
   import Wayfinder from '$lib/charts/Wayfinder.svelte';
+  import Icon from '$lib/shell/Icon.svelte';
 
   const topicId = Number($page.params.id);
   let loading = $state(true);
@@ -100,7 +101,7 @@
   {:else}
     {#if wind}
       <div class="mb-3 flex items-center gap-2">
-        <span class="eyebrow" style:color={STATE_COLOR[wind.state]}>⛵ {STATE_LABEL[wind.state]}</span>
+        <span class="eyebrow flex items-center gap-1.5" style:color={STATE_COLOR[wind.state]}><Icon name="ship" class="size-3.5 shrink-0" />{STATE_LABEL[wind.state]}</span>
         {#if wind.days_since != null}<span class="eyebrow text-faint">· last sailed {Math.round(wind.days_since)}d ago</span>{/if}
       </div>
       <div class="sea pointer-events-none" style={`--swell:${seaIntensity(wind.state)}`} aria-hidden="true">

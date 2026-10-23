@@ -189,6 +189,78 @@ test.describe('phone', () => {
     // The page never scrolls sideways.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(vp.width);
   });
+
+  test('the tutor with a long conversation fits the screen, with a compact header', async ({ page }) => {
+    const id = await seededTopicId(page);
+    // A keyless tutor that answers every send with a long reply.
+    await page.route('**/api/conversations', (r) =>
+      r.request().method() === 'POST'
+        ? r.fulfill({ json: { id: 998, concept_id: 1, attempt_logged: false, assistance_level: 'medium', challenge_level: 'medium', messages: [] } })
+        : r.fallback()
+    );
+    await page.route('**/api/conversations/998/messages', (r) =>
+      r.fulfill({
+        json: {
+          reply: 'Think about what each row must sum to. '.repeat(12),
+          attempt_logged: true,
+          attempt_outcome: 'accepted',
+          reveals_solution: true,
+          assistance_level: 'medium',
+          challenge_level: 'medium',
+          events: [],
+          memory: []
+        }
+      })
+    );
+    await page.goto(`/topics/${id}/tutor`);
+    await settle(page);
+    const input = page.getByPlaceholder(/Ask the tutor/);
+    for (let i = 0; i < 3; i++) {
+      await input.fill(`attempt ${i}: \`scores.masked_fill(mask == 0, float("-inf"))\` before the softmax`);
+      await page.getByRole('button', { name: 'Submit attempt' }).click();
+      await expect(page.getByTestId('worked-solution')).toHaveCount(i + 1);
+    }
+
+    const vp = page.viewportSize()!;
+    // The transcript scrolls inside its own region: no dead band under the composer.
+    const { scrollHeight, scrollWidth } = await page.evaluate(() => ({
+      scrollHeight: document.documentElement.scrollHeight,
+      scrollWidth: document.documentElement.scrollWidth
+    }));
+    expect(scrollHeight).toBeLessThanOrEqual(vp.height);
+    expect(scrollWidth).toBeLessThanOrEqual(vp.width);
+    const send = (await page.getByRole('button', { name: 'Send' }).boundingBox())!;
+    expect(send.y + send.height).toBeLessThanOrEqual(vp.height);
+
+    // The session chips sit on one row (it scrolls sideways), and the header stays compact.
+    const chips = page.getByTestId('tutor-chips');
+    const boxes = await chips.locator(':scope > span').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
+    expect(new Set(boxes.map((t) => Math.round(t))).size).toBe(1);
+    const header = (await page.locator('main header').first().boundingBox())!;
+    expect(header.height).toBeLessThanOrEqual(110);
+    // While the chips overflow, the row can be scrolled from the keyboard.
+    const overflows = await chips.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    if (overflows) await expect(chips).toHaveAttribute('tabindex', '0');
+    else await expect(chips).not.toHaveAttribute('tabindex', /.*/);
+
+    // The gate chip comes first, so it is never the one cut off.
+    const first = chips.locator(':scope > span').first();
+    await expect(first).toHaveText('attempt logged');
+    const firstBox = (await first.boundingBox())!;
+    expect(firstBox.x + firstBox.width).toBeLessThanOrEqual(vp.width);
+    // A fade marks the edge with more chips past it, and moves as the row scrolls.
+    const right = page.getByTestId('chips-fade-right');
+    const left = page.getByTestId('chips-fade-left');
+    await expect(right).toHaveClass(overflows ? /opacity-100/ : /opacity-0/);
+    await expect(left).toHaveClass(/opacity-0/);
+    if (overflows) {
+      await chips.focus();
+      await page.keyboard.press('End');
+      await chips.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+      await expect(left).toHaveClass(/opacity-100/);
+      await expect(right).toHaveClass(/opacity-0/);
+    }
+  });
 });
 
 test.describe('desktop', () => {

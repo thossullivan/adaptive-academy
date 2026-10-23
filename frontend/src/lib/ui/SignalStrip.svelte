@@ -9,6 +9,7 @@
     type ConceptSignals,
     type Verdict
   } from '$lib/competence';
+  import VerdictDot from './VerdictDot.svelte';
 
   let {
     name,
@@ -30,20 +31,22 @@
 </script>
 
 <div class="border-b border-border/60 last:border-0">
+  <!-- Two columns from `sm` up (name | signals + verdict); below it the name gets the full width
+       and may wrap, with the signals on a second line under it. The load-bearing mark has a
+       fixed slot whether or not it shows, so every name starts at the same x. -->
   <button
     type="button"
-    class="flex w-full items-center gap-3 py-1.5 text-left transition-colors hover:bg-bg-soft/40"
+    class="flex w-full flex-col gap-1 py-2 text-left transition-colors hover:bg-surface-2/40 sm:flex-row sm:items-center sm:gap-3 sm:py-1.5"
     aria-expanded={open}
     aria-label="Why is {name} {VERDICT_LABEL[verdict]}?"
     onclick={() => (open = !open)}
   >
-    <div class="flex min-w-0 flex-1 items-center gap-2">
-      <span class="text-faint transition-transform" class:rotate-90={open} aria-hidden="true">›</span>
-      {#if loadBearing}<span class="text-accent" title="Load-bearing concept">◆</span>{/if}
-      <span class="truncate text-sm text-fg-dim">{name}</span>
-      {#if hasAnchor}<span class="eyebrow !text-[0.55rem] text-faint" title="Has a source-grounded quiz">⌗</span>{/if}
+    <div class="flex min-w-0 flex-1 items-baseline gap-2 sm:items-center" data-testid="signal-name-col">
+      <span class="w-2.5 shrink-0 text-faint transition-transform" class:rotate-90={open} aria-hidden="true">›</span>
+      <span class="w-3 shrink-0 text-center text-accent" data-testid="load-bearing-slot" title={loadBearing ? 'Key concept' : undefined}>{#if loadBearing}◆{/if}</span>
+      <span class="min-w-0 break-words text-sm text-fg-dim" data-testid="signal-name">{name}{#if hasAnchor}<span class="eyebrow ml-1.5 !text-[0.55rem] text-faint" title="Has a source-grounded quiz">⌗</span>{/if}</span>
     </div>
-    <div class="flex shrink-0 items-center gap-2.5">
+    <div class="flex shrink-0 items-center gap-2.5 pl-[2.375rem] sm:pl-0" data-testid="signal-marks">
       <div class="flex items-center gap-1.5 text-sm">
         <span title="Mechanism grade: {signals.grade}" style:color={gradeColor}>◆</span>
         <span title="Held cold on delayed recall ({signals.decay})" style:color={sigColor(signals.decay)}>↺</span>
@@ -51,8 +54,9 @@
         <span title="Taught to an audience ({signals.taught})" style:color={sigColor(signals.taught)}>◳</span>
         <span title="Shipped an artifact that meets its criteria ({signals.shipped})" style:color={sigColor(signals.shipped)}>⚒</span>
       </div>
-      <span class="eyebrow w-[4.5rem] text-right !tracking-[0.12em]" style:color={VERDICT_TEXT_COLOR[verdict]}>
-        {VERDICT_LABEL[verdict]}
+      <span class="ml-auto flex w-24 items-center gap-1.5 sm:ml-0">
+        <VerdictDot {verdict} />
+        <span class="eyebrow !tracking-[0.12em]" style:color={VERDICT_TEXT_COLOR[verdict]}>{VERDICT_LABEL[verdict]}</span>
       </span>
     </div>
   </button>

@@ -36,6 +36,8 @@ class TurnResult:
     memory: list[Hit] = field(default_factory=list)
     # engine/attempt.py's outcome when the learner pressed Submit attempt, else None.
     attempt_outcome: str | None = None
+    # The reply is a worked solution the gate allowed (stored as Message.reveals_solution).
+    reveals_solution: bool = False
 
 
 def _history(convo: Conversation) -> list[dict]:
@@ -208,7 +210,8 @@ def run_tutor_turn(
     )
     session.commit()
     return TurnResult(reply=reply_text, events=events, memory=memory_hits,
-                      attempt_outcome=outcome.status if outcome else None)
+                      attempt_outcome=outcome.status if outcome else None,
+                      reveals_solution=revealed)
 
 
 def _assistant_tool_blocks(resp: LLMResponse) -> list[dict]:

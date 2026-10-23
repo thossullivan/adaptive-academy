@@ -3,9 +3,11 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import { canShip } from '$lib/ship';
+  import { deliverableKindLabel, sidebarKindLabel } from '$lib/labels';
   import type { Curriculum, ShipResult, ProgramContext } from '$lib/types';
   import Page from '$lib/shell/Page.svelte';
   import { Card, Button, Badge, Markdown, Input, Textarea, LiveStatus } from '$lib/ui';
+  import Icon from '$lib/shell/Icon.svelte';
 
   const topicId = Number($page.params.id);
   let cur = $state<Curriculum | null>(null);
@@ -90,7 +92,7 @@
 
 <svelte:head><title>Track · Adaptive Academy</title></svelte:head>
 
-<Page eyebrow="Phased track" title={cur?.track.title ?? 'Track'} lead={cur?.track.overview ?? ''} width="normal">
+<Page eyebrow="Your track, phase by phase" title={cur?.track.title ?? 'Track'} lead={cur?.track.overview ?? ''} width="normal">
   {#snippet actions()}
     <Button variant="outline" href="/topics/{topicId}/assess">Assess</Button>
     <Button variant="ghost" onclick={exportMd}>Export .md</Button>
@@ -110,7 +112,7 @@
     <Card accent class="text-center" pad>
       <div class="py-10">
         <h2 class="text-xl text-fg">No curriculum yet</h2>
-        <p class="mx-auto mt-2 max-w-sm text-sm text-muted">Generate one from your reviewed sources.</p>
+        <p class="mx-auto mt-2 max-w-sm text-sm text-muted">Make one from your reading list on the Sources page.</p>
         <div class="mt-6"><Button href="/topics/{topicId}/review">Go to Sources →</Button></div>
       </div>
     </Card>
@@ -161,7 +163,7 @@
                 <span id="track-item-{it.id}" class="min-w-0 flex-1">
                   <Markdown text={it.text} class="text-sm {it.status === 'done' ? 'text-faint line-through' : 'text-fg-dim'}" />
                 </span>
-                {#if it.is_remediation}<Badge tone="warn" mono>remediation</Badge>{/if}
+                {#if it.is_remediation}<Badge tone="warn" mono class="whitespace-nowrap">fills a gap</Badge>{/if}
               </li>
             {/each}
           </ul>
@@ -170,8 +172,8 @@
             {@const d = p.deliverable}
             <div class="mt-3 rounded-[var(--radius-md)] border border-[color-mix(in_oklab,var(--accent)_30%,transparent)] bg-accent-wash p-3.5">
               <div class="flex items-center gap-2">
-                <span class="text-accent" aria-hidden="true">🎯</span>
-                <span class="eyebrow !text-accent">Ship · {p.deliverable.kind}</span>
+                <span class="text-accent"><Icon name="target" class="size-4" /></span>
+                <span class="eyebrow !text-accent">Ship · {deliverableKindLabel(p.deliverable.kind)}</span>
               </div>
               <p class="mt-1.5 text-sm text-fg"><Markdown text={p.deliverable.text} /></p>
               {#if p.deliverable.acceptance_criteria.length}
@@ -197,13 +199,13 @@
                   <div class="flex flex-col gap-2">
                     <Input bind:value={shipUrl[d.id]} aria-label="Artifact URL" placeholder="Artifact URL (repo / blog / notebook)" />
                     <p class="text-xs text-fg-dim">
-                      Supported hosts (GitHub, GitLab, arXiv, HuggingFace, Kaggle, Medium, Substack…) are
-                      fetched automatically — paste below only to add context or if the URL isn't public.
+                      Links to supported sites (GitHub, GitLab, arXiv, HuggingFace, Kaggle, Medium, Substack…) are
+                      fetched for you. Paste text below only to add context, or if the link isn't public.
                     </p>
-                    <Textarea bind:value={shipContent[d.id]} rows={6} aria-label="Artifact content (optional)" placeholder="Optionally paste the artifact — key code, the writeup, the ablation table. Graded against the acceptance criteria above." />
+                    <Textarea bind:value={shipContent[d.id]} rows={6} aria-label="Artifact content (optional)" placeholder="Optional: paste your work, such as key code, the write-up, or a results table. It's graded against the criteria above." />
                     <p class="text-xs text-faint">
-                      Strongest evidence: paste your <span class="text-fg-dim">run output</span> — test results,
-                      the training curve, the benchmark numbers. Proof it actually works beats a description of it.
+                      The best evidence is your <span class="text-fg-dim">run output</span>: test results, the
+                      training curve, benchmark numbers. Showing that it works beats describing it.
                     </p>
                     <div class="flex items-center gap-2">
                       <Button size="sm" onclick={() => ship(d)} disabled={shipping === d.id || !canShip(shipUrl[d.id] ?? '', shipContent[d.id] ?? '')}>
@@ -240,7 +242,7 @@
           {#each cur.sidebars as s (s.id)}
             <Card pad class="border-l-2 border-info">
               <div class="flex items-center gap-2">
-                <span class="eyebrow !text-info">{s.kind}</span>
+                <span class="eyebrow !text-info" data-testid="sidebar-kind">{sidebarKindLabel(s.kind)}</span>
               </div>
               <h2 class="mt-1 text-base text-fg">{s.title}</h2>
               <p class="mt-1.5 text-sm leading-relaxed text-muted"><Markdown text={s.body} block /></p>

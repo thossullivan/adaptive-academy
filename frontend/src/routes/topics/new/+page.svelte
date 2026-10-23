@@ -32,7 +32,7 @@
       await topics.refresh();
       topics.select(topic.id);
       stepIdx = 1;
-      status = 'Researching foundational sources — this can take a moment…';
+      status = 'Finding sources. This can take a moment…';
       await api.runResearch(topic.id);
       stepIdx = 2;
       await goto(`/topics/${topic.id}/review`);
@@ -46,7 +46,7 @@
 
 <svelte:head><title>New topic · Adaptive Academy</title></svelte:head>
 
-<Page eyebrow="New topic" title="What do you want to learn?" lead="A quick brief. The Researcher will assemble a foundation you can curate before any curriculum is built." width="narrow">
+<Page eyebrow="New topic" title="What do you want to learn?" lead="Describe what you want to learn. Research then finds sources, and you choose which to keep before a track is built." width="narrow">
   <SetupNotice status={setup.status} class="mb-4" />
 
   <Card pad class="rise">
@@ -54,10 +54,10 @@
       <Field label="Topic">
         <Input bind:value={title} placeholder="e.g. Build LLMs from scratch" disabled={busy} />
       </Field>
-      <Field label="Your goal" hint="What does 'done' look like — the artifact you'll have shipped?">
+      <Field label="Your goal" hint="What will you have built when you're done?">
         <Textarea bind:value={goal} placeholder="By the end I'll have…" disabled={busy} rows={3} />
       </Field>
-      <Field label="Prior knowledge" hint="So the track starts at the right altitude.">
+      <Field label="Prior knowledge" hint="So the track starts at the right level.">
         <Textarea bind:value={prior_knowledge} placeholder="What you already know…" disabled={busy} rows={3} />
       </Field>
       <Field label="Time budget">
@@ -70,11 +70,11 @@
             {busy ? 'Working…' : 'Research this topic →'}
           </Button>
           {#if setup.blocked}
-            <span data-testid="submit-blocked" class="text-xs text-warn">Needs an Anthropic API key — see the setup note above.</span>
+            <span data-testid="submit-blocked" class="text-xs text-warn">Needs an API key. See the setup note above.</span>
           {/if}
         </div>
         <p class="text-xs text-faint">
-          Runs several model calls (multi-agent research) on {billedTo(setup.status)}. See the cost note in the README.
+          Runs several model calls (research by several agents) on {billedTo(setup.status)}. See the cost note in the README.
         </p>
       </div>
     </div>

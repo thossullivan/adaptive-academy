@@ -60,10 +60,10 @@
     error = '';
     try {
       await api.generateCurriculum(topicId);
-      toasts.show('Track ready — your curriculum is built. ✨');
+      toasts.show('Your track is ready.');
       await goto(`/topics/${topicId}/track`);
     } catch (e) {
-      error = `Curriculum generation failed: ${e}. It's safe to retry — your reading list is saved.`;
+      error = `Couldn't build the track: ${e}. Your reading list is saved, so it's safe to try again.`;
     } finally {
       generating = false;
     }
@@ -76,7 +76,7 @@
       const r = await api.generateAnchors(topicId);
       anchorCount = r.anchors.length;
     } catch (e) {
-      error = `Quiz generation failed: ${e}`;
+      error = `Couldn't make the quizzes: ${e}`;
     } finally {
       generatingAnchors = false;
     }
@@ -85,7 +85,7 @@
 
 <svelte:head><title>Sources · Adaptive Academy</title></svelte:head>
 
-<Page eyebrow="Researcher" title="Review reading list" lead="Curate the foundation before the CurriculumDirector builds your track. Keep what earns its place." width="normal">
+<Page eyebrow="Sources" title="Your reading list" lead="The sources research found for this topic. Keep the ones worth your time, save the list, then build your track from it." width="normal">
   {#snippet actions()}
     <Button variant="outline" onclick={generateAnchors} disabled={generatingAnchors}>
       {generatingAnchors ? 'Generating…' : 'Generate quizzes'}
@@ -105,7 +105,7 @@
     {/if}
 
     <p class="text-sm text-success empty:hidden" role="status">
-      {#if anchorCount != null}Generated {anchorCount} source-grounded quiz anchor(s).{/if}
+      {#if anchorCount != null}Made {anchorCount} quiz question{anchorCount === 1 ? '' : 's'} from your sources.{/if}
     </p>
 
     <div class="flex items-center justify-between">
@@ -150,11 +150,12 @@
     </ul>
 
     <div class="flex flex-wrap items-center gap-2">
-      <Button onclick={save} disabled={busy || !sources.length}>{busy ? 'Saving…' : 'Save reading list'}</Button>
+      <!-- One filled button: Save until the list is saved, then the next step, building the track. -->
+      <Button variant={saved ? 'outline' : 'primary'} onclick={save} disabled={busy || !sources.length}>{busy ? 'Saving…' : 'Save reading list'}</Button>
       {#if saved}
-        <Button onclick={generate} disabled={generating}>{generating ? 'Generating curriculum…' : 'Generate curriculum →'}</Button>
+        <Button onclick={generate} disabled={generating}>{generating ? 'Building your track…' : 'Build my track →'}</Button>
         {#if generating}
-          <span class="text-xs text-faint" role="status">The CurriculumDirector is designing your whole track — this can take a couple of minutes.</span>
+          <span class="text-xs text-faint" role="status">Planning the whole track. This can take a couple of minutes.</span>
         {/if}
       {/if}
     </div>
@@ -164,7 +165,7 @@
     {/if}
 
     {#if events.length}
-      <Card pad eyebrow="Observability" title="What the agents did">
+      <Card pad eyebrow="Agent log" title="What the agents did">
         <EventFeed {events} limit={20} />
       </Card>
     {/if}

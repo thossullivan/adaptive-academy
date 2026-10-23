@@ -63,6 +63,18 @@ import type {
   WindState
 } from './types';
 
+/** A notes save refused because another tab or window saved the note first (HTTP 409). */
+export class NoteConflictError extends Error {
+  /** The note saved now (null: there is none). */
+  note: ConceptNote | null;
+
+  constructor(message: string, note: ConceptNote | null) {
+    super(message);
+    this.name = 'NoteConflictError';
+    this.note = note;
+  }
+}
+
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) {
     // Prefer the API's own `detail` (e.g. the missing-key 503 says how to fix it); fall back
@@ -271,11 +283,23 @@ export const api = {
   getNotebook: (conceptId: number) =>
     fetch(`/api/concepts/${conceptId}/notebook`).then(j<Notebook>),
   /** Save My notes; `vault_path` (the browser's, if any) lets the note reach the vault. */
-  saveNote: (conceptId: number, body: string, vault_path = '') =>
-    fetch(`/api/concepts/${conceptId}/note`, {
+  /** Save My notes. `vault_path` (the browser's, if any) lets the note reach the vault.
+   *  `base_updated_at`: the saved note the editor was showing (null: none yet). When sent and
+   *  another tab saved since, the API refuses with 409 and this throws NoteConflictError with
+   *  the note saved now. Left out: the save is not checked. */
+  saveNote: async (conceptId: number, body: string, vault_path = '', base_updated_at?: string | null) => {
+    const payload: Record<string, unknown> = { body, vault_path };
+    if (base_updated_at !== undefined) payload.base_updated_at = base_updated_at;
+    const r = await fetch(`/api/concepts/${conceptId}/note`, {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ body, vault_path })
-    }).then(j<ConceptNote>),
+      body: JSON.stringify(payload)
+    });
+    if (r.status === 409) {
+      const data = (await r.json().catch(() => null)) as { detail?: string; note?: ConceptNote | null } | null;
+      throw new NoteConflictError(data?.detail ?? 'Your notes were saved somewhere else.', data?.note ?? null);
+    }
+    return j<ConceptNote>(r);
+  },
   getTopicNotebook: (topicId: number) =>
     fetch(`/api/topics/${topicId}/notebook`).then(j<TopicNotebook>),
   searchMemory: (

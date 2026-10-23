@@ -1,6 +1,6 @@
 // Concept notebook helpers: a concept's notes and work in one place (GET /api/concepts/{id}/notebook).
 
-import type { ConceptNote, NotebookItem, NotebookSource, VaultSync } from './types';
+import type { ConceptNote, NotebookConcept, NotebookItem, NotebookSource, VaultSync } from './types';
 
 /** Mirrors engine/notebook.py NOTE_MAX_CHARS (tests/test_frontend_constants.py keeps them equal). */
 export const NOTE_MAX_CHARS = 50000;
@@ -31,10 +31,33 @@ export function notebookSections(items: NotebookItem[]) {
 
 /** One plain line naming the item. */
 export function itemHeading(item: NotebookItem): string {
-  if (item.kind === 'attempt') return item.accepted ? 'Attempt, accepted' : 'Attempt, not accepted';
-  if (item.kind === 'solution') return 'Worked solution';
-  const score = item.score == null ? '' : `, ${Math.round(item.score * 100)} of 100`;
-  return `${item.label || 'Explanation'}${score}`;
+  const { title, score } = itemHeadingParts(item);
+  return score ? `${title}, ${score}` : title;
+}
+
+/** The heading in two parts, so the score can be shown in its level's colour. */
+export function itemHeadingParts(item: NotebookItem): { title: string; score: string | null } {
+  if (item.kind === 'attempt') return { title: item.accepted ? 'Attempt, accepted' : 'Attempt, not accepted', score: null };
+  if (item.kind === 'solution') return { title: 'Worked solution', score: null };
+  return {
+    title: item.label || 'Explanation',
+    score: item.score == null ? null : `${Math.round(item.score * 100)} of 100`
+  };
+}
+
+/** The knowledge level a graded score maps to (mirrors engine/assess.py level_from_score:
+ *  0.75 and up high, 0.45 and up medium, else low). Pair with utils levelColor. */
+export function scoreLevel(score: number): 'high' | 'medium' | 'low' {
+  return score >= 0.75 ? 'high' : score >= 0.45 ? 'medium' : 'low';
+}
+
+/** The concept the Notebook opens on without a ?concept=: the most recently active one with
+ *  notes, else the most recently active one with any work. Null when the list is empty. */
+export function defaultNotebookConcept(
+  concepts: Pick<NotebookConcept, 'concept_id' | 'has_note' | 'last_activity_at'>[]
+): number | null {
+  const newest = [...concepts].sort((a, b) => Date.parse(utc(b.last_activity_at)) - Date.parse(utc(a.last_activity_at)));
+  return (newest.find((c) => c.has_note) ?? newest[0])?.concept_id ?? null;
 }
 
 export type NoteState = 'empty' | 'saved' | 'unsaved' | 'saving' | 'error' | 'too_long';
@@ -105,25 +128,53 @@ type DraftStorage = {
 
 const DRAFT_PREFIX = 'aa.note-draft.';
 
+/** A kept draft and the saved note it was written on: that note's updated_at (null when
+ *  there was no saved note yet; undefined when unknown, for a draft kept before this was
+ *  recorded). */
+export interface KeptDraft {
+  body: string;
+  base: string | null | undefined;
+}
+
+function parseDraft(raw: string | null): KeptDraft | null {
+  if (raw === null) return null;
+  try {
+    const v = JSON.parse(raw);
+    if (v && typeof v === 'object' && v.v === 1 && typeof v.body === 'string') {
+      return { body: v.body, base: typeof v.base === 'string' ? v.base : v.base === null ? null : undefined };
+    }
+  } catch {
+    /* an older plain-text draft */
+  }
+  return { body: raw, base: undefined };
+}
+
 /** Unsaved notes per concept, kept in this tab (sessionStorage) until a save is confirmed,
- *  so a failed save, a draft over the limit, or a switch away never loses them. Never throws:
- *  without storage, drafts simply aren't kept. `storage` defaults to sessionStorage. */
+ *  so a failed save, a draft over the limit, or a switch away never loses them. Each draft
+ *  records the saved note it was written on: a restored draft whose note changed since asks
+ *  before it is kept (draftRestore). Overwrites between two open editors are caught by the
+ *  API, not here: each save sends the version it was written on, and the API refuses (409)
+ *  when another save came first (api.saveNote). Never throws: without storage, drafts simply
+ *  aren't kept. `storage` defaults to sessionStorage. */
 export function draftStore(storage?: DraftStorage | null) {
   const from = (): DraftStorage | null => {
     if (storage !== undefined) return storage;
     return typeof window === 'undefined' ? null : window.sessionStorage;
   };
+  const read = (conceptId: number): KeptDraft | null => {
+    try {
+      return parseDraft(from()?.getItem(DRAFT_PREFIX + conceptId) ?? null);
+    } catch {
+      return null;
+    }
+  };
   return {
-    get(conceptId: number): string | null {
+    get: read,
+    /** Keep `body`, written on the saved note last updated at `base` (null: no note yet;
+     *  left out: not known, so restoring it will ask). */
+    set(conceptId: number, body: string, base?: string | null): void {
       try {
-        return from()?.getItem(DRAFT_PREFIX + conceptId) ?? null;
-      } catch {
-        return null;
-      }
-    },
-    set(conceptId: number, body: string): void {
-      try {
-        from()?.setItem(DRAFT_PREFIX + conceptId, body);
+        from()?.setItem(DRAFT_PREFIX + conceptId, JSON.stringify({ v: 1, body, base }));
       } catch {
         /* storage full or blocked: the draft lives only on the page */
       }
@@ -133,13 +184,37 @@ export function draftStore(storage?: DraftStorage | null) {
       try {
         const s = from();
         if (!s) return;
-        if (ifBody !== undefined && s.getItem(DRAFT_PREFIX + conceptId) !== ifBody) return;
+        if (ifBody !== undefined && read(conceptId)?.body !== ifBody) return;
         s.removeItem(DRAFT_PREFIX + conceptId);
       } catch {
         /* nothing to clear */
       }
     }
   };
+}
+
+/** Whether the editor offers Discard draft. Only for a draft the learner didn't just type:
+ *  one restored from this tab, or one left after a save was refused because the note was
+ *  saved elsewhere. Ordinary live edits get no one-click wipe (there is no undo). */
+export function showDiscard(s: { offer: boolean; changed: boolean; conflict: boolean; saving: boolean }): boolean {
+  return s.offer && s.changed && !s.conflict && !s.saving;
+}
+
+/**
+ * What to do with a draft this tab kept, given the saved note now on the server:
+ * - 'none': there is no draft, or it says what the saved note says.
+ * - 'restore': it was written on this very saved note: put it back as it was.
+ * - 'conflict': the saved note changed after the draft was written (another tab, or the
+ *   Obsidian sync): put it back, but ask which one to keep, and never save it on the way out
+ *   unless the learner chooses it or edits it.
+ */
+export function draftRestore(
+  kept: KeptDraft | null,
+  saved: string,
+  savedAt: string | null
+): 'none' | 'restore' | 'conflict' {
+  if (!kept || kept.body === saved) return 'none';
+  return kept.base !== undefined && kept.base === savedAt ? 'restore' : 'conflict';
 }
 
 /** One concept's saves, one at a time: an edit saved while a save is running is sent right
