@@ -1,7 +1,7 @@
 import importlib.util
 import json
 import struct
-import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,6 +29,7 @@ from adaptive_academy.api.schemas import (
     TeachIn,
 )
 from adaptive_academy.db import ensure_fts, ensure_vec
+from adaptive_academy.engine import memory as memory_module
 from adaptive_academy.engine.assess import assess_concept
 from adaptive_academy.engine.decay import grade_decay_check, schedule_decay_check
 from adaptive_academy.engine.memory import (
@@ -1060,8 +1061,13 @@ def test_reindex_reembeds_stale_chunks_outside_selected_kinds(vec_session, tmp_p
     assert chunk.embedding_model == retriever.embedder.name
 
 
-def test_reindex_batches_stale_embeddings_and_honors_deadline(vec_session):
+def test_reindex_batches_stale_embeddings_and_honors_deadline(vec_session, monkeypatch):
     session = vec_session
+    # A fake clock that only the embedder advances, so the deadline trips after exactly one
+    # batch however slow the machine is. A real 5 ms deadline could expire during the setup
+    # queries on a slow CI runner, before any batch ran.
+    now = [0.0]
+    monkeypatch.setattr(memory_module, "time", SimpleNamespace(perf_counter=lambda: now[0]))
     topic = Topic(title="Embedding deadline")
     session.add(topic)
     session.flush()
@@ -1085,7 +1091,7 @@ def test_reindex_batches_stale_embeddings_and_honors_deadline(vec_session):
 
         def embed(self, texts):
             self.batch_sizes.append(len(texts))
-            time.sleep(0.02)
+            now[0] += 0.02
             return self.inner.embed(texts)
 
     embedder = SlowEmbedder()
